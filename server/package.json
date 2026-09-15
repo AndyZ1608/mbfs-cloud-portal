@@ -1,0 +1,18 @@
+{
+  "name": "mbfs-cloud-portal-server",
+  "version": "2.4.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "express-session": "^1.18.0"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
+  }
+}

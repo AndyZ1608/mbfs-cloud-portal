@@ -1,0 +1,7 @@
+node_modules/
+.pnpm-store/
+web/dist/
+server/public/
+server/.test-data/
+.env
+*.tar.gz

@@ -1,0 +1,66 @@
+# Architecture
+
+## Runtime view
+
+```text
+Browser / React SPA
+        |
+        | same-origin JSON and streaming HTTP
+        v
+Express request boundary
+  request ID -> headers/rate limits/CSRF -> session -> authentication
+        |
+        v
+Feature route modules
+  compute, network, storage, load balancing, backup, marketplace,
+  Kubernetes, monitoring, optimization, billing, administration
+        |
+        v
+OpenStack provider boundary
+  Keystone auth -> service-catalog endpoint selection -> bounded fetch
+        |
+        v
+Keystone / Nova / Neutron / Cinder / Glance / Octavia / Swift
+```
+
+The backend is a modular monolith. This is deliberate: there is one deployed service, one provider implementation, and several workflows share an OpenStack-scoped session. Splitting it into network services would add failure modes without establishing a clearer product boundary.
+
+## Important modules
+
+- `server/index.js`: process startup, background-worker startup, listener, and graceful shutdown only.
+- `server/app.js`: testable Express composition and route registration.
+- `server/config.js`: parsed process configuration and production startup validation.
+- `server/middleware.js`: request context, CSRF, authentication/role checks, and the error contract.
+- `server/openstack.js`: Keystone authentication, service-catalog resolution, timeouts, and provider error translation.
+- `server/routes/*`: feature-level HTTP adapters and current use-case orchestration.
+- `server/audit.js`: tenant-filtered append-only activity records.
+- `server/store.js`, `server/sessionstore.js`: lightweight local persistence and session-store adapters.
+- `web/src/api.js`: shared JSON API client; pages contain feature presentation state.
+
+## API conventions
+
+Existing success response shapes remain feature-specific for compatibility. Errors use:
+
+```json
+{
+  "error": "Human-readable message",
+  "code": "stable_machine_code",
+  "requestId": "trace-id"
+}
+```
+
+All non-safe `/api` requests require `X-CMP-Request: 1`. This protects cookie-authenticated operations from cross-site form submission. The Keystone WebSSO callback is the only explicit exception because it is a cross-site signed-token POST.
+
+## State and background work
+
+Policies, cluster metadata, notifications, and audit records live under `DATA_DIR` (normally `/data`). Sessions may use memory, files, or Redis. The scheduler, power controller, monitor, report generator, and alerts execute in the web process, so only one replica may run them safely today.
+
+## Known architectural limits
+
+- Route modules still combine HTTP adaptation and use-case orchestration. Extract application services when workflows gain independent tests or a second caller.
+- Background operations do not use a durable queue, lease, or idempotency key. Multiple replicas can duplicate work.
+- JSON persistence and synchronous filesystem calls are suitable for a small installation, not a large multi-replica control plane.
+- The RKE2 deployment workflow is long-running and only partially compensates failed infrastructure creation.
+- RBAC relies primarily on OpenStack policy enforcement; only cluster administration has an explicit portal-side `admin` gate.
+- The frontend has no automated component/accessibility test suite and several pages remain oversized.
+
