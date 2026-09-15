@@ -41,6 +41,7 @@ router.post('/login', async (req, res, next) => {
     }
 
     const scoped = await scopeToken(unscopedToken, target.id);
+    await new Promise((resolve, reject) => req.session.regenerate((error) => error ? reject(error) : resolve()));
     req.session.os = {
       token: scoped.token,
       unscopedToken,

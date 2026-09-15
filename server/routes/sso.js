@@ -68,6 +68,7 @@ router.get('/auth/sso/callback', async (req, res) => {
     const svc = await getServiceSession(target.id);
     const isAdmin = SSO.adminGroup && groups.includes(SSO.adminGroup);
 
+    await new Promise((resolve, reject) => req.session.regenerate((error) => error ? reject(error) : resolve()));
     req.session.os = {
       token: svc.token,
       expiresAt: null,

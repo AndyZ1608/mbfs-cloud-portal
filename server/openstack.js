@@ -25,7 +25,7 @@ export class OSError extends Error {
     super(message);
     this.status = status;
     this.code = code;
-    this.expose = true;
+    this.expose = status < 500 || ['provider_timeout', 'provider_unavailable', 'secret_unavailable'].includes(code);
   }
 }
 

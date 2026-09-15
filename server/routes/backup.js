@@ -49,7 +49,26 @@ router.post('/backup/policies', (req, res, next) => {
 
 router.patch('/backup/policies/:id', (req, res, next) => {
   try {
-    const p = patchPolicy(req.params.id, req.session.os.project.id, req.body || {});
+    const input = req.body || {};
+    const patch = {};
+    if (input.enabled !== undefined) {
+      if (typeof input.enabled !== 'boolean') throw new OSError(400, 'enabled phải là boolean');
+      patch.enabled = input.enabled;
+    }
+    if (input.retention !== undefined) {
+      const retention = Number(input.retention);
+      if (!Number.isInteger(retention) || retention < 1 || retention > 90) throw new OSError(400, 'Retention phải từ 1 đến 90');
+      patch.retention = retention;
+    }
+    if (input.schedule !== undefined) {
+      const schedule = input.schedule || {};
+      const hour = Number(schedule.hour), minute = Number(schedule.minute), weekday = Number(schedule.weekday);
+      if (!['daily', 'weekly'].includes(schedule.freq)) throw new OSError(400, 'Tần suất phải là daily/weekly');
+      if (!Number.isInteger(hour) || hour < 0 || hour > 23 || !Number.isInteger(minute) || minute < 0 || minute > 59) throw new OSError(400, 'Giờ chạy không hợp lệ');
+      if (schedule.freq === 'weekly' && (!Number.isInteger(weekday) || weekday < 0 || weekday > 6)) throw new OSError(400, 'Thiếu thứ trong tuần');
+      patch.schedule = { freq: schedule.freq, hour, minute, weekday: schedule.freq === 'weekly' ? weekday : undefined };
+    }
+    const p = patchPolicy(req.params.id, req.session.os.project.id, patch);
     if (!p) throw new OSError(404, 'Không tìm thấy policy');
     res.json({ policy: p });
   } catch (e) { next(e); }

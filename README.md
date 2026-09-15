@@ -18,7 +18,7 @@ For OpenStack, SSO, HTTPS reverse proxy, service-account, backup, monitoring, an
 
 ## Development
 
-Requires Node.js 20.
+Requires Node.js 20.19 or newer.
 
 ```bash
 cd web
@@ -38,4 +38,3 @@ The CI workflow also syntax-checks every backend module and builds the Docker im
 - [Security model and operational requirements](./docs/SECURITY.md)
 
 The API is intentionally a modular monolith. Route modules orchestrate use cases while `server/openstack.js` is the provider boundary. A second provider should be introduced behind a use-case/provider interface only when its behavior and capability differences are known.
-

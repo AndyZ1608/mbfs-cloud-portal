@@ -199,7 +199,7 @@ function CreateUser({ onClose, onDone }) {
       footer={<><button className="btn ghost" onClick={onClose}>Huỷ</button>
         <button className="btn primary" onClick={submit} disabled={busy}>Tạo user</button></>}>
       <Field label="Tên đăng nhập"><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} autoFocus /></Field>
-      <Field label="Mật khẩu (≥8 ký tự)"><input type="text" className="mono" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>
+      <Field label="Mật khẩu (≥8 ký tự)"><input type="password" autoComplete="new-password" className="mono" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>
     </Modal>
   );
 }

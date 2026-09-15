@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 process.env.OS_MOCK = 'true';
 process.env.DATA_DIR = fileURLToPath(new URL('../.test-data', import.meta.url));
+process.env.DATA_ENCRYPTION_KEY = 'test-only-encryption-material';
 
 test('app boundary: health, request ID, CSRF rejection, and valid login', async (t) => {
   const { createApp } = await import('../app.js');
@@ -33,3 +34,11 @@ test('app boundary: health, request ID, CSRF rejection, and valid login', async 
   assert.match(login.headers.get('set-cookie') || '', /mbfs_cloud_sid=/);
 });
 
+test('stored secrets: authenticated encryption round-trip and tamper rejection', async () => {
+  const { seal, unseal, encryptionConfigured } = await import('../secrets.js');
+  assert.equal(encryptionConfigured(), true);
+  const encrypted = seal('join-token');
+  assert.notEqual(encrypted, 'join-token');
+  assert.equal(unseal(encrypted), 'join-token');
+  assert.equal(unseal(encrypted.slice(0, -1) + 'x'), null);
+});

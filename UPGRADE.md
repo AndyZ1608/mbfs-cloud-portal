@@ -8,6 +8,7 @@
 - Non-safe API requests now require `X-CMP-Request: 1`. The bundled frontend sends it automatically, including streaming uploads. Update external API clients before deployment.
 - API errors now include stable `code` and `requestId` fields while retaining the existing `error` field.
 - Existing plaintext Kubernetes tokens are migrated to encrypted form on startup when key material is configured.
+- The frontend now uses React Router 7 and Vite 8 to resolve dependency advisories; local builds require Node.js 20.19 or newer.
 
 
 ```bash

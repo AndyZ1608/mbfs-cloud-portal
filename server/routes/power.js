@@ -34,7 +34,8 @@ router.post('/power/rules', (req, res, next) => {
 
 router.patch('/power/rules/:id', (req, res, next) => {
   try {
-    const r = patchRule(req.params.id, req.session.os.project.id, req.body || {});
+    if (typeof req.body?.enabled !== 'boolean') throw new OSError(400, 'enabled phải là boolean');
+    const r = patchRule(req.params.id, req.session.os.project.id, { enabled: req.body.enabled });
     if (!r) throw new OSError(404, 'Không tìm thấy quy tắc');
     res.json({ rule: r });
   } catch (e) { next(e); }

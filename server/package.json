@@ -3,6 +3,7 @@
   "version": "2.4.0",
   "private": true,
   "type": "module",
+  "engines": { "node": ">=20.19.0" },
   "main": "index.js",
   "scripts": {
     "start": "node index.js",

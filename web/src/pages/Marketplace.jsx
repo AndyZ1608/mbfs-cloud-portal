@@ -119,7 +119,7 @@ function DeployModal({ tpl, onClose, onDone }) {
                 {tpl.params.map((p) => (
                   <Field key={p.key} label={p.label}>
                     <div className="row-inline">
-                      <input type={p.type === 'password' ? 'text' : 'text'} className={p.type === 'password' ? 'mono' : ''}
+                      <input type={p.type === 'password' ? 'password' : 'text'} autoComplete={p.type === 'password' ? 'new-password' : undefined} className={p.type === 'password' ? 'mono' : ''}
                         value={params[p.key]} onChange={(e) => setParams({ ...params, [p.key]: e.target.value })} style={{ flex: 1 }} />
                       {p.generate && <button className="btn sm ghost" title="Tạo ngẫu nhiên" onClick={() => setParams({ ...params, [p.key]: randPass() })}>🎲</button>}
                     </div>

@@ -2,6 +2,20 @@
 // (build offline được). Hỗ trợ Authorization Code + PKCE, verify ID token RS256
 // bằng JWKS của IdP.
 import crypto from 'node:crypto';
+import { config } from './config.js';
+
+async function oidcFetch(url, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.providerTimeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error(`OIDC không phản hồi trong ${config.providerTimeoutMs}ms`);
+    throw new Error('Không thể kết nối OIDC provider');
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export const SSO = {
   enabled: String(process.env.SSO_ENABLED || '').toLowerCase() === 'true',
@@ -40,7 +54,7 @@ let jwksCache = { at: 0, keys: [] };
 export async function discover() {
   if (discoCache && Date.now() - discoCache.at < 3600000) return discoCache.doc;
   const url = `${SSO.issuer}/.well-known/openid-configuration`;
-  const res = await fetch(url);
+  const res = await oidcFetch(url);
   if (!res.ok) throw new Error(`Không đọc được cấu hình OIDC tại ${url} (HTTP ${res.status})`);
   const doc = await res.json();
   discoCache = { at: Date.now(), doc };
@@ -54,7 +68,7 @@ async function getKey(kid) {
     if (hit) return hit;
   }
   const doc = await discover();
-  const res = await fetch(doc.jwks_uri);
+  const res = await oidcFetch(doc.jwks_uri);
   if (!res.ok) throw new Error(`Không tải được JWKS (HTTP ${res.status})`);
   const { keys } = await res.json();
   jwksCache = { at: Date.now(), keys: keys || [] };
@@ -95,7 +109,7 @@ export async function exchangeCode(code, verifier) {
     code_verifier: verifier,
   });
   if (SSO.clientSecret) body.set('client_secret', SSO.clientSecret);
-  const res = await fetch(doc.token_endpoint, {
+  const res = await oidcFetch(doc.token_endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
