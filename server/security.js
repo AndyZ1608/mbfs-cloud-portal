@@ -15,8 +15,7 @@ export function securityHeaders(req, res, next) {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    // Nova console WebSocket hosts may differ from the CMP origin.
-    "connect-src 'self' ws: wss:",
+    "connect-src 'self'",
     "frame-ancestors 'self'",
     "form-action 'self'",
     "base-uri 'self'",

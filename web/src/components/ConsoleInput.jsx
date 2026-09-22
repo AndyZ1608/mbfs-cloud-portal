@@ -3,17 +3,17 @@ import { Eraser, Keyboard, Play, Square } from 'lucide-react';
 import { DEFAULT_SPEED, SPEED_PRESETS } from '../console/keyboard.js';
 import useConsoleAutoType from '../console/useConsoleAutoType.js';
 
-export default function ConsoleInput({ rfbRef, connected, sessionKey }) {
+export default function ConsoleInput({ rfbRef, connected, sessionKey, unavailableReason = '' }) {
   const [text, setText] = useState('');
   const [speed, setSpeed] = useState(DEFAULT_SPEED);
   const { state, start, cancel, typing } = useConsoleAutoType({ rfbRef, connected, sessionKey });
-  const canType = connected && !typing && text.length > 0;
+  const canType = !unavailableReason && connected && !typing && text.length > 0;
 
   return (
     <section className="console-input-panel" aria-labelledby="console-input-title">
       <div className="console-input-head">
         <div><h4 id="console-input-title"><Keyboard size={16} /> Console Input</h4>
-          <span className="dim">Nội dung chỉ được giữ trong trình duyệt và gửi dưới dạng phím bấm VNC.</span></div>
+          <span className="dim">Nội dung chỉ được giữ trong bộ nhớ của trang này.</span></div>
         <label className="console-speed"><span>Tốc độ</span>
           <select value={speed} onChange={(event) => setSpeed(event.target.value)} disabled={typing}>
             {Object.entries(SPEED_PRESETS).map(([value, preset]) => (
@@ -52,7 +52,9 @@ export default function ConsoleInput({ rfbRef, connected, sessionKey }) {
         <button className="btn danger-ghost sm" type="button" onClick={cancel}><Square size={13} /> Huỷ auto-type</button>
       </div>}
       {!typing && state.message && <p className={`console-input-message ${state.phase === 'error' ? 'err-text' : 'dim'}`} role="status">{state.message}</p>}
-      {!connected && <p className="console-input-message warn-text" role="status">Auto-type khả dụng sau khi VNC kết nối thành công.</p>}
+      {unavailableReason
+        ? <p className="console-input-message warn-text" role="status">{unavailableReason}</p>
+        : !connected && <p className="console-input-message warn-text" role="status">Auto-type khả dụng sau khi VNC kết nối thành công.</p>}
       <p className="console-input-note dim">Type chỉ nhập nội dung. Type + Enter gửi thêm Enter nếu nội dung chưa kết thúc bằng dòng mới. Bố cục bàn phím mục tiêu: US.</p>
     </section>
   );

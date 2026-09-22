@@ -7,7 +7,7 @@ import {
 import {
   ConsoleSessionUnavailableError, ConsoleTypingBusyError, createConsoleAutoTyper,
 } from '../src/console/autoType.js';
-import { consoleUrlToWebSocket } from '../src/console/url.js';
+import { getNovaConsoleUrl } from '../src/console/novaConsole.js';
 
 function mockRfb() {
   return {
@@ -109,17 +109,8 @@ test('typing stops when the active RFB session becomes unavailable', async () =>
   assert.equal(rfb.calls.length, 2);
 });
 
-test('converts Nova noVNC URLs to their WebSocket endpoint', () => {
-  assert.equal(
-    consoleUrlToWebSocket('https://novnc.example:6080/vnc_auto.html?path=%3Ftoken%3Dabc'),
-    'wss://novnc.example:6080/?token=abc',
-  );
-  assert.equal(
-    consoleUrlToWebSocket('http://novnc.example/vnc_auto.html?path=websockify%3Ftoken%3Dabc'),
-    'ws://novnc.example/websockify?token=abc',
-  );
-  assert.equal(
-    consoleUrlToWebSocket('https://novnc.example/vnc_auto.html?token=abc'),
-    'wss://novnc.example/websockify?token=abc',
-  );
+test('preserves the complete Nova noVNC client URL without deriving a WebSocket URL', () => {
+  const url = 'https://novnc.example:6080/vnc_auto.html?path=websockify%3Ftoken%3Dredacted&extra=keep-me';
+  assert.equal(getNovaConsoleUrl({ remote_console: { url } }), url);
+  assert.throws(() => getNovaConsoleUrl({ remote_console: {} }), /không trả về URL console/);
 });
