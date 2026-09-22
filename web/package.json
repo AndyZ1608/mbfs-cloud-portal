@@ -6,7 +6,8 @@
   "engines": { "node": ">=20.19.0" },
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "test": "node --test"
   },
   "dependencies": {
     "lucide-react": "^0.454.0",

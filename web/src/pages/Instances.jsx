@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react';
 import { api, fmtDate, ramGB, serverIps } from '../api.js';
 import { Modal, Field, StatusBadge, ActionsMenu, toast, Empty, PageHead } from '../components/ui.jsx';
 import MonitorModal from '../components/MonitorModal.jsx';
+import TypeToConfirmDialog from '../components/TypeToConfirmDialog.jsx';
 
 export default function Instances() {
   const [servers, setServers] = useState(null);
@@ -19,6 +20,9 @@ export default function Instances() {
   const [monFor, setMonFor] = useState(null);
   const [monStatus, setMonStatus] = useState(null);
   const [latest, setLatest] = useState({});
+  const [deleteFor, setDeleteFor] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const deleteRequest = useRef(false);
   const timer = useRef(null);
 
   async function load() {
@@ -44,14 +48,44 @@ export default function Instances() {
     } catch (e) { toast(e.message, 'error'); }
   }
 
-  async function del(s) {
-    if (!window.confirm(`Xoá máy ảo "${s.name}"? Dữ liệu trên đĩa gốc sẽ mất.`)) return;
+  function openDelete(s) {
+    deleteRequest.current = false;
+    setDeleting(false);
+    setDeleteFor(s);
+  }
+
+  function closeDelete() {
+    if (deleteRequest.current) return;
+    setDeleteFor(null);
+    setDeleting(false);
+  }
+
+  async function confirmDelete() {
+    const s = deleteFor;
+    if (!s || deleteRequest.current) return;
+    deleteRequest.current = true;
+    setDeleting(true);
     try {
       await api(`/servers/${s.id}`, { method: 'DELETE' });
       toast(`Đã gửi lệnh xoá ${s.name}`, 'ok');
+      setDeleteFor(null);
       setTimeout(load, 800);
-    } catch (e) { toast(e.message, 'error'); }
+    } catch (e) {
+      toast(e.message, 'error');
+      deleteRequest.current = false;
+      setDeleting(false);
+    }
   }
+
+  useEffect(() => {
+    if (!deleteFor || !servers) return;
+    const current = servers.find((server) => server.id === deleteFor.id);
+    if (!current) {
+      if (!deleteRequest.current) setDeleteFor(null);
+      return;
+    }
+    if (current.name !== deleteFor.name) setDeleteFor(current);
+  }, [servers, deleteFor]);
 
   async function rename(s) {
     const name = window.prompt('Tên mới cho máy ảo:', s.name);
@@ -137,7 +171,7 @@ export default function Instances() {
                       { label: 'Tạo snapshot', onClick: () => snapshot(s) },
                       { label: 'Gắn Floating IP', onClick: () => setFipTarget(s) },
                       'divider',
-                      { label: 'Xoá máy ảo', danger: true, onClick: () => del(s) },
+                      { label: 'Xoá máy ảo', danger: true, onClick: () => openDelete(s) },
                     ]} />
                   </td>
                 </tr>
@@ -156,6 +190,16 @@ export default function Instances() {
       {rebuildFor && <RebuildModal server={rebuildFor} onClose={() => setRebuildFor(null)} onDone={() => { setRebuildFor(null); setTimeout(load, 800); }} />}
       {nicFor && <NicModal server={nicFor} onClose={() => setNicFor(null)} onDone={load} />}
       {sgFor && <SgModal server={sgFor} onClose={() => setSgFor(null)} onDone={() => { setSgFor(null); load(); }} />}
+      {deleteFor && <TypeToConfirmDialog
+        title="Xoá máy ảo"
+        description="Máy ảo và dữ liệu trên đĩa gốc sẽ bị xoá vĩnh viễn. Hành động này không thể hoàn tác."
+        resourceName={deleteFor.name}
+        resourceId={deleteFor.id}
+        confirmLabel="Xoá máy ảo"
+        loading={deleting}
+        onConfirm={confirmDelete}
+        onCancel={closeDelete}
+      />}
 
       {consoleUrl && (
         <Modal title={`Console — ${consoleUrl.name}`} onClose={() => setConsoleUrl(null)}
