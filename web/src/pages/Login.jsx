@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Cloud, Server, HardDrive, Network, Shield, Boxes, BarChart3 } from 'lucide-react';
+import { Server, HardDrive, Network, Shield, Boxes, BarChart3 } from 'lucide-react';
 import { api } from '../api.js';
 
 const FEATURES = [
@@ -57,8 +57,7 @@ export default function Login() {
       <div className="login-shell">
         <section className="hero">
           <div className="hero-brand">
-            <Cloud size={30} />
-            <h1>{cfg.cloudName}</h1>
+            <img className="hero-logo" src="/asset/logo.png" alt="MobiFone Solutions Cloud" />
           </div>
           <p className="hero-sub">Cổng tự phục vụ hạ tầng OpenStack — khởi tạo máy chủ, mạng và lưu trữ trong vài phút, không phải chờ đội vận hành.</p>
 
@@ -77,7 +76,7 @@ export default function Login() {
         <section className="login-col">
           <form className="login-card" onSubmit={submit}>
             <div className="login-brand">
-              <Cloud size={26} />
+              <img className="login-brand-mark" src="/asset/favicon.png" alt="" aria-hidden="true" />
               <div>
                 <h2>Đăng nhập</h2>
                 <p>Truy cập bảng điều khiển hạ tầng</p>

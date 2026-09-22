@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Server, HardDrive, Network, Globe, Shield, Disc3, KeyRound, BarChart3, Scale, DatabaseBackup, History, Store, Boxes, Wrench, PiggyBank, CalendarClock, Archive, Bell, Moon, Sun, LogOut, Cloud } from 'lucide-react';
+import { LayoutDashboard, Server, HardDrive, Network, Globe, Shield, Disc3, KeyRound, BarChart3, Scale, DatabaseBackup, History, Store, Boxes, Wrench, PiggyBank, CalendarClock, Archive, Bell, Moon, Sun, LogOut } from 'lucide-react';
 import { api, fmtDate } from '../api.js';
 import { Toasts, toast } from './ui.jsx';
 
@@ -63,8 +63,8 @@ export default function Layout() {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <Cloud size={22} />
-          <span>{cfg.cloudName}</span>
+          <img className="brand-logo brand-logo-full" src="/asset/logo.png" alt="MobiFone Solutions Cloud" />
+          <img className="brand-logo brand-logo-mark" src="/asset/favicon.png" alt="" aria-hidden="true" />
         </div>
         <nav>
           {NAV.filter((item) => !item.feature || (item.feature === 'billing' && cfg.billingEnabled)).map(({ to, label, icon: Icon, end }) => (
