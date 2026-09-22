@@ -121,12 +121,11 @@ server {
 
 Sau đó thêm service card `cloud.mbfs.vn` vào dashboard insight.mbfs.vn là xong.
 
-> **Console noVNC:** nút "Mở console" mở nguyên URL web client do Nova cấp trong tab
-> mới. Trình duyệt người dùng phải resolve/truy cập được domain/IP `novncproxy` và tin
-> cậy chứng chỉ TLS của proxy. Không chuyển đổi URL HTML này thành WebSocket URL.
-> Console Input chỉ giữ nội dung trong bộ nhớ component. Auto-Type tạm thời bị vô hiệu
-> vì CMP không sở hữu phiên RFB nằm trong trang noVNC khác origin; cần một noVNC client
-> cùng origin/do CMP quản lý trước khi có thể gửi phím an toàn.
+> **Console noVNC:** portal nhúng noVNC và tạo đúng một phiên RFB từ URL web client do
+> Nova cấp. Trình duyệt người dùng phải resolve/truy cập được domain/IP `novncproxy` và
+> tin cậy chứng chỉ TLS của proxy. Khi portal chạy HTTPS, Nova console cũng phải trả URL
+> HTTPS để trình duyệt có thể dùng WSS mà không vi phạm mixed-content. Console Input chỉ
+> giữ nội dung trong bộ nhớ component và gửi phím qua cùng phiên RFB đang hiển thị.
 
 ## 4. Chạy thủ công không Docker (tuỳ chọn)
 

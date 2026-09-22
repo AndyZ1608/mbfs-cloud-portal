@@ -7,7 +7,8 @@ import {
 import {
   ConsoleSessionUnavailableError, ConsoleTypingBusyError, createConsoleAutoTyper,
 } from '../src/console/autoType.js';
-import { getNovaConsoleUrl } from '../src/console/novaConsole.js';
+import { getNovaConsoleUrl, novaConsoleToWebSocket } from '../src/console/novaConsole.js';
+import { createRfbSession } from '../src/console/rfbSession.js';
 
 function mockRfb() {
   return {
@@ -109,8 +110,86 @@ test('typing stops when the active RFB session becomes unavailable', async () =>
   assert.equal(rfb.calls.length, 2);
 });
 
-test('preserves the complete Nova noVNC client URL without deriving a WebSocket URL', () => {
+test('parses Nova noVNC client URLs without losing encoded path or query data', () => {
   const url = 'https://novnc.example:6080/vnc_auto.html?path=websockify%3Ftoken%3Dredacted&extra=keep-me';
   assert.equal(getNovaConsoleUrl({ remote_console: { url } }), url);
+  assert.equal(novaConsoleToWebSocket(url), 'wss://novnc.example:6080/websockify?token=redacted&extra=keep-me');
+  assert.equal(
+    novaConsoleToWebSocket('http://novnc.example/vnc_lite.html?path=%3Ftoken%3Dredacted'),
+    'ws://novnc.example/?token=redacted',
+  );
   assert.throws(() => getNovaConsoleUrl({ remote_console: {} }), /không trả về URL console/);
+  assert.throws(() => novaConsoleToWebSocket('not-a-url'), /không hợp lệ/);
+  assert.throws(() => novaConsoleToWebSocket('https://novnc.example/other.html?token=x'), /không được hỗ trợ/);
+  assert.throws(
+    () => novaConsoleToWebSocket('https://novnc.example/vnc_auto.html?path=https%3A%2F%2Fevil.example%2Fws'),
+    /không hợp lệ/,
+  );
+  assert.throws(
+    () => novaConsoleToWebSocket('http://novnc.example/vnc_auto.html?token=x', 'https:'),
+    /phải dùng TLS/,
+  );
+  assert.throws(
+    () => novaConsoleToWebSocket('https://user:secret@novnc.example/vnc_auto.html?token=sensitive-token'),
+    (error) => !error.message.includes('secret') && !error.message.includes('sensitive-token'),
+  );
+});
+
+function lifecycleRfb() {
+  const listeners = new Map();
+  return {
+    disconnects: 0,
+    addEventListener(name, listener) { listeners.set(name, listener); },
+    removeEventListener(name, listener) { if (listeners.get(name) === listener) listeners.delete(name); },
+    disconnect() { this.disconnects += 1; },
+    emit(name, detail = {}) { listeners.get(name)?.({ detail }); },
+    get listenerCount() { return listeners.size; },
+  };
+}
+
+test('RFB lifecycle owns one session, reconnects with a fresh URL, and cleans up', async () => {
+  const target = { clears: 0, replaceChildren() { this.clears += 1; } };
+  const created = [];
+  const urls = [];
+  const states = [];
+  let requests = 0;
+  let active = null;
+  const session = createRfbSession({
+    target,
+    requestConsole: async () => ({ sequence: ++requests }),
+    parseConsoleUrl: ({ sequence }) => `wss://novnc.example/websockify?token=redacted-${sequence}`,
+    createRfb: (_target, url) => {
+      urls.push(url);
+      const rfb = lifecycleRfb();
+      created.push(rfb);
+      return rfb;
+    },
+    onState: (state) => states.push(state.status),
+    onRfb: (rfb) => { active = rfb; },
+  });
+
+  await session.connect();
+  assert.equal(requests, 1);
+  assert.equal(created.length, 1);
+  assert.equal(active, created[0]);
+  created[0].emit('connect');
+  assert.equal(states.at(-1), 'connected');
+
+  // Console Input text, speed, and progress are component-local and never call this controller.
+  assert.equal(session.current, created[0]);
+  assert.equal(created.length, 1);
+
+  await session.reconnect();
+  assert.equal(requests, 2);
+  assert.equal(created.length, 2);
+  assert.equal(created[0].disconnects, 1);
+  assert.equal(created[0].listenerCount, 0);
+  assert.equal(active, created[1]);
+  assert.notEqual(urls[0], urls[1]);
+
+  session.dispose();
+  assert.equal(created[1].disconnects, 1);
+  assert.equal(created[1].listenerCount, 0);
+  assert.equal(active, null);
+  assert.equal(session.current, null);
 });

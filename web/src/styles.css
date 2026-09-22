@@ -427,16 +427,21 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   max-height: 55vh; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 0;
 }
 
-/* ===== Nova console launcher and browser-only console input ===== */
-.console-modal { max-width: 760px; max-height: 96vh; }
+/* ===== Embedded noVNC console and browser-only console input ===== */
+.console-modal { width: min(95vw, 1400px); max-width: min(95vw, 1400px); max-height: 96vh; }
 .console-modal .modal-body { padding: 0; }
-.console-launch-panel {
-  display: flex; align-items: center; justify-content: space-between; gap: 18px;
-  padding: 18px; background: var(--bg); border-bottom: 1px solid var(--border);
+.vnc-console-shell {
+  position: relative; min-height: 320px; height: min(58vh, 680px); background: #080b10; overflow: hidden;
 }
-.console-launch-panel h4 { margin-bottom: 4px; }
-.console-launch-panel p { margin: 0; }
-.console-launch-actions { display: flex; flex: 0 0 auto; gap: 8px; }
+.vnc-screen {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; outline: none;
+}
+.vnc-screen canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
+.vnc-connection-state {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; color: #c6d3e3; background: rgba(8, 11, 16, 0.92); font-size: 13px;
+}
+.vnc-connection-state .btn { color: #c6d3e3; border-color: #4a5568; }
 .console-input-panel { padding: 16px 18px 12px; border-top: 1px solid var(--border); background: var(--card); }
 .console-input-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 10px; }
 .console-input-head h4 { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; }
@@ -455,8 +460,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 
 @media (max-width: 700px) {
   .console-modal .modal-body { overflow-x: hidden; }
-  .console-launch-panel { align-items: stretch; flex-direction: column; }
-  .console-launch-actions .btn { width: 100%; justify-content: center; }
+  .vnc-console-shell { min-height: 250px; height: 44vh; }
   .console-input-head { align-items: stretch; flex-direction: column; gap: 9px; }
   .console-speed { justify-content: space-between; }
   .console-speed select { flex: 1; }

@@ -1,60 +1,83 @@
-import React, { useEffect, useState } from 'react';
-import { ExternalLink, RefreshCw } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { api } from '../api.js';
 import { Modal } from './ui.jsx';
 import ConsoleInput from './ConsoleInput.jsx';
-import { getNovaConsoleUrl } from '../console/novaConsole.js';
+import { getNovaConsoleUrl, novaConsoleToWebSocket } from '../console/novaConsole.js';
+import { createRfbSession } from '../console/rfbSession.js';
 
-const NO_RFB_REF = { current: null };
-const AUTO_TYPE_UNAVAILABLE = 'Auto-Type yêu cầu phiên noVNC do CMP sở hữu hoặc tích hợp cùng origin.';
+const INITIAL_CONNECTION = { status: 'idle', message: '' };
 
 export default function ConsoleModal({ server, onClose }) {
-  const [requestVersion, setRequestVersion] = useState(0);
-  const [consoleSession, setConsoleSession] = useState({ status: 'loading', url: '', message: '' });
+  const screenRef = useRef(null);
+  const rfbRef = useRef(null);
+  const sessionRef = useRef(null);
+  const [connection, setConnection] = useState(INITIAL_CONNECTION);
+  const [sessionVersion, setSessionVersion] = useState(0);
 
   useEffect(() => {
-    let disposed = false;
-    setConsoleSession({ status: 'loading', url: '', message: '' });
+    let cancelled = false;
 
-    api(`/servers/${server.id}/console`, { method: 'POST' })
-      .then((data) => {
-        if (!disposed) setConsoleSession({ status: 'ready', url: getNovaConsoleUrl(data), message: '' });
+    Promise.all([
+      import('@novnc/novnc/lib/rfb.js'),
+      import('@novnc/novnc/lib/util/logging.js'),
+    ])
+      .then(([rfbModule, loggingModule]) => {
+        if (cancelled) return;
+        const initLogging = loggingModule.initLogging || loggingModule.default?.initLogging;
+        initLogging?.('none');
+        const RFB = rfbModule.default?.default || rfbModule.default;
+        if (typeof RFB !== 'function') throw new Error('Không thể khởi tạo noVNC RFB client.');
+
+        const session = createRfbSession({
+          target: screenRef.current,
+          requestConsole: () => api(`/servers/${server.id}/console`, { method: 'POST' }),
+          parseConsoleUrl: (response) => novaConsoleToWebSocket(getNovaConsoleUrl(response), window.location.protocol),
+          createRfb: (target, websocketUrl) => {
+            const rfb = new RFB(target, websocketUrl, { shared: true });
+            rfb.scaleViewport = true;
+            rfb.resizeSession = false;
+            rfb.focusOnClick = true;
+            return rfb;
+          },
+          onState: setConnection,
+          onRfb: (rfb) => { rfbRef.current = rfb; },
+        });
+        sessionRef.current = session;
+        return session.connect();
       })
       .catch((error) => {
-        if (!disposed) {
-          setConsoleSession({ status: 'error', url: '', message: error?.message || 'Không thể lấy phiên console VNC.' });
-        }
+        if (!cancelled) setConnection({ status: 'error', message: error?.message || 'Không thể mở console VNC.' });
       });
 
-    return () => { disposed = true; };
-  }, [server.id, requestVersion]);
+    return () => {
+      cancelled = true;
+      sessionRef.current?.dispose();
+      sessionRef.current = null;
+      rfbRef.current = null;
+    };
+  }, [server.id]);
+
+  const reconnect = () => {
+    setSessionVersion((value) => value + 1);
+    sessionRef.current?.reconnect();
+  };
+  const connected = connection.status === 'connected';
+  const waiting = ['idle', 'requesting_console', 'connecting'].includes(connection.status);
 
   return (
     <Modal wide className="console-modal" title={`Console — ${server.name}`} onClose={onClose}
       footer={<button className="btn ghost" type="button" onClick={onClose}>Đóng</button>}>
-      <section className="console-launch-panel" aria-live="polite">
-        <div>
-          <h4>Nova noVNC Console</h4>
-          {consoleSession.status === 'loading' && <p className="dim">Đang lấy phiên console mới từ OpenStack…</p>}
-          {consoleSession.status === 'ready' && <p className="dim">Console sẽ mở bằng trình khách noVNC do OpenStack cung cấp.</p>}
-          {consoleSession.status === 'error' && <p className="err-text">{consoleSession.message}</p>}
-        </div>
-        <div className="console-launch-actions">
-          {consoleSession.status === 'error' && <button className="btn ghost" type="button" onClick={() => setRequestVersion((value) => value + 1)}>
-            <RefreshCw size={15} /> Lấy phiên mới
+      <div className="vnc-console-shell">
+        <div className="vnc-screen" ref={screenRef} tabIndex={0} onMouseDown={() => rfbRef.current?.focus()} />
+        {!connected && <div className="vnc-connection-state" role="status">
+          <span>{connection.message || 'Đang chuẩn bị console…'}</span>
+          {!waiting && <button className="btn ghost sm" type="button" onClick={reconnect}>
+            <RefreshCw size={14} /> Kết nối lại
           </button>}
-          {consoleSession.status === 'ready' && <a className="btn primary" href={consoleSession.url} target="_blank" rel="noopener noreferrer">
-            <ExternalLink size={15} /> Mở console (noVNC)
-          </a>}
-        </div>
-      </section>
-
-      <ConsoleInput
-        rfbRef={NO_RFB_REF}
-        connected={false}
-        sessionKey={server.id}
-        unavailableReason={AUTO_TYPE_UNAVAILABLE}
-      />
+        </div>}
+      </div>
+      <ConsoleInput rfbRef={rfbRef} connected={connected} sessionKey={`${server.id}:${sessionVersion}`} />
     </Modal>
   );
 }
