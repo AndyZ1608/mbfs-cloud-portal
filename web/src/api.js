@@ -1,3 +1,13 @@
+export class ApiError extends Error {
+  constructor(message, { status, code, requestId } = {}) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+    this.requestId = requestId;
+  }
+}
+
 export async function api(path, { method = 'GET', body } = {}) {
   const opts = { method, credentials: 'same-origin', headers: {} };
   if (!['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase())) opts.headers['X-CMP-Request'] = '1';
@@ -6,13 +16,15 @@ export async function api(path, { method = 'GET', body } = {}) {
     opts.body = JSON.stringify(body);
   }
   const res = await fetch('/api' + path, opts);
-  if (res.status === 401 && !path.startsWith('/auth/')) {
-    window.location.href = '/login';
-    throw new Error('Phiên đã hết hạn');
-  }
   let data = null;
   try { data = await res.json(); } catch { /* no body */ }
-  if (!res.ok) throw new Error((data && data.error) || `Lỗi HTTP ${res.status}`);
+  if (res.status === 401 && !path.startsWith('/auth/')) {
+    window.location.href = '/login';
+    throw new ApiError('Phiên đã hết hạn', { status: 401, code: data?.code, requestId: data?.requestId });
+  }
+  if (!res.ok) throw new ApiError((data && data.error) || `Lỗi HTTP ${res.status}`, {
+    status: res.status, code: data?.code, requestId: data?.requestId,
+  });
   return data;
 }
 

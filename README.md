@@ -1,6 +1,6 @@
 # MBFS Cloud Portal
 
-MBFS Cloud Portal is a self-hosted OpenStack management portal. It provides tenant-scoped compute, network, block/object storage, load-balancer, backup, monitoring, cost, audit, marketplace, and RKE2 cluster workflows through a React SPA and an Express API.
+MBFS Cloud Portal is a self-hosted OpenStack management portal. It provides tenant-scoped compute, network, block/object storage, load-balancer, backup, monitoring, audit, marketplace, RKE2, and external Billing-service integration through a React SPA and an Express API.
 
 The repository currently supports OpenStack only. VMware and generic multi-cloud provider support are not implemented.
 
@@ -36,5 +36,6 @@ The CI workflow also syntax-checks every backend module and builds the Docker im
 
 - [Architecture and module boundaries](./docs/ARCHITECTURE.md)
 - [Security model and operational requirements](./docs/SECURITY.md)
+- [External Billing integration](./docs/BILLING.md)
 
 The API is intentionally a modular monolith. Route modules orchestrate use cases while `server/openstack.js` is the provider boundary. A second provider should be introduced behind a use-case/provider interface only when its behavior and capability differences are known.

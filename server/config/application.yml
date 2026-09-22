@@ -1,0 +1,13 @@
+# CMP application/service integrations.
+billing:
+  # Enable after replacing the placeholder address below.
+  enabled: false
+
+  # Billing service internal REST API.
+  # Replace x.x.x.x:port with the Billing VM IP and API port.
+  # Example:
+  # base_url: "http://100.64.64.150:8080"
+  base_url: "http://x.x.x.x:port"
+
+  timeout_seconds: 10
+

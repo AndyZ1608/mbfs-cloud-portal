@@ -4,10 +4,13 @@ services:
     container_name: mbfs-cloud-portal
     restart: unless-stopped
     env_file: .env
+    environment:
+      CMP_CONFIG_FILE: /app/config/application.yml
     ports:
       - "8080:8080"
     volumes:
       - portal-data:/data
+      - ./server/config/application.yml:/app/config/application.yml:ro
 
 volumes:
   portal-data:

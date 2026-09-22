@@ -65,6 +65,27 @@ openstack role add --project team-devops --user hieptd member
 User `member` là đủ cho mọi chức năng portal. Quota chỉnh bằng
 `openstack quota set --instances 20 --cores 40 --ram 81920 team-devops`.
 
+### Billing Integration
+
+Billing chạy như dịch vụ độc lập. CMP không đọc database Billing và không tính giá.
+Sửa `server/config/application.yml`, thay địa chỉ mẫu bằng địa chỉ Billing VM:
+
+```yaml
+billing:
+  enabled: true
+
+  # Billing internal REST API.
+  # Example:
+  # base_url: "http://100.64.64.150:8080"
+  base_url: "http://x.x.x.x:port"
+
+  timeout_seconds: 10
+```
+
+CMP chuyển tiếp Keystone token đang scope theo project qua `X-Auth-Token`.
+Billing xác thực token với Keystone và tự lấy `project.id`; CMP không gửi
+`project_id` để chọn dữ liệu. Xem [docs/BILLING.md](docs/BILLING.md).
+
 ## 3. Reverse proxy HTTPS (khuyến nghị: cloud.mbfs.vn)
 
 `.env` thêm:
@@ -142,26 +163,9 @@ Security group, Images (xem/xoá), SSH keypair, quota dashboard, đổi project.
 (đổi flavor, xác nhận/hoàn tác) · Xem log console (boot/cloud-init) khi VM không SSH được.
 
 **v1.2:**
-- **Chi phí & Sử dụng kiểu AWS** — biểu đồ chi phí theo ngày (compute/storage/network),
-  hoá đơn theo dịch vụ (số lượng × đơn giá = thành tiền), dự báo hết kỳ theo run-rate,
-  ngân sách kỳ (lưu trong trình duyệt), preset Tháng này/Tháng trước/7 ngày/30 ngày,
-  xuất CSV. Tính phí cả **volume + snapshot (Cinder)** và **Floating IP (Neutron)**
-  chứ không chỉ compute. Bật bằng cách đặt đơn giá trong `.env`:
-
-  ```bash
-  # VND theo GIỜ — ví dụ tham khảo
-  PRICE_VCPU_HOUR=500          # mỗi vCPU
-  PRICE_RAM_GB_HOUR=250        # mỗi GB RAM
-  PRICE_DISK_GB_HOUR=3         # mỗi GB đĩa local của flavor
-  PRICE_VOLUME_GB_HOUR=5       # mỗi GB volume Cinder
-  PRICE_SNAPSHOT_GB_HOUR=2     # mỗi GB snapshot
-  PRICE_FIP_HOUR=200           # mỗi Floating IP (kể cả chưa gắn)
-  CURRENCY=VND
-  ```
-
-  Lưu ý cách tính: compute lấy từ Nova simple-tenant-usage (gồm cả máy **đã xoá**
-  trong kỳ); volume/snapshot/FIP tính theo tài nguyên hiện có kể từ `created_at`
-  (tài nguyên đã xoá trước đó không truy vấn được). Mốc thời gian theo UTC.
+- Billing hiện được cung cấp bởi Billing service độc lập. Portal chỉ chuyển tiếp
+  Keystone project-scoped token và hiển thị phản hồi; toàn bộ metering/rating/pricing
+  đã được gỡ khỏi CMP.
 - **Load Balancer (Octavia)** — tạo LB một bước (listener + pool + members + health
   monitor), HTTP/HTTPS-passthrough/TCP, round-robin/least-connections/source-IP,
   thêm/gỡ backend, gắn Floating IP vào VIP, xoá cascade. Trang tự ẩn nếu cụm

@@ -192,14 +192,6 @@ router.get('/servers/:id/console-log', async (req, res, next) => {
 
 // ---------- Báo cáo sử dụng (os-simple-tenant-usage) ----------
 
-const PRICING = {
-  vcpu: Number(process.env.PRICE_VCPU_HOUR) || 0,
-  ram_gb: Number(process.env.PRICE_RAM_GB_HOUR) || 0,
-  disk_gb: Number(process.env.PRICE_DISK_GB_HOUR) || 0,
-  currency: process.env.CURRENCY || 'VND',
-};
-PRICING.enabled = PRICING.vcpu > 0 || PRICING.ram_gb > 0 || PRICING.disk_gb > 0;
-
 router.get('/usage', async (req, res, next) => {
   try {
     const sess = req.session.os;
@@ -218,7 +210,6 @@ router.get('/usage', async (req, res, next) => {
         total_memory_mb_usage: u.total_memory_mb_usage || 0,
         total_local_gb_usage: u.total_local_gb_usage || 0,
       },
-      pricing: PRICING,
     });
   } catch (e) { next(e); }
 });

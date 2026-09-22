@@ -19,9 +19,9 @@ const NAV = [
   { to: '/keypairs', label: 'SSH Keys', icon: KeyRound },
   { to: '/backup', label: 'Backup tự động', icon: DatabaseBackup },
   { to: '/power', label: 'Lịch bật/tắt', icon: CalendarClock },
-  { to: '/optimize', label: 'Tối ưu chi phí', icon: PiggyBank },
+  { to: '/optimize', label: 'Tối ưu tài nguyên', icon: PiggyBank },
   { to: '/audit', label: 'Nhật ký hoạt động', icon: History },
-  { to: '/usage', label: 'Chi phí & Sử dụng', icon: BarChart3 },
+  { to: '/billing', label: 'Billing', icon: BarChart3, feature: 'billing' },
 ];
 
 export default function Layout() {
@@ -67,7 +67,7 @@ export default function Layout() {
           <span>{cfg.cloudName}</span>
         </div>
         <nav>
-          {NAV.map(({ to, label, icon: Icon, end }) => (
+          {NAV.filter((item) => !item.feature || (item.feature === 'billing' && cfg.billingEnabled)).map(({ to, label, icon: Icon, end }) => (
             <NavLink key={to} to={to} end={end} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
               <Icon size={17} />
               <span>{label}</span>

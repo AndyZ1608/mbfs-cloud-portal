@@ -154,7 +154,7 @@ export function latestFor(projectId) {
   return out;
 }
 
-// Thống kê CPU cho trang Tối ưu chi phí: {id: {avg, max, samples, hours}}
+// Thống kê CPU cho trang Tối ưu tài nguyên: {id: {avg, max, samples, hours}}
 export function cpuStats(projectId, hours = 168) {
   const cutoff = Date.now() - hours * 3600000;
   const out = {};

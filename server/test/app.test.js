@@ -40,5 +40,7 @@ test('stored secrets: authenticated encryption round-trip and tamper rejection',
   const encrypted = seal('join-token');
   assert.notEqual(encrypted, 'join-token');
   assert.equal(unseal(encrypted), 'join-token');
-  assert.equal(unseal(encrypted.slice(0, -1) + 'x'), null);
+  const parts = encrypted.split('.');
+  parts[2] = `${parts[2][0] === 'A' ? 'B' : 'A'}${parts[2].slice(1)}`;
+  assert.equal(unseal(parts.join('.')), null);
 });

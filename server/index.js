@@ -1,6 +1,5 @@
 import { createApp } from './app.js';
 import { config, validateConfig } from './config.js';
-import { startReport } from './report.js';
 import { startMonitor } from './monitor.js';
 import { startPower } from './power.js';
 import { startScheduler } from './scheduler.js';
@@ -13,7 +12,6 @@ const app = createApp();
 startScheduler();
 startPower();
 startMonitor();
-startReport();
 startAlerts();
 
 const server = app.listen(config.port, () => {
@@ -28,4 +26,3 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
     setTimeout(() => { console.warn('[shutdown] Hết thời gian chờ, thoát cưỡng bức.'); process.exit(1); }, 15000).unref();
   });
 }
-

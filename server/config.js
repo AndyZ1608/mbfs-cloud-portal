@@ -1,4 +1,10 @@
-// Centralized process configuration and startup validation.
+// Centralized process and YAML application configuration.
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parse as parseYaml } from 'yaml';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const bool = (name, fallback = false) => {
   const value = process.env[name];
   if (value === undefined || value === '') return fallback;
@@ -14,6 +20,47 @@ const integer = (name, fallback, { min = Number.MIN_SAFE_INTEGER, max = Number.M
   return value;
 };
 
+export function normalizeBillingConfig(value = {}) {
+  const enabled = value.enabled === true;
+  const timeoutSeconds = Number(value.timeout_seconds ?? 10);
+  const rawBaseUrl = String(value.base_url || '').trim();
+  const errors = [];
+
+  if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 120) {
+    errors.push('billing.timeout_seconds must be between 1 and 120');
+  }
+
+  const baseUrl = rawBaseUrl.replace(/\/+$/, '');
+  if (enabled) {
+    if (!baseUrl) errors.push('billing.base_url is required when billing.enabled=true');
+    else {
+      try {
+        const parsed = new URL(baseUrl);
+        if (!['http:', 'https:'].includes(parsed.protocol)) errors.push('billing.base_url must use http:// or https://');
+        if (parsed.username || parsed.password) errors.push('billing.base_url must not contain credentials');
+        if (parsed.search || parsed.hash) errors.push('billing.base_url must not contain a query string or fragment');
+      } catch {
+        errors.push('billing.base_url must be an absolute URL including http:// or https://');
+      }
+    }
+  }
+
+  return { enabled, baseUrl, timeoutMs: timeoutSeconds * 1000, errors };
+}
+
+export function loadApplicationConfig(filePath = process.env.CMP_CONFIG_FILE || path.join(__dirname, 'config', 'application.yml')) {
+  let document;
+  try {
+    document = parseYaml(fs.readFileSync(filePath, 'utf8')) || {};
+  } catch (error) {
+    throw new Error(`Cannot load CMP application config ${filePath}: ${error.message}`);
+  }
+  const billing = normalizeBillingConfig(document.billing);
+  return Object.freeze({ filePath, billing: Object.freeze(billing) });
+}
+
+const application = loadApplicationConfig();
+
 export const config = Object.freeze({
   env: process.env.NODE_ENV || 'development',
   port: integer('PORT', 8080, { min: 1, max: 65535 }),
@@ -25,6 +72,8 @@ export const config = Object.freeze({
   trustProxy: bool('TRUST_PROXY'),
   providerTimeoutMs: integer('OS_REQUEST_TIMEOUT_MS', 30_000, { min: 1_000, max: 300_000 }),
   providerUploadTimeoutMs: integer('OS_UPLOAD_TIMEOUT_MS', 3_600_000, { min: 60_000, max: 86_400_000 }),
+  applicationConfigFile: application.filePath,
+  billing: application.billing,
 });
 
 export function validateConfig() {
@@ -43,6 +92,7 @@ export function validateConfig() {
   if (process.env.OS_INSECURE === 'true' || process.env.SSO_INSECURE === 'true') {
     warnings.push('TLS certificate verification is disabled for at least one integration');
   }
+  errors.push(...config.billing.errors);
   if (errors.length) throw new Error(`Invalid configuration:\n- ${errors.join('\n- ')}`);
   return warnings;
 }

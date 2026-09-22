@@ -8,7 +8,7 @@ const FEATURES = [
   [HardDrive, 'Ổ đĩa & Backup', 'Volume, snapshot, lịch tự động'],
   [Network, 'Mạng & Load Balancer', 'VPC, Floating IP, Octavia'],
   [Boxes, 'Kubernetes', 'Dựng cụm RKE2 một bước'],
-  [BarChart3, 'Chi phí & Sử dụng', 'Hoá đơn, dự báo, ngân sách'],
+  [BarChart3, 'Billing', 'Số liệu theo project từ Billing service'],
   [Shield, 'Bảo mật', 'Security group, SSH key, nhật ký'],
 ];
 

@@ -15,6 +15,8 @@ Sessions are HTTP-only, `SameSite=Lax`, and optionally Secure. State-changing AP
 
 Every request receives an `X-Request-Id`. Mutation audit records include request ID, user, project, provider, cloud, region, action, result, source address, status, and duration. Passwords, cookies, bearer tokens, and request bodies are not written to the audit log.
 
+Billing requests forward the current project-scoped Keystone token in `X-Auth-Token`. The token is never sent to the browser as Billing configuration, placed in a URL, or written to logs. CMP does not send `project_id`; the Billing service validates the token with Keystone and derives project scope itself.
+
 ## Provider safety
 
 OpenStack endpoints are selected from the authenticated Keystone service catalog with explicit interface and region selection. Normal requests and streaming uploads have separate bounded timeouts. Provider failures are translated into stable error categories; unexpected internal errors are not returned to clients.
@@ -25,4 +27,3 @@ OpenStack endpoints are selected from the authenticated Keystone service catalog
 - The built-in Redis client does not support TLS (`rediss://`) or Redis Cluster/Sentinel; use a private trusted network or replace it with a maintained client before exposed/high-availability deployments.
 - File-backed state is not encrypted wholesale. Kubernetes join tokens are encrypted, but audit and policy metadata remain readable to the container volume owner.
 - OpenStack remains the final authorization authority for ordinary resource operations. A future portal permission model should be enforced centrally before adding roles that are broader or narrower than Keystone roles.
-

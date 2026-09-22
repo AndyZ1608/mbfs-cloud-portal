@@ -83,6 +83,7 @@ router.post('/auth/websso/callback', express.urlencoded({ extended: false, limit
         catalog: scoped.catalog,
         roles: scoped.roles || [],
         auth_mode: 'websso',
+        token_source: 'user',
       };
       record({ user: scoped.user?.name, project: { id: scoped.project.id, name: scoped.project.name }, method: 'POST', path: '/auth/websso/login', status: 200, ms: 0 });
       console.log(`[websso] LOGIN user=${scoped.user?.name} project=${scoped.project.name} projects=${projects.length}`);

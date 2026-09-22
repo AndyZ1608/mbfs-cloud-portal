@@ -80,6 +80,7 @@ router.get('/auth/sso/callback', async (req, res) => {
       // khoản dịch vụ có role admin thật trong Keystone.
       roles: isAdmin ? ['admin', 'member'] : ['member'],
       auth_mode: 'sso',
+      token_source: 'service',
       sso: { idToken: tok.id_token, groups, email: claims.email || null, name: claims.name || null },
     };
     record({ user: username, project: { id: svc.project.id, name: svc.project.name }, method: 'POST', path: '/auth/sso/login', status: 200, ms: 0 });

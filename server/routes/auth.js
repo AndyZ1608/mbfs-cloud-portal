@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { SSO, ssoConfigError } from '../oidc.js';
 import { W as WEBSSO, webssoOn, webssoError } from './websso.js';
 import { passwordAuth, listProjects, scopeToken, OSError, MOCK } from '../openstack.js';
+import { config } from '../config.js';
 
 const router = Router();
 
@@ -17,6 +18,7 @@ router.get('/config', (req, res) => {
     ssoLabel: SSO.buttonLabel,
     ssoError: SSO.enabled ? ssoConfigError() : null,
     allowLocal: SSO.allowLocal,
+    billingEnabled: config.billing.enabled,
   });
 });
 
@@ -51,6 +53,7 @@ router.post('/login', async (req, res, next) => {
       projects: projects.map((p) => ({ id: p.id, name: p.name })),
       catalog: scoped.catalog,
       roles: scoped.roles || [],
+      token_source: 'user',
     };
     console.log(`[auth] LOGIN user=${scoped.user.name} project=${scoped.project.name}`);
     res.json({ user: scoped.user, project: scoped.project, projects: req.session.os.projects, roles: scoped.roles || [] });

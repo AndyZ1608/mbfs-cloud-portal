@@ -1,5 +1,13 @@
 # Nâng cấp MBFS Cloud Portal
 
+## External Billing integration
+
+- Local metering, rating, pricing, monthly cost reports, and price environment variables have been removed.
+- Configure the separately deployed Billing service in `server/config/application.yml`; Docker Compose mounts this file read-only.
+- The old `/usage` page redirects to `/billing`. External clients should use `GET /api/billing`, `/api/billing/instances`, and `/api/billing/instances/:instanceId`.
+- CMP forwards only the current project-scoped Keystone token. Billing validates it and determines `project.id`.
+- Legacy Keycloak bridge-SSO sessions cannot access Billing because they hold a service-account token; migrate those users to Keystone WebSSO federation.
+
 ## v2.4 security/architecture refactor
 
 - Production now requires `NODE_ENV=production` and `SESSION_SECRET` with at least 32 characters.
@@ -40,8 +48,7 @@ docker rm -f mbfs-cloud-portal
 docker-compose up -d --build      # (compose v2: docker compose up -d --build)
 ```
 
-Sau khi up: so sánh `.env.example` để thêm biến mới nếu cần
-(`PRICE_VCPU_HOUR`, `PRICE_RAM_GB_HOUR`, `PRICE_DISK_GB_HOUR`, `CURRENCY`).
+Sau khi up: so sánh `.env.example` để thêm biến mới nếu cần.
 Nếu chạy sau nginx và sẽ dùng upload image, thêm vào location `/`:
 `client_max_body_size 0; proxy_request_buffering off; proxy_read_timeout 3600;`
 
@@ -57,8 +64,7 @@ docker rm -f mbfs-cloud-portal
 docker-compose up -d --build      # (compose v2: docker compose up -d --build)
 ```
 
-Biến `.env` mới (tuỳ chọn): `PRICE_VOLUME_GB_HOUR`, `PRICE_SNAPSHOT_GB_HOUR`,
-`PRICE_FIP_HOUR`. Các biến `PRICE_*` cũ giữ nguyên ý nghĩa.
+Các biến giá của Billing cục bộ trong bản này đã lỗi thời và không còn được CMP sử dụng.
 Trang Load Balancer tự ẩn nếu cụm chưa có Octavia — không cần cấu hình gì thêm.
 
 ## v1.2 → v1.3
@@ -230,7 +236,7 @@ cp .env /root/backup-cloud-portal.env
 tar xzf mbfs-cloud-portal-v2.1.tar.gz --exclude='.env' -C ./
 docker rm -f mbfs-cloud-portal && docker-compose up -d --build
 ```
-Không có biến .env mới. Trang Tối ưu chi phí hiện số tiền khi đã đặt PRICE_*;
+Không có biến .env mới. Trang tối ưu chỉ phân tích mức sử dụng tài nguyên;
 lịch bật/tắt lưu ở volume portal-data (power-rules.json).
 
 ## v2.1 → v2.2 — Giám sát VM + khuyến nghị hạ cấu hình
@@ -250,7 +256,7 @@ docker rm -f mbfs-cloud-portal && docker-compose up -d --build
 Cần `OS_TASK_USERNAME/PASSWORD` + quyền đọc Nova diagnostics (xem .env.example).
 Chưa cấu hình thì cột CPU hiện dấu "—", các chức năng khác không ảnh hưởng.
 
-## v2.2 → v2.3 — Object Storage, IaC, Thông báo, Báo cáo chi phí
+## v2.2 → v2.3 — Object Storage, IaC, Thông báo
 
 - **Object Storage** (menu mới): quản lý container + file trên Swift/Ceph RGW,
   upload stream có progress, tải về, xoá, tạo **link chia sẻ tạm thời (TempURL)**.
@@ -259,14 +265,11 @@ Chưa cấu hình thì cột CPU hiện dấu "—", các chức năng khác kh�
   project (network/subnet/router/secgroup/keypair/volume/VM/FIP).
 - **Trung tâm thông báo**: chuông trên thanh trên cùng, gom sự kiện backup,
   lịch bật/tắt, cảnh báo CPU; có đếm số chưa đọc.
-- **Báo cáo chi phí tháng qua Telegram**: ngày 1 hàng tháng gửi tổng hợp chi phí
-  từng project + máy tốn nhất. Bật bằng REPORT_DAY_OF_MONTH/REPORT_HOUR.
 
 ```bash
 tar xzf mbfs-cloud-portal-v2.3.tar.gz --exclude='.env' -C ./
 docker rm -f mbfs-cloud-portal && docker-compose up -d --build
 ```
-Biến .env mới (tuỳ chọn): REPORT_DAY_OF_MONTH, REPORT_HOUR.
 
 ## v2.3 → v2.4 — Sẵn sàng sản xuất
 

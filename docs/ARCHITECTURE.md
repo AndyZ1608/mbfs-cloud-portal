@@ -13,7 +13,7 @@ Express request boundary
         v
 Feature route modules
   compute, network, storage, load balancing, backup, marketplace,
-  Kubernetes, monitoring, optimization, billing, administration
+  Kubernetes, monitoring, resource optimization, administration
         |
         v
 OpenStack provider boundary
@@ -21,6 +21,11 @@ OpenStack provider boundary
         |
         v
 Keystone / Nova / Neutron / Cinder / Glance / Octavia / Swift
+
+Billing routes follow a separate boundary:
+
+Browser -> CMP Billing controller -> Billing service/client
+        -> External Billing REST API (current scoped Keystone token)
 ```
 
 The backend is a modular monolith. This is deliberate: there is one deployed service, one provider implementation, and several workflows share an OpenStack-scoped session. Splitting it into network services would add failure modes without establishing a clearer product boundary.
@@ -32,6 +37,7 @@ The backend is a modular monolith. This is deliberate: there is one deployed ser
 - `server/config.js`: parsed process configuration and production startup validation.
 - `server/middleware.js`: request context, CSRF, authentication/role checks, and the error contract.
 - `server/openstack.js`: Keystone authentication, service-catalog resolution, timeouts, and provider error translation.
+- `server/billing/*`: external Billing client/service boundary; contains no pricing, metering, rating, or project filtering.
 - `server/routes/*`: feature-level HTTP adapters and current use-case orchestration.
 - `server/audit.js`: tenant-filtered append-only activity records.
 - `server/store.js`, `server/sessionstore.js`: lightweight local persistence and session-store adapters.
@@ -51,6 +57,8 @@ Existing success response shapes remain feature-specific for compatibility. Erro
 
 All non-safe `/api` requests require `X-CMP-Request: 1`. This protects cookie-authenticated operations from cross-site form submission. The Keystone WebSSO callback is the only explicit exception because it is a cross-site signed-token POST.
 
+Application/service integration settings are loaded from `server/config/application.yml` (or `CMP_CONFIG_FILE`). Billing is scoped exclusively by the current project-scoped Keystone token; CMP never sends a project selector to Billing.
+
 ## State and background work
 
 Policies, cluster metadata, notifications, and audit records live under `DATA_DIR` (normally `/data`). Sessions may use memory, files, or Redis. The scheduler, power controller, monitor, report generator, and alerts execute in the web process, so only one replica may run them safely today.
@@ -63,4 +71,3 @@ Policies, cluster metadata, notifications, and audit records live under `DATA_DI
 - The RKE2 deployment workflow is long-running and only partially compensates failed infrastructure creation.
 - RBAC relies primarily on OpenStack policy enforcement; only cluster administration has an explicit portal-side `admin` gate.
 - The frontend has no automated component/accessibility test suite and several pages remain oversized.
-

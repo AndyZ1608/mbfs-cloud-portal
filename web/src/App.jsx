@@ -38,7 +38,8 @@ export default function App() {
           <Route path="/security-groups" element={<SecurityGroups />} />
           <Route path="/images" element={<Images />} />
           <Route path="/keypairs" element={<Keypairs />} />
-          <Route path="/usage" element={<Billing />} />
+          <Route path="/billing" element={<Billing />} />
+          <Route path="/usage" element={<Navigate to="/billing" replace />} />
           <Route path="/load-balancers" element={<LoadBalancers />} />
           <Route path="/backup" element={<Backup />} />
           <Route path="/audit" element={<AuditLog />} />
