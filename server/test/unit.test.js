@@ -55,6 +55,7 @@ test('security headers: có đủ CSP và các header cốt lõi', async () => {
   const h = {};
   securityHeaders({}, { setHeader: (k, v) => (h[k] = v) }, () => {});
   assert.match(h['Content-Security-Policy'], /default-src 'self'/);
+  assert.match(h['Content-Security-Policy'], /connect-src 'self' ws: wss:/);
   assert.equal(h['X-Content-Type-Options'], 'nosniff');
   assert.equal(h['X-Frame-Options'], 'SAMEORIGIN');
   assert.ok(h['Referrer-Policy']);

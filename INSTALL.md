@@ -121,9 +121,12 @@ server {
 
 Sau đó thêm service card `cloud.mbfs.vn` vào dashboard insight.mbfs.vn là xong.
 
-> **Console noVNC:** nút "Mở console" trả về URL noVNC do Nova cấp — URL này trỏ
-> thẳng tới `novncproxy` của OpenStack, trình duyệt người dùng phải truy cập được
-> domain/IP đó (không đi qua portal).
+> **Console noVNC:** nút "Mở console" dùng noVNC nhúng trong portal nhưng kết nối
+> WebSocket trực tiếp từ trình duyệt tới `novncproxy` do Nova cấp. Trình duyệt người
+> dùng phải resolve/truy cập được domain/IP đó và tin cậy chứng chỉ TLS của proxy.
+> Console Input auto-type chỉ giữ nội dung trong bộ nhớ component và gửi phím qua
+> phiên RFB hiện tại. Phase 1 hỗ trợ các ký tự dòng lệnh ASCII theo bố cục bàn phím US;
+> ký tự Unicode không hỗ trợ sẽ dừng thao tác thay vì gửi sai phím.
 
 ## 4. Chạy thủ công không Docker (tuỳ chọn)
 
@@ -142,7 +145,7 @@ OS_MOCK=true PORT=8080 node index.js
 | Lỗi 406 khi thao tác máy ảo | Nova quá cũ so với microversion — hạ `OS_COMPUTE_MICROVERSION` |
 | `unable to verify the first certificate` | Cert tự ký → `OS_INSECURE=true` |
 | Login được nhưng list VM lỗi timeout | Portal không gọi được endpoint Nova/Neutron public → thử `OS_INTERFACE=internal` hoặc mở firewall |
-| Console noVNC không mở | Trình duyệt user không resolve được domain novncproxy — thêm DNS nội bộ |
+| Console noVNC không mở | Trình duyệt user không resolve/truy cập được WebSocket của novncproxy, hoặc không tin cậy chứng chỉ TLS — kiểm tra DNS/firewall/certificate |
 | Đăng xuất ngẫu nhiên sau khi restart container | Session lưu RAM (thiết kế v1) — restart container là mất session, đăng nhập lại |
 | Upload image báo 413 | nginx thiếu `client_max_body_size 0;` |
 | Upload image chậm/timeout với file lớn | nginx thiếu `proxy_request_buffering off;` + tăng `proxy_read_timeout` |

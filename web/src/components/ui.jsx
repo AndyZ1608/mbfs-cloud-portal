@@ -59,7 +59,7 @@ export function UsageBar({ label, used, max, unit = '', render }) {
 }
 
 // ---------- Modal ----------
-export function Modal({ title, onClose, children, footer, wide }) {
+export function Modal({ title, onClose, children, footer, wide, className = '' }) {
   useEffect(() => {
     const esc = (e) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', esc);
@@ -67,7 +67,7 @@ export function Modal({ title, onClose, children, footer, wide }) {
   }, [onClose]);
   return (
     <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`modal ${wide ? 'modal-wide' : ''}`} role="dialog" aria-modal="true">
+      <div className={`modal ${wide ? 'modal-wide' : ''} ${className}`.trim()} role="dialog" aria-modal="true">
         <div className="modal-head">
           <h3>{title}</h3>
           <button className="icon-btn" onClick={onClose} aria-label="Đóng"><X size={18} /></button>

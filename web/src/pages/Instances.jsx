@@ -4,12 +4,13 @@ import { api, fmtDate, ramGB, serverIps } from '../api.js';
 import { Modal, Field, StatusBadge, ActionsMenu, toast, Empty, PageHead } from '../components/ui.jsx';
 import MonitorModal from '../components/MonitorModal.jsx';
 import TypeToConfirmDialog from '../components/TypeToConfirmDialog.jsx';
+import ConsoleModal from '../components/ConsoleModal.jsx';
 
 export default function Instances() {
   const [servers, setServers] = useState(null);
   const [creating, setCreating] = useState(false);
   const [detail, setDetail] = useState(null);
-  const [consoleUrl, setConsoleUrl] = useState(null);
+  const [consoleFor, setConsoleFor] = useState(null);
   const [fipTarget, setFipTarget] = useState(null);
   const [resizeFor, setResizeFor] = useState(null);
   const [logFor, setLogFor] = useState(null);
@@ -106,12 +107,7 @@ export default function Instances() {
     } catch (e) { toast(e.message, 'error'); }
   }
 
-  async function openConsole(s) {
-    try {
-      const d = await api(`/servers/${s.id}/console`, { method: 'POST' });
-      setConsoleUrl({ name: s.name, url: d.remote_console?.url || d.console?.url });
-    } catch (e) { toast(e.message, 'error'); }
-  }
+  function openConsole(s) { setConsoleFor(s); }
 
   const shown = !servers ? null : servers.filter((s) => {
     const t = q.trim().toLowerCase();
@@ -200,17 +196,7 @@ export default function Instances() {
         onConfirm={confirmDelete}
         onCancel={closeDelete}
       />}
-
-      {consoleUrl && (
-        <Modal title={`Console — ${consoleUrl.name}`} onClose={() => setConsoleUrl(null)}
-          footer={<>
-            <button className="btn ghost" onClick={() => { navigator.clipboard?.writeText(consoleUrl.url); toast('Đã copy URL', 'ok'); }}>Copy URL</button>
-            <a className="btn primary" href={consoleUrl.url} target="_blank" rel="noreferrer">Mở console (noVNC)</a>
-          </>}>
-          <p>Phiên console noVNC đã sẵn sàng. URL chỉ dùng được trong ít phút:</p>
-          <p className="mono wrap">{consoleUrl.url}</p>
-        </Modal>
-      )}
+      {consoleFor && <ConsoleModal server={consoleFor} onClose={() => setConsoleFor(null)} />}
     </>
   );
 }
