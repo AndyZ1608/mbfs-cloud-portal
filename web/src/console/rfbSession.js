@@ -1,4 +1,5 @@
-export function createRfbSession({ requestConsole, parseConsoleUrl, createRfb, target, onState, onRfb }) {
+export function createRfbSession({ requestConsole, parseConsoleUrl, createRfb, target, onState, onRfb,
+  onResponse = () => {}, onAttempt = () => {}, onEvent = () => {}, onFailure = () => {} }) {
   let generation = 0;
   let current = null;
   let listeners = [];
@@ -36,13 +37,18 @@ export function createRfbSession({ requestConsole, parseConsoleUrl, createRfb, t
     const attempt = ++generation;
     clearCurrent();
     target.replaceChildren();
+    onAttempt();
     emit('requesting_console', 'Đang lấy phiên console mới từ OpenStack…');
 
+    let stage = 'request_console';
     try {
       const response = await requestConsole();
       if (disposed || attempt !== generation) return;
+      stage = 'parse_url';
+      onResponse(response);
       const websocketUrl = parseConsoleUrl(response);
       emit('connecting', 'Đang kết nối VNC…');
+      stage = 'construct_rfb';
       const rfb = createRfb(target, websocketUrl);
       if (disposed || attempt !== generation) {
         rfb.disconnect();
@@ -52,10 +58,14 @@ export function createRfbSession({ requestConsole, parseConsoleUrl, createRfb, t
       onRfb(rfb);
 
       listen(rfb, 'connect', () => {
-        if (current === rfb) emit('connected', 'Console đã kết nối.');
+        if (current === rfb) {
+          onEvent('connect');
+          emit('connected', 'Console đã kết nối.');
+        }
       });
       listen(rfb, 'disconnect', (event) => {
         if (current !== rfb) return;
+        onEvent('disconnect', { clean: event.detail?.clean === true });
         detach(rfb);
         current = null;
         onRfb(null);
@@ -63,18 +73,27 @@ export function createRfbSession({ requestConsole, parseConsoleUrl, createRfb, t
       });
       listen(rfb, 'securityfailure', () => {
         if (current === rfb) {
+          onEvent('securityfailure');
           clearCurrent();
           emit('error', 'Xác thực phiên VNC thất bại.');
         }
       });
       listen(rfb, 'credentialsrequired', () => {
         if (current === rfb) {
+          onEvent('credentialsrequired');
           clearCurrent();
           emit('error', 'Phiên VNC yêu cầu thông tin xác thực bổ sung.');
         }
       });
-    } catch (error) {
-      if (!disposed && attempt === generation) emit('error', error?.message || 'Không thể mở console VNC.');
+      listen(rfb, 'desktopname', () => {
+        if (current === rfb) onEvent('desktopname');
+      });
+    } catch {
+      if (!disposed && attempt === generation) {
+        clearCurrent();
+        onFailure(stage);
+        emit('error', 'Không thể mở console VNC.');
+      }
     }
   }
 

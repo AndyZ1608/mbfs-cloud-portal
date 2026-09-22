@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { osFetch, OSError } from '../openstack.js';
+import { traceNovaConsole } from '../consoleDiagnostics.js';
 
 const router = Router();
 
@@ -174,6 +175,8 @@ router.post('/servers/:id/console', async (req, res, next) => {
       method: 'POST',
       body: { remote_console: { protocol: 'vnc', type: 'novnc' } },
     });
+    traceNovaConsole(data, req.id);
+    res.setHeader('Cache-Control', 'no-store');
     res.json(data);
   } catch (e) { next(e); }
 });
