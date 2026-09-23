@@ -46,9 +46,81 @@ test('Nova alone decides support regardless of image, metadata, boot source, or 
     assert.deepEqual(p.calls.map(({ service, path }) => [service, path]), [
       ['compute', '/servers/vm-1'], ['compute', '/servers/vm-1/action'],
     ]);
-    assert.deepEqual(p.calls[1].options, { method: 'POST', body: { changePassword: { adminPass: secret } } });
+    assert.deepEqual(p.calls[1].options, {
+      method: 'POST', body: { changePassword: { adminPass: secret } }, responseType: 'none',
+    });
     assert.equal(JSON.stringify(result).includes(secret), false);
   }
+});
+
+test('real Nova client accepts empty 202/204 responses and still rejects non-2xx errors', async (t) => {
+  await assert.rejects(
+    new Response(null, { status: 202, headers: { 'Content-Type': 'application/json' } }).json(),
+    SyntaxError,
+  );
+  const previousMockSetting = process.env.OS_MOCK;
+  process.env.OS_MOCK = 'false';
+  const { osFetch: realOsFetch } = await import('../openstack.js?password-response-regression');
+  process.env.OS_MOCK = previousMockSetting;
+
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  const originalError = console.error;
+  const logs = [];
+  console.log = (...args) => { logs.push(args.join(' ')); };
+  console.error = (...args) => { logs.push(args.join(' ')); };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    console.log = originalLog;
+    console.error = originalError;
+  });
+  const scopedSession = {
+    ...session,
+    token: 'test-token-not-for-logging',
+    catalog: [{ type: 'compute', endpoints: [{ interface: 'public', url: 'https://nova.invalid/v2.1' }] }],
+  };
+  const cases = [
+    { label: '202 empty JSON', response: () => new Response(null, { status: 202, headers: { 'Content-Type': 'application/json' } }), success: true },
+    { label: '204 empty', response: () => new Response(null, { status: 204 }), success: true },
+    { label: '202 Content-Length 0', response: () => new Response('', { status: 202, headers: { 'Content-Type': 'application/json', 'Content-Length': '0' } }), success: true },
+    { label: '400 Nova JSON', response: () => new Response(JSON.stringify({ badRequest: { message: `Invalid ${secret}` } }), { status: 400, headers: { 'Content-Type': 'application/json' } }), code: 'invalid_password' },
+    { label: '500 Nova JSON', response: () => new Response(JSON.stringify({ computeFault: { message: `Failure ${secret}` } }), { status: 500, headers: { 'Content-Type': 'application/json' } }), code: 'provider_failure' },
+  ];
+  for (const scenario of cases) {
+    const requests = [];
+    let metadata;
+    globalThis.fetch = async (_url, options) => {
+      requests.push(options);
+      if (options.method === 'GET') {
+        return new Response(JSON.stringify({ server }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      const response = scenario.response();
+      metadata = {
+        status: response.status,
+        contentType: response.headers.get('content-type'),
+        contentLength: response.headers.get('content-length'),
+        bodyEmpty: (await response.clone().text()).length === 0,
+      };
+      return response;
+    };
+    if (scenario.success) {
+      assert.deepEqual(await changeInstancePassword(scopedSession, server.id, secret, realOsFetch),
+        { success: true, instanceName: server.name }, scenario.label);
+    } else {
+      await assert.rejects(changeInstancePassword(scopedSession, server.id, secret, realOsFetch), (error) => {
+        assert.equal(error.code, scenario.code, scenario.label);
+        assert.equal(error.message.includes(secret), false);
+        return true;
+      });
+    }
+    assert.equal(requests.length, 2, scenario.label);
+    assert.equal(metadata.status, Number(scenario.label.slice(0, 3)));
+    assert.equal(metadata.bodyEmpty, Boolean(scenario.success));
+    if (scenario.label === '202 Content-Length 0') assert.equal(metadata.contentLength, '0');
+    if (scenario.label === '202 empty JSON') assert.equal(metadata.contentType, 'application/json');
+  }
+  assert.equal(logs.join('\n').includes(secret), false);
+  assert.equal(logs.join('\n').includes(scopedSession.token), false);
 });
 
 test('project, role, and input guards prevent Nova action', async () => {

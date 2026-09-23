@@ -156,7 +156,7 @@ export function endpointFor(catalog, svc) {
 
 // ---------- Generic fetch ----------
 
-export async function osFetch(sess, svc, path, { method = 'GET', body, rawBody, contentType, headers = {} } = {}) {
+export async function osFetch(sess, svc, path, { method = 'GET', body, rawBody, contentType, headers = {}, responseType } = {}) {
   if (MOCK) return mockFetch(svc, method, path, body);
   const base = endpointFor(sess.catalog, svc);
   const h = { 'X-Auth-Token': sess.token, Accept: 'application/json', ...headers };
@@ -177,6 +177,9 @@ export async function osFetch(sess, svc, path, { method = 'GET', body, rawBody, 
   const res = await providerFetch(base + path, opts);
   if (res.status === 401) throw new OSError(401, 'Token đã hết hạn, vui lòng đăng nhập lại');
   if (!res.ok) throw new OSError(res.status, await readError(res));
+  // Some Nova actions return 202 with no body, even when Content-Type says JSON.
+  // Opt in per action so other API callers keep their existing response parsing.
+  if (responseType === 'none') return null;
   if (res.status === 204) return null;
   const ct = res.headers.get('content-type') || '';
   if (!ct.includes('json')) return res.text();

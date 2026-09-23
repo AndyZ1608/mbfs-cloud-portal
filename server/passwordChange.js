@@ -47,7 +47,7 @@ export async function changeInstancePassword(session, instanceId, password, fetc
 
   try {
     await fetchOpenStack(session, 'compute', `/servers/${encodeURIComponent(instanceId)}/action`, {
-      method: 'POST', body: { changePassword: { adminPass: password } },
+      method: 'POST', body: { changePassword: { adminPass: password } }, responseType: 'none',
     });
   } catch (error) {
     throw safeNovaError(error);
