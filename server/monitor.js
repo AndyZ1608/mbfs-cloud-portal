@@ -95,7 +95,7 @@ async function sampleServer(sess, s) {
       if (Date.now() - last > 6 * 3600000) {
         cpuAlert.set(s.id, Date.now());
         notify(`🔥 [MBFS Cloud] Máy ảo "${s.name}" CPU ${last3[2]}% (≥${CPU_TH}% liên tục ${Math.round((3 * INTERVAL) / 60000)} phút)`);
-        pushNotice({ project_id: e.project_id, project_name: '', level: 'warn', title: `CPU cao: ${s.name}`, detail: `CPU ${last3[2]}% liên tục ${Math.round((3 * INTERVAL) / 60000)} phút`, link: '/instances' });
+        pushNotice({ project_id: e.project_id, project_name: '', level: 'warn', title: `CPU cao: ${s.name}`, detail: `CPU ${last3[2]}% liên tục ${Math.round((3 * INTERVAL) / 60000)} phút`, link: '/instances', code: 'highCpu', values: { name: s.name, cpu: last3[2], minutes: Math.round((3 * INTERVAL) / 60000) } });
       }
     } else if (last3.length && last3[last3.length - 1] < CPU_TH - 10 && cpuAlert.has(s.id)) {
       cpuAlert.delete(s.id);

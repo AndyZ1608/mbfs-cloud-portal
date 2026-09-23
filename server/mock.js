@@ -104,6 +104,7 @@ function parse(path) {
   return { path: u.pathname.replace(/\/+$/, '') || '/', q: u.searchParams };
 }
 const notFound = () => { const e = new Error('Không tìm thấy tài nguyên (mock)'); e.status = 404; return e; };
+const conflict = (message) => { const e = new Error(message); e.status = 409; return e; };
 
 export function mockFetch(svc, method, rawPath, body) {
   const { path, q } = parse(rawPath);
@@ -194,16 +195,21 @@ function mockCompute(m, path, body) {
     else if ('unpause' in body) s.status = 'ACTIVE';
     else if ('reboot' in body) { s.status = 'REBOOT'; setTimeout(() => (s.status = 'ACTIVE'), 4000); }
     else if ('resize' in body) {
+      if (!['ACTIVE', 'SHUTOFF'].includes(s.status)) throw conflict('VM đang trong quy trình resize');
       const fl = flavors.find((f) => f.id === body.resize.flavorRef);
       if (!fl) throw notFound();
       s.status = 'RESIZE';
       setTimeout(() => { s.status = 'VERIFY_RESIZE'; s._pendingFlavor = fl; }, 3000);
     }
     else if ('confirmResize' in body) {
+      if (s.status !== 'VERIFY_RESIZE') throw conflict('VM chưa sẵn sàng xác nhận resize');
       if (s._pendingFlavor) { s.flavor = { ...s._pendingFlavor, original_name: s._pendingFlavor.name }; delete s._pendingFlavor; }
       s.status = 'ACTIVE';
     }
-    else if ('revertResize' in body) { delete s._pendingFlavor; s.status = 'ACTIVE'; }
+    else if ('revertResize' in body) {
+      if (s.status !== 'VERIFY_RESIZE') throw conflict('VM chưa sẵn sàng hoàn tác resize');
+      delete s._pendingFlavor; s.status = 'ACTIVE';
+    }
     else if ('changePassword' in body) return null;
     else if ('os-getConsoleOutput' in body) {
       const lines = [

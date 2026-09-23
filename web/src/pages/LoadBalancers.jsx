@@ -2,8 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { api, fmtDate } from '../api.js';
 import { Modal, Field, StatusBadge, ActionsMenu, toast, Empty, PageHead } from '../components/ui.jsx';
+import { useI18n } from '../i18n/react.jsx';
 
 export default function LoadBalancers() {
+  const { t } = useI18n();
   const [available, setAvailable] = useState(null);
   const [lbs, setLbs] = useState(null);
   const [fips, setFips] = useState([]);
@@ -28,20 +30,20 @@ export default function LoadBalancers() {
   }, []); // eslint-disable-line
 
   async function del(lb) {
-    if (!window.confirm(`Xoá load balancer "${lb.name}" cùng toàn bộ listener/pool/member (cascade)?`)) return;
-    try { await api(`/lb/${lb.id}`, { method: 'DELETE' }); toast('Đang xoá LB…', 'ok'); setTimeout(load, 800); }
+    if (!window.confirm(t('loadBalancers.deleteConfirm', { name: lb.name }))) return;
+    try { await api(`/lb/${lb.id}`, { method: 'DELETE' }); toast(t('loadBalancers.deleting'), 'ok'); setTimeout(load, 800); }
     catch (e) { toast(e.message, 'error'); }
   }
 
   const fipOf = (lb) => fips.find((f) => f.fixed_ip_address === lb.vip_address && f.port_id);
 
-  if (available === null) return <Empty>Đang kiểm tra Octavia…</Empty>;
+  if (available === null) return <Empty>{t('loadBalancers.checking')}</Empty>;
   if (available === false) return (
     <>
       <PageHead title="Load Balancer" />
       <Empty>
-        Cụm OpenStack chưa deploy <b>Octavia</b> (không có service type <span className="mono">load-balancer</span> trong catalog).<br />
-        Kiểm tra trên controller: <span className="mono">openstack service list | grep -i octavia</span>
+        {t('loadBalancers.unavailable')} <b>Octavia</b> (<span className="mono">load-balancer</span>).<br />
+        {t('objectStorage.checkController')} <span className="mono">openstack service list | grep -i octavia</span>
       </Empty>
     </>
   );
@@ -49,15 +51,15 @@ export default function LoadBalancers() {
   return (
     <>
       <PageHead title="Load Balancer" count={lbs?.length} onRefresh={load}>
-        <button className="btn primary" onClick={() => setCreating(true)}><Plus size={16} /> Tạo Load Balancer</button>
+        <button className="btn primary" onClick={() => setCreating(true)}><Plus size={16} /> {t('loadBalancers.create')}</button>
       </PageHead>
 
-      {!lbs ? <Empty>Đang tải…</Empty> : lbs.length === 0 ? (
-        <Empty>Chưa có load balancer. Tạo LB để phân phối tải HTTP/TCP vào nhiều máy ảo backend.</Empty>
+      {!lbs ? <Empty>{t('common.loading')}</Empty> : lbs.length === 0 ? (
+        <Empty>{t('loadBalancers.empty')}</Empty>
       ) : (
         <div className="card">
           <table className="tbl">
-            <thead><tr><th>Tên</th><th>Provisioning</th><th>Hoạt động</th><th>VIP</th><th>Floating IP</th><th>Tạo lúc</th><th /></tr></thead>
+            <thead><tr><th>{t('common.name')}</th><th>Provisioning</th><th>{t('loadBalancers.operating')}</th><th>VIP</th><th>Floating IP</th><th>{t('common.createdAt')}</th><th /></tr></thead>
             <tbody>
               {lbs.map((lb) => {
                 const f = fipOf(lb);
@@ -71,10 +73,10 @@ export default function LoadBalancers() {
                     <td className="dim">{fmtDate(lb.created_at)}</td>
                     <td>
                       <ActionsMenu items={[
-                        { label: 'Chi tiết / Members', onClick: () => setDetailFor(lb) },
-                        !f && { label: 'Gắn Floating IP', onClick: () => setFipFor(lb), disabled: lb.provisioning_status !== 'ACTIVE' },
+                        { label: t('loadBalancers.details'), onClick: () => setDetailFor(lb) },
+                        !f && { label: t('instances.floatingIp'), onClick: () => setFipFor(lb), disabled: lb.provisioning_status !== 'ACTIVE' },
                         'divider',
-                        { label: 'Xoá LB (cascade)', danger: true, onClick: () => del(lb) },
+                        { label: t('loadBalancers.delete'), danger: true, onClick: () => del(lb) },
                       ]} />
                     </td>
                   </tr>
@@ -94,6 +96,7 @@ export default function LoadBalancers() {
 
 // ---------- Tạo LB (fully-populated: listener + pool + members + monitor trong 1 call) ----------
 function CreateLbModal({ onClose, onDone }) {
+  const { t } = useI18n();
   const [opts, setOpts] = useState(null);
   const [busy, setBusy] = useState(false);
   const [f, setF] = useState({
@@ -113,8 +116,8 @@ function CreateLbModal({ onClose, onDone }) {
   const toggleMember = (id) => setF((x) => ({ ...x, members: x.members.includes(id) ? x.members.filter((m) => m !== id) : [...x.members, id] }));
 
   async function submit() {
-    if (!f.name.trim()) return toast('Nhập tên LB', 'error');
-    if (!f.members.length) return toast('Chọn ít nhất một máy ảo backend', 'error');
+    if (!f.name.trim()) return toast(t('loadBalancers.nameRequired'), 'error');
+    if (!f.members.length) return toast(t('loadBalancers.memberRequired'), 'error');
     setBusy(true);
     try {
       await api('/lb', {
@@ -126,40 +129,40 @@ function CreateLbModal({ onClose, onDone }) {
           monitor: f.monitor ? { enabled: true, path: f.hm_path, delay: f.hm_delay, timeout: f.hm_timeout, retries: f.hm_retries } : { enabled: false },
         },
       });
-      toast(`Đang tạo LB "${f.name}" — chờ provisioning ACTIVE (1–3 phút)`, 'ok');
+      toast(t('loadBalancers.creatingName', { name: f.name }), 'ok');
       onDone();
     } catch (e) { toast(e.message, 'error'); setBusy(false); }
   }
 
   return (
-    <Modal title="Tạo Load Balancer" onClose={onClose} wide
-      footer={<><button className="btn ghost" onClick={onClose}>Huỷ</button>
-        <button className="btn primary" onClick={submit} disabled={busy || !opts}>{busy ? 'Đang tạo…' : 'Tạo Load Balancer'}</button></>}>
-      {!opts ? <p>Đang tải…</p> : (
+    <Modal title={t('loadBalancers.create')} onClose={onClose} wide
+      footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
+        <button className="btn primary" onClick={submit} disabled={busy || !opts}>{t(busy ? 'instances.creating' : 'loadBalancers.create')}</button></>}>
+      {!opts ? <p>{t('common.loading')}</p> : (
         <div className="form-grid">
-          <Field label="Tên LB"><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="vd: lb-web-app" autoFocus /></Field>
-          <Field label="Subnet cho VIP" hint="IP ảo của LB nằm trong subnet này">
+          <Field label={t('loadBalancers.lbName')}><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="e.g. lb-web-app" autoFocus /></Field>
+          <Field label={t('loadBalancers.vipSubnet')} hint={t('loadBalancers.vipHint')}>
             <select value={f.subnet_id} onChange={(e) => setF({ ...f, subnet_id: e.target.value })}>
               {opts.subnets.map((s) => <option key={s.id} value={s.id}>{s.netName} — {s.cidr}</option>)}
             </select>
           </Field>
-          <Field label="Giao thức" hint={f.protocol === 'HTTPS' ? 'HTTPS passthrough — TLS terminate ở backend' : undefined}>
+          <Field label={t('securityGroups.protocol')} hint={f.protocol === 'HTTPS' ? t('loadBalancers.httpsHint') : undefined}>
             <select value={f.protocol} onChange={(e) => { const pr = e.target.value; setF({ ...f, protocol: pr, port: pr === 'HTTPS' ? 443 : pr === 'HTTP' ? 80 : f.port, member_port: pr === 'HTTPS' ? 443 : pr === 'HTTP' ? 80 : f.member_port }); }}>
               <option value="HTTP">HTTP</option>
               <option value="HTTPS">HTTPS (passthrough)</option>
               <option value="TCP">TCP</option>
             </select>
           </Field>
-          <Field label="Cổng listener"><input type="number" min="1" max="65535" className="mono" value={f.port} onChange={(e) => setF({ ...f, port: e.target.value })} /></Field>
-          <Field label="Thuật toán">
+          <Field label={t('loadBalancers.listenerPort')}><input type="number" min="1" max="65535" className="mono" value={f.port} onChange={(e) => setF({ ...f, port: e.target.value })} /></Field>
+          <Field label={t('loadBalancers.algorithm')}>
             <select value={f.algorithm} onChange={(e) => setF({ ...f, algorithm: e.target.value })}>
               <option value="ROUND_ROBIN">Round robin</option>
               <option value="LEAST_CONNECTIONS">Least connections</option>
               <option value="SOURCE_IP">Source IP (sticky)</option>
             </select>
           </Field>
-          <Field label="Cổng backend" hint="Cổng dịch vụ trên các máy ảo"><input type="number" min="1" max="65535" className="mono" value={f.member_port} onChange={(e) => setF({ ...f, member_port: e.target.value })} /></Field>
-          <Field label="Máy ảo backend">
+          <Field label={t('loadBalancers.backendPort')} hint={t('loadBalancers.backendPortHint')}><input type="number" min="1" max="65535" className="mono" value={f.member_port} onChange={(e) => setF({ ...f, member_port: e.target.value })} /></Field>
+          <Field label={t('loadBalancers.backendInstances')}>
             <div className="check-list">
               {opts.servers.map((s) => (
                 <label key={s.id} className="check-item">
@@ -167,11 +170,11 @@ function CreateLbModal({ onClose, onDone }) {
                   <span>{s.name}</span><span className="dim">({s.status})</span>
                 </label>
               ))}
-              {opts.servers.length === 0 && <p className="dim">Chưa có máy ảo nào.</p>}
+              {opts.servers.length === 0 && <p className="dim">{t('dashboard.noInstances')}</p>}
             </div>
           </Field>
           <Field label="Health monitor">
-            <label className="check-item"><input type="checkbox" checked={f.monitor} onChange={(e) => setF({ ...f, monitor: e.target.checked })} /> Bật kiểm tra sức khoẻ backend</label>
+            <label className="check-item"><input type="checkbox" checked={f.monitor} onChange={(e) => setF({ ...f, monitor: e.target.checked })} /> {t('loadBalancers.enableMonitor')}</label>
             {f.monitor && (
               <div className="row-inline" style={{ marginTop: 8, flexWrap: 'wrap' }}>
                 {f.protocol === 'HTTP' && <span className="row-inline"><span className="dim">Path</span><input className="mono" style={{ width: 90 }} value={f.hm_path} onChange={(e) => setF({ ...f, hm_path: e.target.value })} /></span>}
@@ -189,6 +192,7 @@ function CreateLbModal({ onClose, onDone }) {
 
 // ---------- Chi tiết LB: cây listener → pool → members ----------
 function LbDetailModal({ lb, onClose }) {
+  const { t } = useI18n();
   const [tree, setTree] = useState(null);
   const [servers, setServers] = useState([]);
   const [addSid, setAddSid] = useState('');
@@ -211,16 +215,16 @@ function LbDetailModal({ lb, onClose }) {
     setBusy(true);
     try {
       await api(`/lb/pools/${pool.id}/members`, { method: 'POST', body: { server_id: addSid, port: Number(addPort) } });
-      toast('Đã thêm backend', 'ok');
+      toast(t('loadBalancers.backendAdded'), 'ok');
       await load();
     } catch (e) { toast(e.message, 'error'); }
     setBusy(false);
   }
 
   async function delMember(m) {
-    if (!window.confirm(`Gỡ backend ${m.address}:${m.protocol_port}?`)) return;
+    if (!window.confirm(t('loadBalancers.removeBackendConfirm', { address: `${m.address}:${m.protocol_port}` }))) return;
     setBusy(true);
-    try { await api(`/lb/pools/${pool.id}/members/${m.id}`, { method: 'DELETE' }); toast('Đã gỡ backend', 'ok'); await load(); }
+    try { await api(`/lb/pools/${pool.id}/members/${m.id}`, { method: 'DELETE' }); toast(t('loadBalancers.backendRemoved'), 'ok'); await load(); }
     catch (e) { toast(e.message, 'error'); }
     setBusy(false);
   }
@@ -228,12 +232,12 @@ function LbDetailModal({ lb, onClose }) {
   const serverName = (addr) => servers.find((s) => JSON.stringify(s.addresses || {}).includes(`"${addr}"`))?.name;
 
   return (
-    <Modal title={`${lb.name} — chi tiết`} onClose={onClose} wide>
-      {!tree ? <p>Đang tải…</p> : (
+    <Modal title={t('loadBalancers.detailTitle', { name: lb.name })} onClose={onClose} wide>
+      {!tree ? <p>{t('common.loading')}</p> : (
         <>
           <div className="kv" style={{ marginBottom: 14 }}>
             <div><span>VIP</span><span className="mono">{tree.loadbalancer.vip_address}</span></div>
-            <div><span>Trạng thái</span><span><StatusBadge status={tree.loadbalancer.provisioning_status} /> <StatusBadge status={tree.loadbalancer.operating_status} /></span></div>
+            <div><span>{t('common.status')}</span><span><StatusBadge status={tree.loadbalancer.provisioning_status} /> <StatusBadge status={tree.loadbalancer.operating_status} /></span></div>
             <div><span>Provider</span><span className="dim">{tree.loadbalancer.provider || '—'}</span></div>
           </div>
           {tree.listeners.map((ls) => (
@@ -246,21 +250,21 @@ function LbDetailModal({ lb, onClose }) {
                   <div className="lb-node-head">
                     <b>Pool</b> <span className="dim">{ls.pool.lb_algorithm}</span>
                     {ls.pool.healthmonitor
-                      ? <span className="dim">· monitor {ls.pool.healthmonitor.type}{ls.pool.healthmonitor.url_path ? ` ${ls.pool.healthmonitor.url_path}` : ''} (mỗi {ls.pool.healthmonitor.delay}s)</span>
-                      : <span className="dim">· không có health monitor</span>}
+                      ? <span className="dim">· monitor {ls.pool.healthmonitor.type}{ls.pool.healthmonitor.url_path ? ` ${ls.pool.healthmonitor.url_path}` : ''} ({t('loadBalancers.everySeconds', { seconds: ls.pool.healthmonitor.delay })})</span>
+                      : <span className="dim">· {t('loadBalancers.noMonitor')}</span>}
                   </div>
                   <table className="tbl">
-                    <thead><tr><th>Backend</th><th>Địa chỉ</th><th>Trạng thái</th><th /></tr></thead>
+                    <thead><tr><th>Backend</th><th>{t('loadBalancers.address')}</th><th>{t('common.status')}</th><th /></tr></thead>
                     <tbody>
                       {ls.pool.members.map((m) => (
                         <tr key={m.id}>
                           <td>{m.name || serverName(m.address) || <span className="dim">—</span>}</td>
                           <td className="mono">{m.address}:{m.protocol_port}</td>
                           <td><StatusBadge status={m.operating_status} /></td>
-                          <td><button className="btn sm danger-ghost" disabled={busy} onClick={() => delMember(m)}>Gỡ</button></td>
+                          <td><button className="btn sm danger-ghost" disabled={busy} onClick={() => delMember(m)}>{t('instances.detach')}</button></td>
                         </tr>
                       ))}
-                      {ls.pool.members.length === 0 && <tr><td colSpan="4" className="dim">Chưa có backend nào.</td></tr>}
+                      {ls.pool.members.length === 0 && <tr><td colSpan="4" className="dim">{t('loadBalancers.noBackends')}</td></tr>}
                     </tbody>
                   </table>
                   <div className="row-inline" style={{ marginTop: 10 }}>
@@ -268,10 +272,10 @@ function LbDetailModal({ lb, onClose }) {
                       {servers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
                     <input type="number" className="mono" style={{ width: 84 }} value={addPort} onChange={(e) => setAddPort(e.target.value)} />
-                    <button className="btn sm primary" disabled={busy || !addSid} onClick={addMember}>Thêm backend</button>
+                    <button className="btn sm primary" disabled={busy || !addSid} onClick={addMember}>{t('loadBalancers.addBackend')}</button>
                   </div>
                 </div>
-              ) : <p className="dim">Listener chưa có pool.</p>}
+              ) : <p className="dim">{t('loadBalancers.noPool')}</p>}
             </div>
           ))}
         </>
@@ -282,6 +286,7 @@ function LbDetailModal({ lb, onClose }) {
 
 // ---------- Gắn Floating IP vào VIP ----------
 function LbFipModal({ lb, onClose, onDone }) {
+  const { t } = useI18n();
   const [fips, setFips] = useState(null);
   const [extNets, setExtNets] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -297,35 +302,35 @@ function LbFipModal({ lb, onClose, onDone }) {
     setBusy(true);
     try {
       await api(`/floatingips/${fipId}/associate`, { method: 'POST', body: { port_id: lb.vip_port_id } });
-      toast(`Đã gắn Floating IP vào ${lb.name}`, 'ok');
+      toast(t('instances.fipAttached', { name: lb.name }), 'ok');
       onDone();
     } catch (e) { toast(e.message, 'error'); setBusy(false); }
   }
 
   async function allocateAndAssociate() {
-    if (!extNets.length) return toast('Không có mạng external nào', 'error');
+    if (!extNets.length) return toast(t('instances.noExternalNetwork'), 'error');
     setBusy(true);
     try {
       const d = await api('/floatingips', { method: 'POST', body: { floating_network_id: extNets[0].id } });
       await api(`/floatingips/${d.floatingip.id}/associate`, { method: 'POST', body: { port_id: lb.vip_port_id } });
-      toast(`Đã cấp ${d.floatingip.floating_ip_address} cho ${lb.name}`, 'ok');
+      toast(t('instances.fipAllocated', { ip: d.floatingip.floating_ip_address, name: lb.name }), 'ok');
       onDone();
     } catch (e) { toast(e.message, 'error'); setBusy(false); }
   }
 
   return (
-    <Modal title={`Gắn Floating IP — ${lb.name}`} onClose={onClose}
-      footer={<button className="btn primary" onClick={allocateAndAssociate} disabled={busy}>Cấp IP mới & gắn luôn</button>}>
-      {!fips ? <p>Đang tải…</p> : fips.length === 0 ? (
-        <p className="dim">Không có Floating IP trống. Bấm "Cấp IP mới & gắn luôn".</p>
+    <Modal title={t('instances.fipTitle', { name: lb.name })} onClose={onClose}
+      footer={<button className="btn primary" onClick={allocateAndAssociate} disabled={busy}>{t('instances.allocateAndAttach')}</button>}>
+      {!fips ? <p>{t('common.loading')}</p> : fips.length === 0 ? (
+        <p className="dim">{t('instances.noAvailableFip')}</p>
       ) : (
         <table className="tbl">
-          <thead><tr><th>IP trống</th><th /></tr></thead>
+          <thead><tr><th>{t('instances.availableIp')}</th><th /></tr></thead>
           <tbody>
             {fips.map((f) => (
               <tr key={f.id}>
                 <td className="mono">{f.floating_ip_address}</td>
-                <td><button className="btn sm" disabled={busy} onClick={() => associate(f.id)}>Gắn IP này</button></td>
+                <td><button className="btn sm" disabled={busy} onClick={() => associate(f.id)}>{t('instances.attachThisIp')}</button></td>
               </tr>
             ))}
           </tbody>

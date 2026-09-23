@@ -2,17 +2,22 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Server, HardDrive, Network, Shield, Boxes, BarChart3 } from 'lucide-react';
 import { api } from '../api.js';
+import { useI18n } from '../i18n/react.jsx';
+import LanguageSwitcher from '../components/LanguageSwitcher.jsx';
+import { resources } from '../i18n/index.js';
 
 const FEATURES = [
-  [Server, 'Máy ảo', 'Tạo, resize, console, snapshot'],
-  [HardDrive, 'Ổ đĩa & Backup', 'Volume, snapshot, lịch tự động'],
-  [Network, 'Mạng & Load Balancer', 'VPC, Floating IP, Octavia'],
-  [Boxes, 'Kubernetes', 'Dựng cụm RKE2 một bước'],
-  [BarChart3, 'Billing', 'Số liệu theo project từ Billing service'],
-  [Shield, 'Bảo mật', 'Security group, SSH key, nhật ký'],
+  [Server, 'featureCompute'],
+  [HardDrive, 'featureStorage'],
+  [Network, 'featureNetwork'],
+  [Boxes, 'featureKubernetes'],
+  [BarChart3, 'featureBilling'],
+  [Shield, 'featureSecurity'],
 ];
+const configFields = (message) => message?.match(/\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b/g)?.join(', ') || '';
 
 export default function Login() {
+  const { t, locale } = useI18n();
   const [cfg, setCfg] = useState({ cloudName: 'MBFS Cloud', defaultDomain: 'Default', mock: false, sso: false, websso: false, allowLocal: true });
   const [form, setForm] = useState({ username: '', password: '', domain: '' });
   const [err, setErr] = useState('');
@@ -21,7 +26,7 @@ export default function Login() {
 
   useEffect(() => {
     const q = new URLSearchParams(window.location.search).get('sso_error');
-    if (q) setErr(q);
+    if (q) setErr({ message: q, code: q, fromQuery: true });
     api('/auth/config').then((c) => { setCfg(c); setForm((f) => ({ ...f, domain: c.defaultDomain })); }).catch(() => {});
     api('/auth/session').then(() => nav('/', { replace: true })).catch(() => {});
   }, [nav]);
@@ -34,7 +39,7 @@ export default function Login() {
       await api('/auth/login', { method: 'POST', body: form });
       nav('/', { replace: true });
     } catch (ex) {
-      setErr(ex.message);
+      setErr(ex);
     } finally {
       setBusy(false);
     }
@@ -59,69 +64,72 @@ export default function Login() {
           <div className="hero-brand">
             <img className="hero-logo" src="/asset/logo.png" alt="MobiFone Solutions Cloud" />
           </div>
-          <p className="hero-sub">Cổng tự phục vụ hạ tầng OpenStack — khởi tạo máy chủ, mạng và lưu trữ trong vài phút, không phải chờ đội vận hành.</p>
+          <p className="hero-sub">{t('auth.hero')}</p>
 
           <IsoStack />
 
           <ul className="hero-feats">
-            {FEATURES.map(([Icon, title, desc]) => (
-              <li key={title}>
+            {FEATURES.map(([Icon, key]) => (
+              <li key={key}>
                 <span className="hf-icon"><Icon size={16} /></span>
-                <span className="hf-text"><b>{title}</b><em>{desc}</em></span>
+                <span className="hf-text"><b>{t(`auth.${key}Title`)}</b><em>{t(`auth.${key}Description`)}</em></span>
               </li>
             ))}
           </ul>
         </section>
 
         <section className="login-col">
+          <div className="login-language"><LanguageSwitcher /></div>
           <form className="login-card" onSubmit={submit}>
             <div className="login-brand">
               <img className="login-brand-mark" src="/asset/favicon.png" alt="" aria-hidden="true" />
               <div>
-                <h2>Đăng nhập</h2>
-                <p>Truy cập bảng điều khiển hạ tầng</p>
+                <h2>{t('auth.title')}</h2>
+                <p>{t('auth.subtitle')}</p>
               </div>
             </div>
 
-            {cfg.mock && <div className="login-note">Chế độ demo: nhập tài khoản/mật khẩu bất kỳ để vào.</div>}
-            {err && <div className="login-err">{err}</div>}
-            {cfg.ssoError && <div className="login-err">Cấu hình SSO chưa đủ: {cfg.ssoError}</div>}
-            {cfg.webssoError && <div className="login-err">Cấu hình WebSSO chưa đủ: {cfg.webssoError}</div>}
+            {cfg.mock && <div className="login-note">{t('auth.demoHint')}</div>}
+            {err && <div className="login-err">{err.code && resources.vi[`errors.${err.code}`]
+              ? t(`errors.${err.code}`)
+              : locale === 'en' && (err.fromQuery || /[À-ỹ]/u.test(err.message || '')) ? t('auth.signInFailed') : err.message}</div>}
+            {cfg.ssoError && <div className="login-err">{t('auth.ssoConfigError', { message: locale === 'vi' ? cfg.ssoError : configFields(cfg.ssoError) })}</div>}
+            {cfg.webssoError && <div className="login-err">{t('auth.webssoConfigError', { message: locale === 'vi' ? cfg.webssoError : configFields(cfg.webssoError) })}</div>}
 
             {cfg.websso && (
               <>
-                <a className="btn primary block sso-btn" href="/api/auth/websso/login">{cfg.webssoLabel || 'Đăng nhập bằng SSO'}</a>
-                {cfg.allowLocal && <div className="login-or"><span>hoặc dùng tài khoản OpenStack</span></div>}
+                <a className="btn primary block sso-btn" href="/api/auth/websso/login">{locale === 'en' && /[À-ỹ]/u.test(cfg.webssoLabel || '') ? t('auth.ssoLogin') : cfg.webssoLabel || t('auth.ssoLogin')}</a>
+                {cfg.allowLocal && <div className="login-or"><span>{t('auth.localOption')}</span></div>}
               </>
             )}
 
             {cfg.sso && !cfg.websso && (
               <>
-                <a className="btn primary block sso-btn" href="/api/auth/sso/login">{cfg.ssoLabel || 'Đăng nhập bằng SSO'}</a>
-                {cfg.allowLocal && <div className="login-or"><span>hoặc dùng tài khoản OpenStack</span></div>}
+                <a className="btn primary block sso-btn" href="/api/auth/sso/login">{locale === 'en' && /[À-ỹ]/u.test(cfg.ssoLabel || '') ? t('auth.ssoLogin') : cfg.ssoLabel || t('auth.ssoLogin')}</a>
+                {cfg.allowLocal && <div className="login-or"><span>{t('auth.localOption')}</span></div>}
               </>
             )}
 
             {((!cfg.sso && !cfg.websso) || cfg.allowLocal) && <>
               <label className="field">
-                <span className="field-label">Tài khoản</span>
+                <span className="field-label">{t('auth.username')}</span>
                 <input autoFocus autoComplete="username" value={form.username}
                   onChange={(e) => setForm({ ...form, username: e.target.value })} />
               </label>
               <label className="field">
-                <span className="field-label">Mật khẩu</span>
+                <span className="field-label">{t('auth.password')}</span>
                 <input type="password" autoComplete="current-password" value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })} />
               </label>
               <label className="field">
                 <span className="field-label">Domain</span>
                 <input value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })} />
-                <span className="field-hint">Domain Keystone — giữ nguyên nếu không chắc</span>
+                <span className="field-hint">{t('auth.domainHint')}</span>
               </label>
-              <button className="btn primary block" disabled={busy}>{busy ? 'Đang đăng nhập…' : 'Đăng nhập'}</button>
+              <button className="btn primary block" disabled={busy}>{busy ? t('auth.signingIn') : t('auth.title')}</button>
             </>}
 
-            <p className="login-foot">{(cfg.sso || cfg.websso) && !cfg.allowLocal ? 'Hệ thống chỉ đăng nhập qua SSO.' : 'Dùng tài khoản OpenStack (Keystone) do quản trị viên cấp.'}</p>
+            <p className="login-foot">{(cfg.sso || cfg.websso) && !cfg.allowLocal ? t('auth.ssoOnly') : t('auth.localHint')}</p>
           </form>
           <p className="login-copy">© {new Date().getFullYear()} MobiFone Solutions · Private Cloud Platform</p>
         </section>

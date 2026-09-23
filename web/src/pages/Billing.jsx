@@ -2,41 +2,43 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Activity, Coins, Cpu, HardDrive, MemoryStick, ReceiptText, RefreshCw, Server } from 'lucide-react';
 import { api } from '../api.js';
 import { Empty, Modal, PageHead, StatusBadge } from '../components/ui.jsx';
+import { useI18n } from '../i18n/react.jsx';
 import {
   BILLING_FIELDS, billingValue, displayBillingValue, findInstances, firstBillingValue,
   flattenScalars, formatVnd, hasInstanceCosts, instanceId, labelFor,
 } from '../utils/billing.js';
 
 const SUMMARY_DETAIL_FIELDS = [
-  ['Project Name', BILLING_FIELDS.projectName],
-  ['Project ID', BILLING_FIELDS.projectId],
-  ['Period Start', BILLING_FIELDS.periodStart],
-  ['Period End', BILLING_FIELDS.periodEnd],
-  ['Timezone', BILLING_FIELDS.timezone],
-  ['Currency', BILLING_FIELDS.currency],
-  ['Data Quality Status', BILLING_FIELDS.dataQuality],
+  ['billing.projectName', BILLING_FIELDS.projectName],
+  ['billing.projectId', BILLING_FIELDS.projectId],
+  ['billing.periodStart', BILLING_FIELDS.periodStart],
+  ['billing.periodEnd', BILLING_FIELDS.periodEnd],
+  ['billing.timezone', BILLING_FIELDS.timezone],
+  ['billing.currency', BILLING_FIELDS.currency],
+  ['billing.qualityStatus', BILLING_FIELDS.dataQuality],
 ];
 
 const TECHNICAL_FIELDS = [
-  ['As of', BILLING_FIELDS.asOf],
-  ['Cost complete', BILLING_FIELDS.costComplete],
-  ['Estimated', BILLING_FIELDS.estimated],
-  ['Unrated segments', BILLING_FIELDS.unratedSegments],
-  ['Project unattributed cost', BILLING_FIELDS.unattributedCost, true],
+  ['billing.asOf', BILLING_FIELDS.asOf],
+  ['billing.costComplete', BILLING_FIELDS.costComplete],
+  ['billing.estimated', BILLING_FIELDS.estimated],
+  ['billing.unratedSegments', BILLING_FIELDS.unratedSegments],
+  ['billing.projectUnattributedCost', BILLING_FIELDS.unattributedCost, true],
 ];
 
 const KNOWN_SUMMARY_KEYS = new Set(Object.values(BILLING_FIELDS).flat().map((key) => key.split('.').at(-1)));
 
-function errorMessage(error) {
-  if (error?.status === 403) return 'Bạn không có quyền xem dữ liệu Billing của project hiện tại.';
+function errorMessage(error, t) {
+  if (error?.status === 403) return t('billing.noAccess');
   if (['billing_unavailable', 'billing_timeout', 'billing_invalid_response'].includes(error?.code) || [502, 503, 504].includes(error?.status)) {
-    return 'Billing service hiện không khả dụng. Các chức năng cloud khác vẫn hoạt động bình thường.';
+    return t('billing.unavailable');
   }
-  if (error?.code === 'billing_disabled') return 'Tích hợp Billing đang được tắt bởi quản trị viên.';
-  return error?.message || 'Không thể tải dữ liệu Billing.';
+  if (error?.code === 'billing_disabled') return t('billing.disabled');
+  return error?.message || t('billing.loadFailed');
 }
 
 export default function Billing() {
+  const { t } = useI18n();
   const [summary, setSummary] = useState(null);
   const [instancePayload, setInstancePayload] = useState(null);
   const [instanceDetails, setInstanceDetails] = useState({});
@@ -95,12 +97,12 @@ export default function Billing() {
     <>
       <PageHead title="Billing">
         <button className="btn ghost" onClick={load} disabled={loading}>
-          <RefreshCw className={loading ? 'spin' : ''} size={15} />{loading ? 'Đang tải…' : 'Tải lại'}
+          <RefreshCw className={loading ? 'spin' : ''} size={15} />{t(loading ? 'common.loading' : 'billing.reload')}
         </button>
       </PageHead>
-      <p className="dim page-desc">Billing data provided by the Billing service for the current Keystone project.</p>
+      <p className="dim page-desc">{t('billing.subtitle')}</p>
 
-      {loading && <Empty>Đang tải dữ liệu Billing…</Empty>}
+      {loading && <Empty>{t('billing.loading')}</Empty>}
       {!loading && error && <BillingErrorState error={error} onRetry={load} />}
       {!loading && !error && (
         <div className="billing-page">
@@ -110,10 +112,10 @@ export default function Billing() {
       )}
 
       {detail && (
-        <Modal wide title="Chi tiết Billing máy ảo" onClose={() => { setDetail(null); setDetailError(null); }}
-          footer={<button className="btn ghost" onClick={() => { setDetail(null); setDetailError(null); }}>Đóng</button>}>
-          {detailLoading ? <Empty>Đang tải chi tiết…</Empty>
-            : detailError ? <div className="notice-card err-text">{errorMessage(detailError)}</div>
+        <Modal wide title={t('billing.detailTitle')} onClose={() => { setDetail(null); setDetailError(null); }}
+          footer={<button className="btn ghost" onClick={() => { setDetail(null); setDetailError(null); }}>{t('common.close')}</button>}>
+          {detailLoading ? <Empty>{t('billing.detailLoading')}</Empty>
+            : detailError ? <div className="notice-card err-text">{errorMessage(detailError, t)}</div>
               : <Detail payload={detail} />}
         </Modal>
       )}
@@ -122,23 +124,24 @@ export default function Billing() {
 }
 
 function BillingSummary({ payload, instances }) {
+  const { t } = useI18n();
   const apiVmCount = billingValue(payload, BILLING_FIELDS.vmCount);
   const apiActiveCount = billingValue(payload, BILLING_FIELDS.activeVmCount);
   const activeFromList = instances.filter((row) => String(billingValue(row, BILLING_FIELDS.status) || '').toUpperCase() === 'ACTIVE').length;
   const metrics = [
-    { label: 'Total Cost', value: formatVnd(billingValue(payload, BILLING_FIELDS.totalCost)), icon: Coins, primary: true },
-    { label: 'VM Count', value: displayBillingValue(apiVmCount ?? instances.length), icon: Server },
-    { label: 'Active VM Count', value: displayBillingValue(apiActiveCount ?? activeFromList), icon: Activity },
-    { label: 'CPU Cost', value: formatVnd(billingValue(payload, BILLING_FIELDS.cpuCost)), icon: Cpu, money: true },
-    { label: 'RAM Cost', value: formatVnd(billingValue(payload, BILLING_FIELDS.ramCost)), icon: MemoryStick, money: true },
-    { label: 'SSD Cost', value: formatVnd(billingValue(payload, BILLING_FIELDS.ssdCost)), icon: HardDrive, money: true },
+    { label: t('billing.totalCost'), value: formatVnd(billingValue(payload, BILLING_FIELDS.totalCost)), icon: Coins, primary: true },
+    { label: t('billing.vmCount'), value: displayBillingValue(apiVmCount ?? instances.length), icon: Server },
+    { label: t('billing.activeVmCount'), value: displayBillingValue(apiActiveCount ?? activeFromList), icon: Activity },
+    { label: t('billing.cpuCost'), value: formatVnd(billingValue(payload, BILLING_FIELDS.cpuCost)), icon: Cpu, money: true },
+    { label: t('billing.ramCost'), value: formatVnd(billingValue(payload, BILLING_FIELDS.ramCost)), icon: MemoryStick, money: true },
+    { label: t('billing.ssdCost'), value: formatVnd(billingValue(payload, BILLING_FIELDS.ssdCost)), icon: HardDrive, money: true },
   ];
   const unattributed = billingValue(payload, BILLING_FIELDS.unattributedCost);
   const additional = flattenScalars(payload).filter(([key]) => !KNOWN_SUMMARY_KEYS.has(key.split('.').at(-1)));
 
   return (
     <section aria-labelledby="billing-summary-title">
-      <h3 className="billing-section-title" id="billing-summary-title">Project billing summary</h3>
+      <h3 className="billing-section-title" id="billing-summary-title">{t('billing.summaryTitle')}</h3>
       <div className="billing-metrics">
         {metrics.map(({ label, value, icon: Icon, primary, money }) => (
           <div className={`billing-metric ${primary ? 'billing-metric-primary' : ''}`} key={label}>
@@ -150,24 +153,24 @@ function BillingSummary({ payload, instances }) {
 
       {unattributed !== undefined && (
         <div className="billing-unattributed">
-          <span>Project-level unattributed cost</span>
+          <span>{t('billing.unattributedCost')}</span>
           <strong>{formatVnd(unattributed)}</strong>
-          <small>Included as reported by Billing; the authoritative project total is not derived from VM rows.</small>
+          <small>{t('billing.unattributedHint')}</small>
         </div>
       )}
 
       <div className="card billing-info-card">
-        <div className="card-head"><div><h4>Billing information</h4><span className="dim">Project and billing-period context</span></div></div>
+        <div className="card-head"><div><h4>{t('billing.information')}</h4><span className="dim">{t('billing.periodContext')}</span></div></div>
         <div className="billing-info-grid">
-          {SUMMARY_DETAIL_FIELDS.map(([title, aliases]) => (
-            <InfoValue key={title} title={title} value={billingValue(payload, aliases)} quality={title === 'Data Quality Status'} />
+          {SUMMARY_DETAIL_FIELDS.map(([key, aliases]) => (
+            <InfoValue key={key} title={t(key)} value={billingValue(payload, aliases)} quality={key === 'billing.qualityStatus'} />
           ))}
         </div>
         <details className="billing-technical">
-          <summary>Technical details</summary>
+          <summary>{t('billing.technicalDetails')}</summary>
           <div className="billing-technical-grid">
-            {TECHNICAL_FIELDS.map(([title, aliases, money]) => (
-              <InfoValue key={title} title={title} value={billingValue(payload, aliases)} money={money} />
+            {TECHNICAL_FIELDS.map(([key, aliases, money]) => (
+              <InfoValue key={key} title={t(key)} value={billingValue(payload, aliases)} money={money} />
             ))}
             {additional.map(([key, value]) => <InfoValue key={key} title={labelFor(key)} value={value} fieldKey={key} />)}
           </div>
@@ -196,19 +199,20 @@ function ramGib(row, details) {
 }
 
 function InstanceTable({ instances, details, costsLoading, onOpen }) {
+  const { t } = useI18n();
   return (
     <section className="card billing-instances" aria-labelledby="instance-billing-title">
-      <div className="card-head"><div><h4 id="instance-billing-title">Instance billing</h4><span className="dim">Billing values reported for each VM</span></div><span className="billing-count">{instances.length} VM</span></div>
-      {!instances.length ? <Empty>Không có bản ghi Billing máy ảo trong project hiện tại.</Empty> : (
+      <div className="card-head"><div><h4 id="instance-billing-title">{t('billing.instanceTitle')}</h4><span className="dim">{t('billing.instanceHint')}</span></div><span className="billing-count">{instances.length} VM</span></div>
+      {!instances.length ? <Empty>{t('billing.instanceEmpty')}</Empty> : (
         <div className="table-scroll"><table className="tbl billing-table">
-          <thead><tr><th>Name</th><th>Instance ID</th><th>Status</th><th className="num">vCPU</th><th className="num">RAM GiB</th><th className="num">SSD GiB</th><th className="num">CPU Cost</th><th className="num">RAM Cost</th><th className="num">SSD Cost</th><th className="num">Total Cost</th><th>Action</th></tr></thead>
+          <thead><tr><th>{t('common.name')}</th><th>{t('billing.instanceId')}</th><th>{t('common.status')}</th><th className="num">vCPU</th><th className="num">{t('billing.ramGib')}</th><th className="num">{t('billing.ssdGib')}</th><th className="num">{t('billing.cpuCost')}</th><th className="num">{t('billing.ramCost')}</th><th className="num">{t('billing.ssdCost')}</th><th className="num">{t('billing.totalCost')}</th><th>{t('common.action')}</th></tr></thead>
           <tbody>{instances.map((row, index) => {
             const id = instanceId(row);
             const detailPayload = id ? details[id] : null;
             const sources = [detailPayload, row];
             const loadingCost = id && costsLoading.has(id);
             const money = (aliases) => loadingCost && firstBillingValue(sources, aliases) === undefined
-              ? <span className="billing-cost-loading">Đang tải…</span>
+              ? <span className="billing-cost-loading">{t('common.loading')}</span>
               : formatVnd(firstBillingValue(sources, aliases));
             return <tr key={id || index}>
               <td><strong>{displayBillingValue(resourceValue(row, detailPayload, BILLING_FIELDS.name))}</strong></td>
@@ -221,7 +225,7 @@ function InstanceTable({ instances, details, costsLoading, onOpen }) {
               <td className="num billing-money-cell">{money(BILLING_FIELDS.ramCost)}</td>
               <td className="num billing-money-cell">{money(BILLING_FIELDS.ssdCost)}</td>
               <td className="num billing-total-cell">{money(BILLING_FIELDS.totalCost)}</td>
-              <td><button className="btn sm ghost" disabled={!id} onClick={() => onOpen(row)}><ReceiptText size={14} /> Chi tiết</button></td>
+              <td><button className="btn sm ghost" disabled={!id} onClick={() => onOpen(row)}><ReceiptText size={14} /> {t('common.details')}</button></td>
             </tr>;
           })}</tbody>
         </table></div>
@@ -231,12 +235,14 @@ function InstanceTable({ instances, details, costsLoading, onOpen }) {
 }
 
 function Detail({ payload }) {
+  const { t } = useI18n();
   const fields = flattenScalars(payload);
-  if (!fields.length) return <Empty>Billing service không trả về trường chi tiết nào.</Empty>;
+  if (!fields.length) return <Empty>{t('billing.detailEmpty')}</Empty>;
   return <div className="detail-grid">{fields.map(([key, value]) => <div key={key}><span>{labelFor(key)}</span><b className="mono">{displayBillingValue(value, key)}</b></div>)}</div>;
 }
 
 function BillingErrorState({ error, onRetry }) {
-  return <div className="card notice-card"><b>{errorMessage(error)}</b>{error?.requestId && <p className="dim mono">Request ID: {error.requestId}</p>}
-    <button className="btn ghost" onClick={onRetry}>Thử lại</button></div>;
+  const { t } = useI18n();
+  return <div className="card notice-card"><b>{errorMessage(error, t)}</b>{error?.requestId && <p className="dim mono">Request ID: {error.requestId}</p>}
+    <button className="btn ghost" onClick={onRetry}>{t('common.retry')}</button></div>;
 }

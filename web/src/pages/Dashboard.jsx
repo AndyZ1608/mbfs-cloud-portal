@@ -3,8 +3,10 @@ import { Link } from 'react-router-dom';
 import { api, fmtDate, ramGB, serverIps } from '../api.js';
 import { StatusBadge, UsageBar, Empty } from '../components/ui.jsx';
 import { FileCode } from 'lucide-react';
+import { useI18n } from '../i18n/react.jsx';
 
 export default function Dashboard() {
+  const { t } = useI18n();
   const [limits, setLimits] = useState(null);
   const [servers, setServers] = useState(null);
   const [err, setErr] = useState('');
@@ -15,8 +17,8 @@ export default function Dashboard() {
       .catch((e) => setErr(e.message));
   }, []);
 
-  if (err) return <Empty>Không tải được dữ liệu: {err}</Empty>;
-  if (!limits || !servers) return <Empty>Đang tải…</Empty>;
+  if (err) return <Empty>{t('common.loadFailed', { message: err })}</Empty>;
+  if (!limits || !servers) return <Empty>{t('common.loading')}</Empty>;
 
   const c = limits.compute || {};
   const v = limits.volume || {};
@@ -26,27 +28,27 @@ export default function Dashboard() {
 
   return (
     <>
-      <div className="page-head"><h2>Tổng quan</h2>
+      <div className="page-head"><h2>{t('navigation.overview')}</h2>
         <div className="page-actions">
-          <a className="btn ghost" href="/api/export/terraform"><FileCode size={15} /> Xuất Terraform</a>
+          <a className="btn ghost" href="/api/export/terraform"><FileCode size={15} /> {t('dashboard.exportTerraform')}</a>
         </div>
       </div>
 
       <div className="grid-cards">
         <div className="card">
-          <h4>Hạn ngạch tính toán</h4>
-          <UsageBar label="Máy ảo" used={c.totalInstancesUsed ?? 0} max={c.maxTotalInstances ?? 0} />
+          <h4>{t('dashboard.computeQuota')}</h4>
+          <UsageBar label={t('navigation.instances')} used={c.totalInstancesUsed ?? 0} max={c.maxTotalInstances ?? 0} />
           <UsageBar label="vCPU" used={c.totalCoresUsed ?? 0} max={c.maxTotalCores ?? 0} />
           <UsageBar label="RAM" used={c.totalRAMUsed ?? 0} max={c.maxTotalRAMSize ?? 0} render={(x) => ramGB(x)} />
         </div>
         <div className="card">
-          <h4>Hạn ngạch lưu trữ</h4>
-          <UsageBar label="Dung lượng volume" used={v.totalGigabytesUsed ?? 0} max={v.maxTotalVolumeGigabytes ?? 0} unit="GB" />
-          <UsageBar label="Số volume" used={v.totalVolumesUsed ?? 0} max={v.maxTotalVolumes ?? 0} />
+          <h4>{t('dashboard.storageQuota')}</h4>
+          <UsageBar label={t('dashboard.volumeCapacity')} used={v.totalGigabytesUsed ?? 0} max={v.maxTotalVolumeGigabytes ?? 0} unit="GB" />
+          <UsageBar label={t('dashboard.volumeCount')} used={v.totalVolumesUsed ?? 0} max={v.maxTotalVolumes ?? 0} />
           {v.maxTotalSnapshots != null && <UsageBar label="Snapshot" used={v.totalSnapshotsUsed ?? 0} max={v.maxTotalSnapshots} />}
         </div>
         <div className="card">
-          <h4>Hạn ngạch mạng</h4>
+          <h4>{t('dashboard.networkQuota')}</h4>
           {n.floatingip ? (
             <>
               <UsageBar label="Floating IP" used={n.floatingip.used ?? 0} max={n.floatingip.limit ?? 0} />
@@ -54,13 +56,13 @@ export default function Dashboard() {
               {n.security_group && <UsageBar label="Security group" used={n.security_group.used ?? 0} max={n.security_group.limit ?? 0} />}
             </>
           ) : (
-            <p className="dim">Neutron không hỗ trợ quota chi tiết trên phiên bản này.</p>
+            <p className="dim">{t('dashboard.neutronQuotaUnavailable')}</p>
           )}
         </div>
         <div className="card">
-          <h4>Trạng thái máy ảo</h4>
+          <h4>{t('dashboard.instanceStatus')}</h4>
           <div className="status-chips">
-            {Object.keys(byStatus).length === 0 && <p className="dim">Chưa có máy ảo nào.</p>}
+            {Object.keys(byStatus).length === 0 && <p className="dim">{t('dashboard.noInstances')}</p>}
             {Object.entries(byStatus).map(([st, cnt]) => (
               <div key={st} className="status-chip"><StatusBadge status={st} /><b>{cnt}</b></div>
             ))}
@@ -70,14 +72,14 @@ export default function Dashboard() {
 
       <div className="card">
         <div className="card-head">
-          <h4>Máy ảo mới tạo</h4>
-          <Link to="/instances" className="link">Xem tất cả →</Link>
+          <h4>{t('dashboard.recentInstances')}</h4>
+          <Link to="/instances" className="link">{t('dashboard.viewAll')}</Link>
         </div>
         {recent.length === 0 ? (
-          <Empty>Chưa có máy ảo. Vào mục <Link to="/instances" className="link">Máy ảo</Link> để tạo mới.</Empty>
+          <Empty>{t('dashboard.noInstancesAction')} <Link to="/instances" className="link">{t('navigation.instances')}</Link>.</Empty>
         ) : (
           <table className="tbl">
-            <thead><tr><th>Tên</th><th>Trạng thái</th><th>Địa chỉ IP</th><th>Cấu hình</th><th>Tạo lúc</th></tr></thead>
+            <thead><tr><th>{t('common.name')}</th><th>{t('common.status')}</th><th>{t('common.ipAddress')}</th><th>{t('instances.flavor')}</th><th>{t('common.createdAt')}</th></tr></thead>
             <tbody>
               {recent.map((s) => (
                 <tr key={s.id}>

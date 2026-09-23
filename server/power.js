@@ -42,7 +42,7 @@ async function fire(rule) {
   rule.last_run = { ts: new Date().toISOString(), status: 'ok', message: rule.action === 'stop' ? 'Đã tắt máy' : 'Đã bật máy' };
   save();
   record({ user: 'portal-task', project: { id: rule.project_id, name: rule.project_name }, method: 'JOB', path: `/power/${rule.action}/${rule.server_name}`, status: 200, ms: 0 });
-  pushNotice({ project_id: rule.project_id, project_name: rule.project_name, level: 'info', title: `${rule.action === 'stop' ? 'Đã tắt' : 'Đã bật'} máy theo lịch: ${rule.server_name}`, link: '/power' });
+  pushNotice({ project_id: rule.project_id, project_name: rule.project_name, level: 'info', title: `${rule.action === 'stop' ? 'Đã tắt' : 'Đã bật'} máy theo lịch: ${rule.server_name}`, link: '/power', code: rule.action === 'stop' ? 'powerStopped' : 'powerStarted', values: { name: rule.server_name } });
 }
 
 async function tick() {
@@ -63,7 +63,7 @@ async function tick() {
     } catch (e) {
       r.last_run = { ts: new Date().toISOString(), status: 'error', message: e.message };
       save();
-      pushNotice({ project_id: r.project_id, project_name: r.project_name, level: 'error', title: `Lịch ${r.action === 'stop' ? 'tắt' : 'bật'} máy lỗi: ${r.server_name}`, detail: e.message, link: '/power' });
+      pushNotice({ project_id: r.project_id, project_name: r.project_name, level: 'error', title: `Lịch ${r.action === 'stop' ? 'tắt' : 'bật'} máy lỗi: ${r.server_name}`, detail: e.message, link: '/power', code: r.action === 'stop' ? 'powerStopFailed' : 'powerStartFailed', values: { name: r.server_name } });
       console.warn(`[power] LỖI ${r.server_name}: ${e.message}`);
     }
   }

@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { MoreVertical, X, Loader2 } from 'lucide-react';
+import { useI18n } from '../i18n/react.jsx';
+import { intlLocale } from '../i18n/index.js';
 
 // ---------- Toast ----------
 export function toast(msg, type = 'info') {
@@ -31,7 +33,7 @@ const TONES = {
   ACTIVE: 'ok', available: 'ok', active: 'ok', UP: 'ok',
   SHUTOFF: 'muted', DOWN: 'muted', stopped: 'muted',
   ERROR: 'err', error: 'err', error_deleting: 'err',
-  BUILD: 'warn', REBOOT: 'warn', HARD_REBOOT: 'warn', RESIZE: 'warn', VERIFY_RESIZE: 'warn',
+  BUILD: 'warn', REBOOT: 'warn', HARD_REBOOT: 'warn', RESIZE: 'warn', RESIZE_MIGRATING: 'warn', VERIFY_RESIZE: 'warn',
   creating: 'warn', attaching: 'warn', detaching: 'warn', extending: 'warn', deleting: 'warn', queued: 'warn', saving: 'warn',
   'in-use': 'info', PAUSED: 'info', SHELVED: 'info', SHELVED_OFFLOADED: 'info',
   ONLINE: 'ok', OFFLINE: 'muted', DEGRADED: 'warn', NO_MONITOR: 'info',
@@ -46,7 +48,7 @@ export function StatusBadge({ status }) {
 export function UsageBar({ label, used, max, unit = '', render }) {
   const pct = max > 0 ? Math.min(100, Math.round((used / max) * 100)) : 0;
   const tone = pct >= 90 ? 'err' : pct >= 75 ? 'warn' : 'ok';
-  const show = render || ((v) => `${v}`);
+  const show = render || ((v) => new Intl.NumberFormat(intlLocale()).format(v));
   return (
     <div className="usage">
       <div className="usage-top">
@@ -60,6 +62,7 @@ export function UsageBar({ label, used, max, unit = '', render }) {
 
 // ---------- Modal ----------
 export function Modal({ title, onClose, children, footer, wide, className = '' }) {
+  const { t } = useI18n();
   useEffect(() => {
     const esc = (e) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', esc);
@@ -70,7 +73,7 @@ export function Modal({ title, onClose, children, footer, wide, className = '' }
       <div className={`modal ${wide ? 'modal-wide' : ''} ${className}`.trim()} role="dialog" aria-modal="true">
         <div className="modal-head">
           <h3>{title}</h3>
-          <button className="icon-btn" onClick={onClose} aria-label="Đóng"><X size={18} /></button>
+          <button className="icon-btn" onClick={onClose} aria-label={t('common.close')}><X size={18} /></button>
         </div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
@@ -92,6 +95,7 @@ export function Field({ label, hint, children }) {
 
 // ---------- Actions menu (⋮) ----------
 export function ActionsMenu({ items }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -101,7 +105,7 @@ export function ActionsMenu({ items }) {
   }, []);
   return (
     <div className="menu-wrap" ref={ref}>
-      <button className="icon-btn" onClick={() => setOpen((o) => !o)} aria-label="Hành động"><MoreVertical size={16} /></button>
+      <button className="icon-btn" onClick={() => setOpen((o) => !o)} aria-label={t('common.action')}><MoreVertical size={16} /></button>
       {open && (
         <div className="menu">
           {items.filter(Boolean).map((it, i) =>
@@ -128,11 +132,12 @@ export function Empty({ children }) {
 }
 
 export function PageHead({ title, count, onRefresh, children }) {
+  const { t } = useI18n();
   return (
     <div className="page-head">
       <h2>{title} {count != null && <span className="count">{count}</span>}</h2>
       <div className="page-actions">
-        {onRefresh && <button className="btn ghost" onClick={onRefresh}>Làm mới</button>}
+        {onRefresh && <button className="btn ghost" onClick={onRefresh}>{t('common.refresh')}</button>}
         {children}
       </div>
     </div>

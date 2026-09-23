@@ -2,8 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Plus, ArrowLeft, Download, Link2 } from 'lucide-react';
 import { api, fmtBytes, fmtDate } from '../api.js';
 import { Modal, Field, ActionsMenu, toast, Empty, PageHead } from '../components/ui.jsx';
+import { useI18n } from '../i18n/react.jsx';
 
 export default function ObjectStorage() {
+  const { t } = useI18n();
   const [available, setAvailable] = useState(null);
   const [containers, setContainers] = useState(null);
   const [open, setOpen] = useState(null); // container đang mở
@@ -18,18 +20,18 @@ export default function ObjectStorage() {
   }, []);
 
   async function del(c) {
-    if (!window.confirm(`Xoá container "${c.name}"? Phải xoá hết object bên trong trước.`)) return;
-    try { await api(`/object/containers/${encodeURIComponent(c.name)}`, { method: 'DELETE' }); toast('Đã xoá container', 'ok'); load(); }
+    if (!window.confirm(t('objectStorage.deleteContainerConfirm', { name: c.name }))) return;
+    try { await api(`/object/containers/${encodeURIComponent(c.name)}`, { method: 'DELETE' }); toast(t('objectStorage.containerDeleted'), 'ok'); load(); }
     catch (e) { toast(e.message, 'error'); }
   }
 
-  if (available === null) return <Empty>Đang kiểm tra Object Storage…</Empty>;
+  if (available === null) return <Empty>{t('objectStorage.checking')}</Empty>;
   if (available === false) return (
     <>
       <PageHead title="Object Storage" />
       <Empty>
-        Cụm chưa có dịch vụ <b>object-store</b> (Swift hoặc Ceph RGW).<br />
-        Kiểm tra trên controller: <span className="mono">openstack service list | grep object-store</span>
+        {t('objectStorage.unavailable')} <b>object-store</b> (Swift/Ceph RGW).<br />
+        {t('objectStorage.checkController')} <span className="mono">openstack service list | grep object-store</span>
       </Empty>
     </>
   );
@@ -38,16 +40,16 @@ export default function ObjectStorage() {
   return (
     <>
       <PageHead title="Object Storage" count={containers?.length} onRefresh={load}>
-        <button className="btn primary" onClick={() => setCreating(true)}><Plus size={16} /> Tạo container</button>
+        <button className="btn primary" onClick={() => setCreating(true)}><Plus size={16} /> {t('objectStorage.createContainer')}</button>
       </PageHead>
-      <p className="dim page-desc">Lưu trữ tệp theo chuẩn Swift/S3 — phù hợp cho backup, log, file tĩnh. Có thể tạo link chia sẻ tạm thời cho từng file.</p>
+      <p className="dim page-desc">{t('objectStorage.description')}</p>
 
-      {!containers ? <Empty>Đang tải…</Empty> : containers.length === 0 ? (
-        <Empty>Chưa có container nào.</Empty>
+      {!containers ? <Empty>{t('common.loading')}</Empty> : containers.length === 0 ? (
+        <Empty>{t('objectStorage.empty')}</Empty>
       ) : (
         <div className="card">
           <table className="tbl">
-            <thead><tr><th>Container</th><th>Số object</th><th>Dung lượng</th><th /></tr></thead>
+            <thead><tr><th>Container</th><th>{t('objectStorage.objectCount')}</th><th>{t('volumes.capacity')}</th><th /></tr></thead>
             <tbody>
               {containers.map((c) => (
                 <tr key={c.name}>
@@ -55,9 +57,9 @@ export default function ObjectStorage() {
                   <td className="mono">{c.count}</td>
                   <td className="mono">{fmtBytes(c.bytes)}</td>
                   <td><ActionsMenu items={[
-                    { label: 'Mở', onClick: () => setOpen(c) },
+                    { label: t('objectStorage.open'), onClick: () => setOpen(c) },
                     'divider',
-                    { label: 'Xoá container', danger: true, onClick: () => del(c) },
+                    { label: t('objectStorage.deleteContainer'), danger: true, onClick: () => del(c) },
                   ]} /></td>
                 </tr>
               ))}
@@ -71,29 +73,31 @@ export default function ObjectStorage() {
 }
 
 function CreateContainer({ onClose, onDone }) {
+  const { t } = useI18n();
   const [f, setF] = useState({ name: '', public: false });
   const [busy, setBusy] = useState(false);
   async function submit() {
-    if (!f.name.trim()) return toast('Nhập tên container', 'error');
+    if (!f.name.trim()) return toast(t('objectStorage.nameRequired'), 'error');
     setBusy(true);
-    try { await api('/object/containers', { method: 'POST', body: f }); toast('Đã tạo container', 'ok'); onDone(); }
+    try { await api('/object/containers', { method: 'POST', body: f }); toast(t('objectStorage.containerCreated'), 'ok'); onDone(); }
     catch (e) { toast(e.message, 'error'); setBusy(false); }
   }
   return (
-    <Modal title="Tạo container" onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Huỷ</button>
-        <button className="btn primary" onClick={submit} disabled={busy}>Tạo</button></>}>
-      <Field label="Tên container"><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="vd: backups" autoFocus /></Field>
+    <Modal title={t('objectStorage.createContainer')} onClose={onClose}
+      footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
+        <button className="btn primary" onClick={submit} disabled={busy}>{t('common.create')}</button></>}>
+      <Field label={t('objectStorage.containerName')}><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="e.g. backups" autoFocus /></Field>
       <label className="check-item">
         <input type="checkbox" checked={f.public} onChange={(e) => setF({ ...f, public: e.target.checked })} />
-        Cho phép đọc công khai (ai có link đều tải được)
+        {t('objectStorage.publicRead')}
       </label>
-      <p className="warn-text">{f.public ? 'Cân nhắc: mọi người trên mạng có thể đọc toàn bộ file trong container này.' : ''}</p>
+      <p className="warn-text">{f.public ? t('objectStorage.publicWarning') : ''}</p>
     </Modal>
   );
 }
 
 function Browser({ container, onBack }) {
+  const { t } = useI18n();
   const [objects, setObjects] = useState(null);
   const [progress, setProgress] = useState(null);
   const [share, setShare] = useState(null);
@@ -116,19 +120,19 @@ function Browser({ container, onBack }) {
     xhr.upload.onprogress = (ev) => ev.lengthComputable && setProgress(Math.round((ev.loaded / ev.total) * 100));
     xhr.onload = () => {
       setProgress(null);
-      if (xhr.status >= 200 && xhr.status < 300) { toast(`Đã tải lên ${file.name}`, 'ok'); load(); }
-      else toast(`Upload lỗi HTTP ${xhr.status}`, 'error');
+      if (xhr.status >= 200 && xhr.status < 300) { toast(t('objectStorage.uploaded', { name: file.name }), 'ok'); load(); }
+      else toast(t('images.uploadHttpError', { status: xhr.status }), 'error');
     };
-    xhr.onerror = () => { setProgress(null); toast('Upload thất bại', 'error'); };
+    xhr.onerror = () => { setProgress(null); toast(t('objectStorage.uploadFailed'), 'error'); };
     xhr.send(file);
     if (fileRef.current) fileRef.current.value = '';
   }
 
   async function del(o) {
-    if (!window.confirm(`Xoá "${o.name}"?`)) return;
+    if (!window.confirm(t('objectStorage.deleteObjectConfirm', { name: o.name }))) return;
     try {
       await api(`/object/containers/${encodeURIComponent(container.name)}/objects/${o.name.split('/').map(encodeURIComponent).join('/')}`, { method: 'DELETE' });
-      toast('Đã xoá', 'ok'); load();
+      toast(t('objectStorage.deleted'), 'ok'); load();
     } catch (e) { toast(e.message, 'error'); }
   }
 
@@ -142,20 +146,20 @@ function Browser({ container, onBack }) {
   return (
     <>
       <PageHead title={`Object Storage · ${container.name}`} count={objects?.length} onRefresh={load}>
-        <button className="btn ghost" onClick={onBack}><ArrowLeft size={15} /> Danh sách container</button>
+        <button className="btn ghost" onClick={onBack}><ArrowLeft size={15} /> {t('objectStorage.containerList')}</button>
         <input type="file" ref={fileRef} onChange={upload} style={{ display: 'none' }} />
         <button className="btn primary" onClick={() => fileRef.current?.click()} disabled={progress !== null}>
-          {progress !== null ? `Đang tải lên ${progress}%` : 'Tải file lên'}
+          {progress !== null ? t('objectStorage.uploading', { progress }) : t('objectStorage.uploadFile')}
         </button>
       </PageHead>
       {progress !== null && <div className="progress-track"><div className="progress-fill" style={{ width: progress + '%' }} /></div>}
 
-      {!objects ? <Empty>Đang tải…</Empty> : objects.length === 0 ? (
-        <Empty>Container trống. Bấm "Tải file lên" để bắt đầu.</Empty>
+      {!objects ? <Empty>{t('common.loading')}</Empty> : objects.length === 0 ? (
+        <Empty>{t('objectStorage.noObjects')}</Empty>
       ) : (
         <div className="card">
           <table className="tbl">
-            <thead><tr><th>Tên file</th><th>Kích thước</th><th>Loại</th><th>Sửa lần cuối</th><th /></tr></thead>
+            <thead><tr><th>{t('objectStorage.fileName')}</th><th>{t('objectStorage.size')}</th><th>{t('networks.type')}</th><th>{t('objectStorage.modified')}</th><th /></tr></thead>
             <tbody>
               {objects.map((o) => (
                 <tr key={o.name}>
@@ -164,9 +168,9 @@ function Browser({ container, onBack }) {
                   <td className="dim mono">{o.content_type}</td>
                   <td className="dim">{fmtDate(o.last_modified)}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
-                    <a className="btn sm" href={`/api/object/containers/${encodeURIComponent(container.name)}/objects/${o.name.split('/').map(encodeURIComponent).join('/')}`}><Download size={14} /> Tải</a>{' '}
-                    <button className="btn sm ghost" onClick={() => tempUrl(o)}><Link2 size={14} /> Link chia sẻ</button>{' '}
-                    <button className="btn sm danger-ghost" onClick={() => del(o)}>Xoá</button>
+                    <a className="btn sm" href={`/api/object/containers/${encodeURIComponent(container.name)}/objects/${o.name.split('/').map(encodeURIComponent).join('/')}`}><Download size={14} /> {t('objectStorage.download')}</a>{' '}
+                    <button className="btn sm ghost" onClick={() => tempUrl(o)}><Link2 size={14} /> {t('objectStorage.shareLink')}</button>{' '}
+                    <button className="btn sm danger-ghost" onClick={() => del(o)}>{t('common.delete')}</button>
                   </td>
                 </tr>
               ))}
@@ -176,9 +180,9 @@ function Browser({ container, onBack }) {
       )}
 
       {share && (
-        <Modal title={`Link chia sẻ — ${share.name}`} onClose={() => setShare(null)}
-          footer={<button className="btn primary" onClick={() => { navigator.clipboard?.writeText(share.url); toast('Đã copy link', 'ok'); }}>Copy link</button>}>
-          <p>Link tải trực tiếp, hết hạn sau <b>{share.hours} giờ</b> — ai có link đều tải được, không cần đăng nhập.</p>
+        <Modal title={t('objectStorage.shareTitle', { name: share.name })} onClose={() => setShare(null)}
+          footer={<button className="btn primary" onClick={() => { navigator.clipboard?.writeText(share.url); toast(t('objectStorage.copied'), 'ok'); }}>{t('objectStorage.copyLink')}</button>}>
+          <p>{t('objectStorage.shareDescription', { hours: share.hours })}</p>
           <p className="mono wrap">{share.url}</p>
         </Modal>
       )}

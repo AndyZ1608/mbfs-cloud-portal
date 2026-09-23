@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
-import { api, fmtDate, fmtBytes } from '../api.js';
+import { api, apiErrorMessage, fmtDate, fmtBytes } from '../api.js';
 import { Modal, Field, StatusBadge, toast, Empty, PageHead } from '../components/ui.jsx';
+import { useI18n } from '../i18n/react.jsx';
 
 export default function Images() {
+  const { t } = useI18n();
   const [images, setImages] = useState(null);
   const [uploading, setUploading] = useState(false);
 
@@ -14,8 +16,8 @@ export default function Images() {
   useEffect(() => { load(); }, []);
 
   async function del(img) {
-    if (!window.confirm(`Xoá image "${img.name}"?`)) return;
-    try { await api(`/images/${img.id}`, { method: 'DELETE' }); toast('Đã xoá image', 'ok'); load(); }
+    if (!window.confirm(t('images.deleteConfirm', { name: img.name }))) return;
+    try { await api(`/images/${img.id}`, { method: 'DELETE' }); toast(t('images.deleted'), 'ok'); load(); }
     catch (e) { toast(e.message, 'error'); }
   }
 
@@ -23,15 +25,15 @@ export default function Images() {
 
   return (
     <>
-      <PageHead title="Images" count={images?.length} onRefresh={load}>
-        <button className="btn primary" onClick={() => setUploading(true)}><Plus size={16} /> Upload image</button>
+      <PageHead title={t('navigation.images')} count={images?.length} onRefresh={load}>
+        <button className="btn primary" onClick={() => setUploading(true)}><Plus size={16} /> {t('images.upload')}</button>
       </PageHead>
-      <p className="dim page-desc">Image hệ điều hành và snapshot máy ảo. Image upload qua portal ở chế độ Private (chỉ project này thấy).</p>
+      <p className="dim page-desc">{t('images.description')}</p>
 
-      {!images ? <Empty>Đang tải…</Empty> : images.length === 0 ? <Empty>Chưa có image nào.</Empty> : (
+      {!images ? <Empty>{t('common.loading')}</Empty> : images.length === 0 ? <Empty>{t('images.empty')}</Empty> : (
         <div className="card">
           <table className="tbl">
-            <thead><tr><th>Tên</th><th>Trạng thái</th><th>Hiển thị</th><th>Định dạng</th><th>Dung lượng</th><th>Tạo lúc</th><th /></tr></thead>
+            <thead><tr><th>{t('common.name')}</th><th>{t('common.status')}</th><th>{t('images.visibility')}</th><th>{t('images.format')}</th><th>{t('images.size')}</th><th>{t('common.createdAt')}</th><th /></tr></thead>
             <tbody>
               {images.map((img) => (
                 <tr key={img.id}>
@@ -41,7 +43,7 @@ export default function Images() {
                   <td className="mono dim">{img.disk_format || '—'}</td>
                   <td className="mono">{fmtBytes(img.size)}</td>
                   <td className="dim">{fmtDate(img.created_at)}</td>
-                  <td>{img.visibility !== 'public' && <button className="btn sm danger-ghost" onClick={() => del(img)}>Xoá</button>}</td>
+                  <td>{img.visibility !== 'public' && <button className="btn sm danger-ghost" onClick={() => del(img)}>{t('common.delete')}</button>}</td>
                 </tr>
               ))}
             </tbody>
@@ -55,6 +57,7 @@ export default function Images() {
 }
 
 function UploadModal({ onClose, onDone }) {
+  const { t } = useI18n();
   const [f, setF] = useState({ name: '', disk_format: 'qcow2', min_disk: '', min_ram: '' });
   const [file, setFile] = useState(null);
   const [progress, setProgress] = useState(null); // null | 0..100
@@ -72,8 +75,8 @@ function UploadModal({ onClose, onDone }) {
   }
 
   async function submit() {
-    if (!f.name.trim()) return toast('Nhập tên image', 'error');
-    if (!file) return toast('Chọn file image', 'error');
+    if (!f.name.trim()) return toast(t('images.nameRequired'), 'error');
+    if (!file) return toast(t('images.fileRequired'), 'error');
     let imgId = null;
     try {
       // Bước 1: tạo metadata
@@ -95,12 +98,12 @@ function UploadModal({ onClose, onDone }) {
         };
         xhr.onload = () => (xhr.status >= 200 && xhr.status < 300)
           ? resolve()
-          : reject(new Error(safeErr(xhr) || `Upload lỗi HTTP ${xhr.status}`));
-        xhr.onerror = () => reject(new Error('Upload thất bại (mất kết nối)'));
-        xhr.onabort = () => reject(new Error('Đã huỷ upload'));
+          : reject(new Error(safeErr(xhr) || t('images.uploadHttpError', { status: xhr.status })));
+        xhr.onerror = () => reject(new Error(t('images.uploadNetworkError')));
+        xhr.onabort = () => reject(new Error(t('images.uploadCancelled')));
         xhr.send(file);
       });
-      toast(`Đã upload image "${f.name}" — chờ trạng thái active`, 'ok');
+      toast(t('images.uploaded', { name: f.name }), 'ok');
       onDone();
     } catch (e) {
       toast(e.message, 'error');
@@ -111,12 +114,12 @@ function UploadModal({ onClose, onDone }) {
   }
 
   function safeErr(xhr) {
-    try { return JSON.parse(xhr.responseText).error; } catch { return null; }
+    try { return apiErrorMessage(JSON.parse(xhr.responseText), xhr.status); } catch { return null; }
   }
 
   function close() {
     if (progress !== null && progress < 100) {
-      if (!window.confirm('Đang upload — huỷ giữa chừng?')) return;
+      if (!window.confirm(t('images.cancelUploadConfirm'))) return;
       xhrRef.current?.abort();
     }
     onClose();
@@ -124,24 +127,24 @@ function UploadModal({ onClose, onDone }) {
 
   const busy = progress !== null;
   return (
-    <Modal title="Upload image" onClose={close}
+    <Modal title={t('images.upload')} onClose={close}
       footer={<>
-        <button className="btn ghost" onClick={close}>Đóng</button>
-        <button className="btn primary" onClick={submit} disabled={busy}>{busy ? `Đang upload ${progress}%` : 'Bắt đầu upload'}</button>
+        <button className="btn ghost" onClick={close}>{t('common.close')}</button>
+        <button className="btn primary" onClick={submit} disabled={busy}>{busy ? t('images.uploading', { progress }) : t('images.startUpload')}</button>
       </>}>
-      <Field label="File image" hint="qcow2 / raw / iso / vmdk / vdi — không giới hạn dung lượng, stream thẳng lên Glance">
+      <Field label={t('images.file')} hint={t('images.fileHint')}>
         <input type="file" onChange={pickFile} disabled={busy} />
       </Field>
-      {file && <p className="dim">Đã chọn: <b>{file.name}</b> ({fmtBytes(file.size)})</p>}
-      <Field label="Tên image"><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} disabled={busy} /></Field>
-      <Field label="Định dạng đĩa">
+      {file && <p className="dim">{t('images.selected')}: <b>{file.name}</b> ({fmtBytes(file.size)})</p>}
+      <Field label={t('images.imageName')}><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} disabled={busy} /></Field>
+      <Field label={t('images.diskFormat')}>
         <select value={f.disk_format} onChange={(e) => setF({ ...f, disk_format: e.target.value })} disabled={busy}>
           {['qcow2', 'raw', 'iso', 'vmdk', 'vdi'].map((x) => <option key={x} value={x}>{x}</option>)}
         </select>
       </Field>
       <div className="row-inline">
-        <Field label="Min disk (GB, tuỳ chọn)"><input type="number" min="0" value={f.min_disk} onChange={(e) => setF({ ...f, min_disk: e.target.value })} disabled={busy} /></Field>
-        <Field label="Min RAM (MB, tuỳ chọn)"><input type="number" min="0" value={f.min_ram} onChange={(e) => setF({ ...f, min_ram: e.target.value })} disabled={busy} /></Field>
+        <Field label={t('images.minDisk')}><input type="number" min="0" value={f.min_disk} onChange={(e) => setF({ ...f, min_disk: e.target.value })} disabled={busy} /></Field>
+        <Field label={t('images.minRam')}><input type="number" min="0" value={f.min_ram} onChange={(e) => setF({ ...f, min_ram: e.target.value })} disabled={busy} /></Field>
       </div>
       {busy && <div className="progress-track"><div className="progress-fill" style={{ width: progress + '%' }} /></div>}
     </Modal>

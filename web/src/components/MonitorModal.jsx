@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { api, fmtBytes } from '../api.js';
-import { Modal, toast } from './ui.jsx';
+import { api } from '../api.js';
+import { Modal } from './ui.jsx';
+import { useI18n } from '../i18n/react.jsx';
+import { intlLocale } from '../i18n/index.js';
 
 // Biểu đồ đường SVG thuần — không thêm thư viện
 function LineChart({ points, color = 'var(--accent)', fmt = (v) => v, unit = '' }) {
+  const { t } = useI18n();
   const W = 560, H = 110, padL = 46, padB = 16, padT = 8;
-  if (!points.length) return <div className="dim" style={{ padding: '20px 0' }}>Chưa có dữ liệu.</div>;
+  if (!points.length) return <div className="dim" style={{ padding: '20px 0' }}>{t('common.empty')}</div>;
   const xs = points.map((p) => p[0]);
   const ys = points.map((p) => p[1] ?? 0);
   const x0 = Math.min(...xs), x1 = Math.max(...xs) || x0 + 1;
@@ -14,7 +17,7 @@ function LineChart({ points, color = 'var(--accent)', fmt = (v) => v, unit = '' 
   const Y = (v) => H - padB - (v / yMax) * (H - padB - padT);
   const line = points.map((p, i) => `${i ? 'L' : 'M'}${X(p[0]).toFixed(1)},${Y(p[1] ?? 0).toFixed(1)}`).join(' ');
   const area = `${line} L${X(x1).toFixed(1)},${H - padB} L${X(x0).toFixed(1)},${H - padB} Z`;
-  const tLabel = (t) => new Date(t).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  const tLabel = (time) => new Date(time).toLocaleTimeString(intlLocale(), { hour: '2-digit', minute: '2-digit', hour12: false });
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" role="img">
       {[0.5, 1].map((f) => (
@@ -31,10 +34,11 @@ function LineChart({ points, color = 'var(--accent)', fmt = (v) => v, unit = '' 
   );
 }
 
-const RANGES = [[1, '1 giờ'], [6, '6 giờ'], [24, '24 giờ']];
+const RANGES = [1, 6, 24];
 const bps = (v) => (v >= 1048576 ? (v / 1048576).toFixed(1) + ' MB' : v >= 1024 ? Math.round(v / 1024) + ' KB' : Math.round(v) + ' B');
 
 export default function MonitorModal({ server, status, onClose }) {
+  const { t } = useI18n();
   const [hours, setHours] = useState(6);
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
@@ -55,36 +59,36 @@ export default function MonitorModal({ server, status, onClose }) {
     : null;
 
   return (
-    <Modal title={`Giám sát — ${server.name}`} onClose={onClose} wide
-      footer={extUrl && <a className="btn ghost" href={extUrl} target="_blank" rel="noreferrer">Mở hệ thống giám sát ngoài ↗</a>}>
+    <Modal title={t('monitor.title', { name: server.name })} onClose={onClose} wide
+      footer={extUrl && <a className="btn ghost" href={extUrl} target="_blank" rel="noreferrer">{t('monitor.external')} ↗</a>}>
       <div className="row-inline" style={{ marginBottom: 10, justifyContent: 'space-between' }}>
         <div className="tab-row" style={{ marginBottom: 0 }}>
-          {RANGES.map(([h, label]) => (
-            <button key={h} className={`tab ${hours === h ? 'active' : ''}`} onClick={() => setHours(h)}>{label}</button>
+          {RANGES.map((h) => (
+            <button key={h} className={`tab ${hours === h ? 'active' : ''}`} onClick={() => setHours(h)}>{t('monitor.hours', { count: h })}</button>
           ))}
         </div>
         {last && (
           <span className="dim">
-            Hiện tại: <b className="mono">{last[1]}% CPU</b>
+            {t('common.current')}: <b className="mono">{last[1]}% CPU</b>
             {last[2] != null && last[3] ? <> · <b className="mono">{Math.round((last[2] / last[3]) * 100)}% RAM</b> ({last[2]}/{last[3]} MB)</> : null}
           </span>
         )}
       </div>
 
-      {err ? <p className="warn-text">{err}</p> : !data ? <p>Đang tải…</p> : (
+      {err ? <p className="warn-text">{err}</p> : !data ? <p>{t('common.loading')}</p> : (
         <>
           <h4 className="chart-title">CPU (%)</h4>
           <LineChart points={pick(1)} unit="%" fmt={(v) => Math.round(v)} />
           <h4 className="chart-title">RAM (%)</h4>
           {memPts.length ? <LineChart points={memPts} color="#1e8e4e" unit="%" fmt={(v) => Math.round(v)} />
-            : <p className="dim">Hypervisor không báo RAM thực dùng (VM cần memballoon/qemu-guest-agent) — bỏ qua biểu đồ này.</p>}
-          <h4 className="chart-title">Mạng (nhận ↓ / gửi ↑ mỗi giây)</h4>
+            : <p className="dim">{t('monitor.ramUnavailable')}</p>}
+          <h4 className="chart-title">{t('monitor.network')}</h4>
           <LineChart points={pick(4)} color="#b57d0f" fmt={bps} unit="/s" />
           <LineChart points={pick(5)} color="#2c6cb0" fmt={bps} unit="/s" />
-          <h4 className="chart-title">Đĩa (đọc / ghi mỗi giây)</h4>
+          <h4 className="chart-title">{t('monitor.disk')}</h4>
           <LineChart points={pick(6)} color="#7a5cc9" fmt={bps} unit="/s" />
           <LineChart points={pick(7)} color="#c23b6f" fmt={bps} unit="/s" />
-          <p className="dim">Lấy mẫu mỗi {status?.interval_sec || 120}s từ Nova diagnostics (libvirt) — không cần agent trong VM.</p>
+          <p className="dim">{t('monitor.sampleInterval', { seconds: status?.interval_sec || 120 })}</p>
         </>
       )}
     </Modal>

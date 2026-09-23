@@ -3,18 +3,20 @@ import { Link } from 'react-router-dom';
 import { Download } from 'lucide-react';
 import { api } from '../api.js';
 import { toast, Empty, PageHead } from '../components/ui.jsx';
+import { useI18n } from '../i18n/react.jsx';
 
 const LABEL = {
-  vm_idle: ['Máy ảo CPU thấp', 'Máy ảo'],
-  vm_shutoff: ['Máy ảo tắt lâu ngày', 'Máy ảo'],
-  vm_error: ['Máy ảo lỗi', 'Máy ảo'],
-  volume_orphan: ['Volume không dùng', 'Ổ đĩa'],
-  fip_idle: ['Floating IP rảnh', 'Floating IP'],
-  snapshot_old: ['Snapshot quá cũ', 'Snapshot'],
+  vm_idle: 'optimize.vmIdle',
+  vm_shutoff: 'optimize.vmShutoff',
+  vm_error: 'optimize.vmError',
+  volume_orphan: 'optimize.volumeOrphan',
+  fip_idle: 'optimize.fipIdle',
+  snapshot_old: 'optimize.snapshotOld',
 };
-const SEV = { high: ['Cao', 'badge-err'], medium: ['Vừa', 'badge-warn'], low: ['Thấp', 'badge-muted'] };
+const SEV = { high: ['optimize.high', 'badge-err'], medium: ['optimize.medium', 'badge-warn'], low: ['optimize.low', 'badge-muted'] };
 
 export default function Optimize() {
+  const { t } = useI18n();
   const [data, setData] = useState(null);
   const [days, setDays] = useState(7);
   const [busy, setBusy] = useState(false);
@@ -28,8 +30,8 @@ export default function Optimize() {
   useEffect(() => { load(); }, []); // eslint-disable-line
 
   function exportCsv() {
-    const head = ['Loai', 'Muc do', 'Ten', 'Chi tiet', 'Khuyen nghi'];
-    const rows = data.findings.map((f) => [LABEL[f.type]?.[0] || f.type, SEV[f.severity][0], f.name, f.detail, f.advice]);
+    const head = [t('optimize.type'), t('optimize.severity'), t('common.name'), t('common.details'), t('optimize.recommendation')];
+    const rows = data.findings.map((f) => [LABEL[f.type] ? t(LABEL[f.type]) : f.type, t(SEV[f.severity][0]), f.name, f.detail, f.advice]);
     const csv = '\uFEFF' + [head, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
@@ -40,43 +42,43 @@ export default function Optimize() {
 
   return (
     <>
-      <PageHead title="Tối ưu tài nguyên" count={data?.findings.length}>
-        <span className="dim">Ngưỡng nhàn rỗi</span>
+      <PageHead title={t('navigation.optimize')} count={data?.findings.length}>
+        <span className="dim">{t('optimize.idleThreshold')}</span>
         <select value={days} onChange={(e) => { setDays(Number(e.target.value)); load(Number(e.target.value)); }} style={{ width: 110 }}>
-          {[3, 7, 14, 30].map((d) => <option key={d} value={d}>{d} ngày</option>)}
+          {[3, 7, 14, 30].map((d) => <option key={d} value={d}>{t('optimize.days', { count: d })}</option>)}
         </select>
-        <button className="btn ghost" onClick={() => load()} disabled={busy}>{busy ? 'Đang quét…' : 'Quét lại'}</button>
+        <button className="btn ghost" onClick={() => load()} disabled={busy}>{t(busy ? 'optimize.scanning' : 'optimize.scanAgain')}</button>
         {data?.findings.length > 0 && <button className="btn ghost" onClick={exportCsv}><Download size={15} /> CSV</button>}
       </PageHead>
-      <p className="dim page-desc">Rà soát tài nguyên không còn tạo giá trị: máy tắt lâu, máy lỗi, volume rời, IP rảnh và snapshot cũ.</p>
+      <p className="dim page-desc">{t('optimize.description')}</p>
 
-      {!data ? <Empty>Đang quét…</Empty> : (
+      {!data ? <Empty>{t('optimize.scanning')}</Empty> : (
         <>
           <div className="grid-cards">
             <div className="card stat">
-              <span className="stat-label">Tổng khuyến nghị</span>
+              <span className="stat-label">{t('optimize.totalRecommendations')}</span>
               <span className="stat-val mono">{data.findings.length}</span>
-              <span className="stat-sub dim">Billing và chi phí được cung cấp bởi dịch vụ Billing độc lập</span>
+              <span className="stat-sub dim">{t('optimize.billingNote')}</span>
             </div>
             {Object.entries(data.counts).filter(([, n]) => n > 0).map(([k, n]) => (
               <div key={k} className="card stat">
-                <span className="stat-label">{LABEL[k]?.[0] || k}</span>
+                <span className="stat-label">{LABEL[k] ? t(LABEL[k]) : k}</span>
                 <span className="stat-val mono">{n}</span>
               </div>
             ))}
           </div>
 
           {data.findings.length === 0 ? (
-            <Empty>Không phát hiện lãng phí nào trong project này. 👍</Empty>
+            <Empty>{t('optimize.noFindings')}</Empty>
           ) : (
             <div className="card">
               <table className="tbl">
-                <thead><tr><th>Mức</th><th>Loại</th><th>Tài nguyên</th><th>Chi tiết</th><th>Nên làm gì</th></tr></thead>
+                <thead><tr><th>{t('optimize.severity')}</th><th>{t('optimize.type')}</th><th>{t('optimize.resource')}</th><th>{t('common.details')}</th><th>{t('optimize.recommendation')}</th></tr></thead>
                 <tbody>
                   {data.findings.map((f, i) => (
                     <tr key={f.id + i}>
-                      <td><span className={`badge ${SEV[f.severity][1]}`}><i />{SEV[f.severity][0]}</span></td>
-                      <td className="dim">{LABEL[f.type]?.[0] || f.type}</td>
+                      <td><span className={`badge ${SEV[f.severity][1]}`}><i />{t(SEV[f.severity][0])}</span></td>
+                      <td className="dim">{LABEL[f.type] ? t(LABEL[f.type]) : f.type}</td>
                       <td><b>{f.name}</b></td>
                       <td className="dim">{f.detail}</td>
                       <td className="dim">{f.advice}</td>
@@ -86,8 +88,8 @@ export default function Optimize() {
               </table>
             </div>
           )}
-          {data.monitor && !data.monitor.enabled && <div className="card notice-card">Chưa bật giám sát VM nên không phát hiện được máy CPU thấp — thêm <span className="mono">OS_TASK_USERNAME/PASSWORD</span> và cấp quyền đọc Nova diagnostics.</div>}
-          <p className="dim">{data.note} Xử lý trực tiếp ở các mục <Link to="/instances" className="link">Máy ảo</Link>, <Link to="/volumes" className="link">Ổ đĩa</Link>, <Link to="/floating-ips" className="link">Floating IP</Link>.</p>
+          {data.monitor && !data.monitor.enabled && <div className="card notice-card">{t('optimize.monitorDisabled')} <span className="mono">OS_TASK_USERNAME/PASSWORD</span> {t('optimize.monitorPermission')}</div>}
+          <p className="dim">{t('optimize.actionHint')} <Link to="/instances" className="link">{t('navigation.instances')}</Link>, <Link to="/volumes" className="link">{t('navigation.volumes')}</Link>, <Link to="/floating-ips" className="link">Floating IP</Link>.</p>
         </>
       )}
     </>

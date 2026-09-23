@@ -29,6 +29,7 @@ router.post('/marketplace/deploy', async (req, res, next) => {
     const values = collectParams(tpl, params);
     const userData = tpl.userData(values);
     const warnings = [];
+    const warningCodes = [];
 
     // 1) Security group mở cổng ứng dụng
     const sgNames = ['default'];
@@ -82,9 +83,13 @@ router.post('/marketplace/deploy', async (req, res, next) => {
       }
       if (!port) {
         warnings.push('Máy chưa có port mạng sau 30s — gắn Floating IP thủ công ở trang Máy ảo sau.');
+        warningCodes.push('portUnavailable');
       } else {
         const ext = (await osFetch(sess, 'network', '/v2.0/networks?router:external=true')).networks?.[0];
-        if (!ext) warnings.push('Không có mạng external nào để cấp Floating IP.');
+        if (!ext) {
+          warnings.push('Không có mạng external nào để cấp Floating IP.');
+          warningCodes.push('externalNetworkUnavailable');
+        }
         else {
           const fr = await osFetch(sess, 'network', '/v2.0/floatingips', {
             method: 'POST',
@@ -111,6 +116,7 @@ router.post('/marketplace/deploy', async (req, res, next) => {
       security_group: sgCreated,
       access,
       warnings,
+      warningCodes,
       note: 'cloud-init cần 2–5 phút cài đặt sau khi máy ACTIVE. Theo dõi bằng "Xem log console" ở trang Máy ảo.',
     });
   } catch (e) { next(e); }

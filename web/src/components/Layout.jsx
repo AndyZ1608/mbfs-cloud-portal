@@ -4,28 +4,32 @@ import { LayoutDashboard, Server, HardDrive, Network, Globe, Shield, Disc3, KeyR
 import { api, fmtDate } from '../api.js';
 import { Toasts, toast } from './ui.jsx';
 import useCmpSession from '../useCmpSession.js';
+import { useI18n } from '../i18n/react.jsx';
+import LanguageSwitcher from './LanguageSwitcher.jsx';
+import { noticeDetail, noticeTitle } from '../i18n/notifications.js';
 
 const NAV = [
-  { to: '/', label: 'Tổng quan', icon: LayoutDashboard, end: true },
-  { to: '/instances', label: 'Máy ảo', icon: Server },
-  { to: '/marketplace', label: 'Ứng dụng mẫu', icon: Store },
-  { to: '/kubernetes', label: 'Kubernetes', icon: Boxes },
-  { to: '/volumes', label: 'Ổ đĩa', icon: HardDrive },
-  { to: '/networks', label: 'Mạng & Router', icon: Network },
-  { to: '/floating-ips', label: 'Floating IP', icon: Globe },
-  { to: '/load-balancers', label: 'Load Balancer', icon: Scale },
-  { to: '/security-groups', label: 'Security Group', icon: Shield },
-  { to: '/object-storage', label: 'Object Storage', icon: Archive },
-  { to: '/images', label: 'Images', icon: Disc3 },
-  { to: '/keypairs', label: 'SSH Keys', icon: KeyRound },
-  { to: '/backup', label: 'Backup tự động', icon: DatabaseBackup },
-  { to: '/power', label: 'Lịch bật/tắt', icon: CalendarClock },
-  { to: '/optimize', label: 'Tối ưu tài nguyên', icon: PiggyBank },
-  { to: '/audit', label: 'Nhật ký hoạt động', icon: History },
-  { to: '/billing', label: 'Billing', icon: BarChart3, feature: 'billing' },
+  { to: '/', key: 'overview', icon: LayoutDashboard, end: true },
+  { to: '/instances', key: 'instances', icon: Server },
+  { to: '/marketplace', key: 'marketplace', icon: Store },
+  { to: '/kubernetes', key: 'kubernetes', icon: Boxes },
+  { to: '/volumes', key: 'volumes', icon: HardDrive },
+  { to: '/networks', key: 'networks', icon: Network },
+  { to: '/floating-ips', key: 'floatingIps', icon: Globe },
+  { to: '/load-balancers', key: 'loadBalancers', icon: Scale },
+  { to: '/security-groups', key: 'securityGroups', icon: Shield },
+  { to: '/object-storage', key: 'objectStorage', icon: Archive },
+  { to: '/images', key: 'images', icon: Disc3 },
+  { to: '/keypairs', key: 'keypairs', icon: KeyRound },
+  { to: '/backup', key: 'backup', icon: DatabaseBackup },
+  { to: '/power', key: 'power', icon: CalendarClock },
+  { to: '/optimize', key: 'optimize', icon: PiggyBank },
+  { to: '/audit', key: 'audit', icon: History },
+  { to: '/billing', key: 'billing', icon: BarChart3, feature: 'billing' },
 ];
 
 export default function Layout() {
+  const { t } = useI18n();
   const sess = useCmpSession();
   const [cfg, setCfg] = useState({ cloudName: 'MBFS Cloud' });
   const nav = useNavigate();
@@ -55,7 +59,7 @@ export default function Layout() {
     nav('/login', { replace: true });
   }
 
-  if (!sess) return <div className="boot">Đang tải…</div>;
+  if (!sess) return <div className="boot">{t('common.loading')}</div>;
 
   return (
     <div className="app">
@@ -65,21 +69,21 @@ export default function Layout() {
           <img className="brand-logo brand-logo-mark" src="/asset/favicon.png" alt="" aria-hidden="true" />
         </div>
         <nav>
-          {NAV.filter((item) => !item.feature || (item.feature === 'billing' && cfg.billingEnabled)).map(({ to, label, icon: Icon, end }) => (
+          {NAV.filter((item) => !item.feature || (item.feature === 'billing' && cfg.billingEnabled)).map(({ to, key, icon: Icon, end }) => (
             <NavLink key={to} to={to} end={end} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
               <Icon size={17} />
-              <span>{label}</span>
+              <span>{t(`navigation.${key}`)}</span>
             </NavLink>
           ))}
           {sess?.roles?.includes('admin') && (
             <NavLink to="/admin" className={({ isActive }) => `nav-item nav-admin ${isActive ? 'active' : ''}`}>
               <Wrench size={17} />
-              <span>Quản trị cụm</span>
+              <span>{t('navigation.admin')}</span>
             </NavLink>
           )}
         </nav>
         <div className="sidebar-foot">
-          {cfg.mock && <div className="mock-flag">CHẾ ĐỘ DEMO</div>}
+          {cfg.mock && <div className="mock-flag">{t('common.demoMode')}</div>}
           <span className="ver">portal v2.4</span>
         </div>
       </aside>
@@ -87,7 +91,7 @@ export default function Layout() {
       <div className="main">
         <header className="topbar">
           <div className="topbar-left">
-            <span className="tb-label">Project</span>
+            <span className="tb-label">{t('common.project')}</span>
             <select className="project-select" value={sess.project.id} onChange={(e) => switchProject(e.target.value)}>
               {sess.projects.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
@@ -95,10 +99,11 @@ export default function Layout() {
             </select>
           </div>
           <div className="topbar-right">
+            <LanguageSwitcher />
             <ThemeToggle />
             <NotifBell />
             <span className="user-chip">{sess.user.name}{(sess.auth_mode === 'sso' || sess.auth_mode === 'websso') && <em className="sso-tag">SSO</em>}</span>
-            <button className="btn ghost sm" onClick={logout}><LogOut size={15} /> Đăng xuất</button>
+            <button className="btn ghost sm" onClick={logout}><LogOut size={15} /> {t('header.logout')}</button>
           </div>
         </header>
         <main className="content">
@@ -111,6 +116,7 @@ export default function Layout() {
 }
 
 function NotifBell() {
+  const { t, locale } = useI18n();
   const [data, setData] = useState(null);
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -135,21 +141,21 @@ function NotifBell() {
   const tone = { ok: 'badge-ok', error: 'badge-err', warn: 'badge-warn', info: 'badge-info' };
   return (
     <div className="menu-wrap" ref={ref}>
-      <button className="icon-btn notif-btn" onClick={toggle} aria-label="Thong bao">
+      <button className="icon-btn notif-btn" onClick={toggle} aria-label={t('header.notifications')}>
         <Bell size={17} />
         {data?.unread > 0 && <em className="notif-dot">{data.unread > 9 ? '9+' : data.unread}</em>}
       </button>
       {open && (
         <div className="menu notif-panel">
-          <div className="notif-head">Thông báo</div>
+          <div className="notif-head">{t('header.notifications')}</div>
           {!data?.notifications?.length
-            ? <p className="dim" style={{ padding: '10px 12px', margin: 0 }}>Chưa có thông báo nào.</p>
+            ? <p className="dim" style={{ padding: '10px 12px', margin: 0 }}>{t('header.noNotifications')}</p>
             : data.notifications.map((n) => (
               <div key={n.id} className="notif-item">
                 <span className={`badge ${tone[n.level] || 'badge-muted'}`}><i /></span>
                 <span>
-                  <b>{n.title}</b>
-                  {n.detail && <em>{n.detail}</em>}
+                  <b>{noticeTitle(n, locale)}</b>
+                  {noticeDetail(n, locale) && <em>{noticeDetail(n, locale)}</em>}
                   <span className="dim">{fmtDate(n.ts)}</span>
                 </span>
               </div>
@@ -161,13 +167,14 @@ function NotifBell() {
 }
 
 function ThemeToggle() {
+  const { t } = useI18n();
   const [dark, setDark] = useState(() => localStorage.getItem('mbfs-theme') === 'dark');
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
     localStorage.setItem('mbfs-theme', dark ? 'dark' : 'light');
   }, [dark]);
   return (
-    <button className="icon-btn" onClick={() => setDark(!dark)} title={dark ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'}>
+    <button className="icon-btn" onClick={() => setDark(!dark)} title={dark ? t('header.lightTheme') : t('header.darkTheme')}>
       {dark ? <Sun size={17} /> : <Moon size={17} />}
     </button>
   );

@@ -2,6 +2,7 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Modal, Spinner } from './ui.jsx';
 import { matchesExactConfirmation } from '../utils/confirmation.js';
+import { useI18n } from '../i18n/react.jsx';
 
 export default function TypeToConfirmDialog({
   title,
@@ -13,6 +14,7 @@ export default function TypeToConfirmDialog({
   onConfirm,
   onCancel,
 }) {
+  const { t } = useI18n();
   const [confirmation, setConfirmation] = useState('');
   const inputRef = useRef(null);
   const formId = useId();
@@ -38,22 +40,22 @@ export default function TypeToConfirmDialog({
 
   return (
     <Modal title={title} onClose={cancel} footer={<>
-      <button className="btn ghost" type="button" onClick={cancel} disabled={loading}>Huỷ</button>
+      <button className="btn ghost" type="button" onClick={cancel} disabled={loading}>{t('common.cancel')}</button>
       <button className="btn danger" type="submit" form={formId} disabled={!canConfirm} aria-disabled={!canConfirm}>
-        {loading && <Spinner size={15} />}{loading ? 'Đang xoá…' : confirmLabel}
+        {loading && <Spinner size={15} />}{loading ? t('instances.deleting') : confirmLabel}
       </button>
     </>}>
       <form id={formId} onSubmit={submit}>
         <div className="danger-confirm-warning" role="alert">
           <AlertTriangle aria-hidden="true" size={20} />
-          <div><strong>Hành động không thể hoàn tác</strong><p>{description}</p></div>
+          <div><strong>{t('instances.deleteWarning')}</strong><p>{description}</p></div>
         </div>
         <dl className="danger-confirm-resource">
-          <div><dt>Tên</dt><dd>{resourceName}</dd></div>
+          <div><dt>{t('common.name')}</dt><dd>{resourceName}</dd></div>
           {resourceId && <div><dt>ID</dt><dd className="mono">{resourceId}</dd></div>}
         </dl>
         <label className="field" htmlFor={inputId}>
-          <span className="field-label">Nhập chính xác <strong>{resourceName}</strong> để xác nhận</span>
+          <span className="field-label">{t('instances.typeToConfirm', { name: resourceName })}</span>
           <input
             ref={inputRef}
             id={inputId}
@@ -64,7 +66,7 @@ export default function TypeToConfirmDialog({
             spellCheck="false"
             aria-describedby={`${inputId}-hint`}
           />
-          <span className="field-hint" id={`${inputId}-hint`}>Phân biệt chữ hoa, chữ thường và khoảng trắng.</span>
+          <span className="field-hint" id={`${inputId}-hint`}>{t('instances.confirmCaseHint')}</span>
         </label>
       </form>
     </Modal>

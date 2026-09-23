@@ -81,6 +81,25 @@ const ACTIONS = {
   unshelve: { unshelve: null },
 };
 
+const RESIZE_ACTIONS = new Set(['resize', 'confirm-resize', 'revert-resize']);
+
+export function resizeError(error) {
+  const mapped = (() => {
+    if (error?.status === 401) return new OSError(401, 'Phiên OpenStack đã hết hạn.', 'authentication_required');
+    if (error?.status === 403) return new OSError(403, 'Nova từ chối quyền thao tác resize VM.', 'permission_denied');
+    if (error?.status === 404) return new OSError(404, 'Không tìm thấy VM hoặc flavor trong project hiện tại.', 'resource_not_found');
+    if (error?.status === 400) return new OSError(400, 'Nova từ chối flavor hoặc yêu cầu resize.', 'invalid_resize_request');
+    if (error?.status === 409) return new OSError(409, 'Không thể resize VM ở trạng thái hiện tại.', 'invalid_instance_state');
+    if (/(?:NoValidHost|insufficient|not enough|resources?)/i.test(error?.message || '')) {
+      return new OSError(503, 'Compute host không đủ tài nguyên để resize VM.', 'insufficient_capacity');
+    }
+    if (error?.status === 503) return new OSError(503, 'Dịch vụ Nova hiện không khả dụng.', 'provider_unavailable');
+    return new OSError(502, 'Nova không thể xử lý yêu cầu resize VM.', 'resize_provider_failure');
+  })();
+  mapped.expose = true; // Fixed messages only; never forward raw Nova text or request data.
+  return mapped;
+}
+
 // Đổi tên máy ảo
 router.put('/servers/:id', async (req, res, next) => {
   try {
@@ -154,19 +173,53 @@ router.post('/servers/:id/security-groups', async (req, res, next) => {
 router.post('/servers/:id/action', async (req, res, next) => {
   try {
     const { action, name, flavorRef } = req.body || {};
+    const resizeLifecycle = RESIZE_ACTIONS.has(action);
     let body;
     if (action === 'snapshot') {
       if (!name) throw new OSError(400, 'Thiếu tên snapshot');
       body = { createImage: { name } };
     } else if (action === 'resize') {
-      if (!flavorRef) throw new OSError(400, 'Thiếu flavor mới để resize');
+      if (typeof flavorRef !== 'string' || !flavorRef.trim()) throw new OSError(400, 'Thiếu flavor mới để resize');
       body = { resize: { flavorRef } };
     } else {
       body = ACTIONS[action];
       if (!body) throw new OSError(400, `Hành động không hợp lệ: ${action}`);
     }
-    const data = await osFetch(req.session.os, 'compute', `/servers/${req.params.id}/action`, { method: 'POST', body });
+
+    if (resizeLifecycle) {
+      if (!req.session.os.roles?.some((role) => role === 'member' || role === 'admin')) {
+        throw new OSError(403, 'Cần role member hoặc admin để thao tác resize VM.', 'permission_denied');
+      }
+      let server;
+      try {
+        server = (await osFetch(req.session.os, 'compute', `/servers/${encodeURIComponent(req.params.id)}`))?.server;
+      } catch (error) { throw resizeError(error); }
+      const projectId = server?.tenant_id || server?.project_id;
+      if (server?.id !== req.params.id || !projectId || projectId !== req.session.os.project?.id) {
+        throw new OSError(404, 'Không tìm thấy VM trong project hiện tại.', 'server_not_found');
+      }
+      res.locals.resizeAudit = {
+        action, instance_id: server.id, old_flavor: server.flavor?.id || null,
+        ...(action === 'resize' ? {
+          requested_flavor: /^[A-Za-z0-9_.-]{1,128}$/.test(flavorRef) ? flavorRef : null,
+        } : {}),
+      };
+      if (action === 'resize' && flavorRef === server.flavor?.id) {
+        throw new OSError(400, 'Chọn flavor khác cấu hình hiện tại.', 'same_flavor');
+      }
+    }
+
+    let data;
+    try {
+      data = await osFetch(req.session.os, 'compute', `/servers/${encodeURIComponent(req.params.id)}/action`, {
+        method: 'POST', body, ...(resizeLifecycle ? { responseType: 'none' } : {}),
+      });
+    } catch (error) {
+      if (resizeLifecycle) throw resizeError(error);
+      throw error;
+    }
     console.log(`[compute] ACTION ${action} server=${req.params.id} by=${req.session.os.user.name}`);
+    if (resizeLifecycle) return res.status(202).json({ success: true, accepted: true });
     res.json(data || { ok: true });
   } catch (e) { next(e); }
 });

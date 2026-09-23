@@ -5,8 +5,11 @@ import { Modal, Field, StatusBadge, ActionsMenu, toast, Empty, PageHead } from '
 import MonitorModal from '../components/MonitorModal.jsx';
 import TypeToConfirmDialog from '../components/TypeToConfirmDialog.jsx';
 import { openInstanceConsole } from '../console/navigation.js';
+import { canStartResize, canFinalizeResize, validResizeFlavor, submitResizeOnce } from '../resize.js';
+import { useI18n } from '../i18n/react.jsx';
 
 export default function Instances() {
+  const { t } = useI18n();
   const [servers, setServers] = useState(null);
   const [creating, setCreating] = useState(false);
   const [detail, setDetail] = useState(null);
@@ -23,13 +26,22 @@ export default function Instances() {
   const [deleteFor, setDeleteFor] = useState(null);
   const [passwordFor, setPasswordFor] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [pendingResize, setPendingResize] = useState(new Map());
   const deleteRequest = useRef(false);
+  const actionRequests = useRef(new Set());
   const timer = useRef(null);
 
   async function load() {
     try {
       const d = await api('/servers');
       setServers(d.servers);
+      setPendingResize((current) => {
+        const next = new Map(current);
+        for (const server of d.servers) {
+          if (next.has(server.id) && next.get(server.id) !== server.status) next.delete(server.id);
+        }
+        return next.size === current.size ? current : next;
+      });
       api('/monitor/latest').then((m) => setLatest(m.latest || {})).catch(() => {});
     } catch (e) { toast(e.message, 'error'); }
   }
@@ -42,11 +54,23 @@ export default function Instances() {
   }, []);
 
   async function act(s, action, label) {
+    const finalizingResize = action === 'confirm-resize' || action === 'revert-resize';
+    if (finalizingResize && (actionRequests.current.has(s.id) || pendingResize.has(s.id))) return;
+    if (finalizingResize) {
+      actionRequests.current.add(s.id);
+      setPendingResize((current) => new Map(current).set(s.id, s.status));
+    }
     try {
       await api(`/servers/${s.id}/action`, { method: 'POST', body: { action } });
-      toast(`${label}: ${s.name}`, 'ok');
+      toast(t('instances.actionWithName', { action: label, name: s.name }), 'ok');
+      if (finalizingResize) load();
       setTimeout(load, 800);
-    } catch (e) { toast(e.message, 'error'); }
+    } catch (e) {
+      if (finalizingResize) setPendingResize((current) => { const next = new Map(current); next.delete(s.id); return next; });
+      toast(e.message, 'error');
+    } finally {
+      if (finalizingResize) actionRequests.current.delete(s.id);
+    }
   }
 
   function openDelete(s) {
@@ -68,7 +92,7 @@ export default function Instances() {
     setDeleting(true);
     try {
       await api(`/servers/${s.id}`, { method: 'DELETE' });
-      toast(`Đã gửi lệnh xoá ${s.name}`, 'ok');
+      toast(t('instances.deleteSent', { name: s.name }), 'ok');
       setDeleteFor(null);
       setTimeout(load, 800);
     } catch (e) {
@@ -89,21 +113,21 @@ export default function Instances() {
   }, [servers, deleteFor]);
 
   async function rename(s) {
-    const name = window.prompt('Tên mới cho máy ảo:', s.name);
+    const name = window.prompt(t('instances.renamePrompt'), s.name);
     if (!name || name.trim() === s.name) return;
     try {
       await api(`/servers/${s.id}`, { method: 'PUT', body: { name: name.trim() } });
-      toast(`Đã đổi tên thành "${name.trim()}"`, 'ok');
+      toast(t('instances.renamed', { name: name.trim() }), 'ok');
       load();
     } catch (e) { toast(e.message, 'error'); }
   }
 
   async function snapshot(s) {
-    const name = window.prompt('Tên snapshot (image):', `${s.name}-snap-${new Date().toISOString().slice(0, 10)}`);
+    const name = window.prompt(t('instances.snapshotPrompt'), `${s.name}-snap-${new Date().toISOString().slice(0, 10)}`);
     if (!name) return;
     try {
       await api(`/servers/${s.id}/action`, { method: 'POST', body: { action: 'snapshot', name } });
-      toast(`Đang tạo snapshot "${name}" — xem ở mục Images`, 'ok');
+      toast(t('instances.snapshotStarted', { name }), 'ok');
     } catch (e) { toast(e.message, 'error'); }
   }
   const shown = !servers ? null : servers.filter((s) => {
@@ -114,17 +138,17 @@ export default function Instances() {
 
   return (
     <>
-      <PageHead title="Máy ảo" count={shown?.length} onRefresh={load}>
-        <input placeholder="Tìm tên / IP…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 190 }} />
-        <button className="btn primary" onClick={() => setCreating(true)}><Plus size={16} /> Tạo máy ảo</button>
+      <PageHead title={t('instances.title')} count={shown?.length} onRefresh={load}>
+        <input placeholder={t('instances.search')} value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 190 }} />
+        <button className="btn primary" onClick={() => setCreating(true)}><Plus size={16} /> {t('instances.create')}</button>
       </PageHead>
 
-      {!servers ? <Empty>Đang tải…</Empty> : shown.length === 0 ? (
-        <Empty>Chưa có máy ảo nào trong project này. Bấm “Tạo máy ảo” để bắt đầu.</Empty>
+      {!servers ? <Empty>{t('common.loading')}</Empty> : shown.length === 0 ? (
+        <Empty>{t('instances.empty')}</Empty>
       ) : (
         <div className="card">
           <table className="tbl">
-            <thead><tr><th>Tên</th><th>Trạng thái</th><th>CPU</th><th>Địa chỉ IP</th><th>Cấu hình</th><th>SSH key</th><th>Tạo lúc</th><th /></tr></thead>
+            <thead><tr><th>{t('common.name')}</th><th>{t('common.status')}</th><th>CPU</th><th>{t('common.ipAddress')}</th><th>{t('instances.flavor')}</th><th>SSH key</th><th>{t('common.createdAt')}</th><th /></tr></thead>
             <tbody>
               {shown.map((s) => (
                 <tr key={s.id}>
@@ -132,7 +156,7 @@ export default function Instances() {
                   <td><StatusBadge status={s.status} />{s['OS-EXT-STS:task_state'] && <span className="dim task"> {s['OS-EXT-STS:task_state']}…</span>}</td>
                   <td>{latest[s.id] ? (
                     <button className={`cpu-chip cpu-${latest[s.id].cpu >= 90 ? 'hot' : latest[s.id].cpu >= 70 ? 'warm' : 'ok'}`}
-                      onClick={() => setMonFor(s)} title="Xem biểu đồ giám sát">{latest[s.id].cpu}%</button>
+                      onClick={() => setMonFor(s)} title={t('instances.monitor')}>{latest[s.id].cpu}%</button>
                   ) : <span className="dim">—</span>}</td>
                   <td>{serverIps(s).map((x) => (
                     <span key={x.ip} className={`mono chip ${x.type === 'floating' ? 'chip-fip' : ''}`} title={`${x.net} (${x.type})`}>{x.ip}</span>
@@ -144,28 +168,28 @@ export default function Instances() {
                   <td className="dim">{fmtDate(s.created)}</td>
                   <td>
                     <ActionsMenu items={[
-                      s.status === 'VERIFY_RESIZE' && { label: '✓ Xác nhận resize', onClick: () => act(s, 'confirm-resize', 'Đã xác nhận resize') },
-                      s.status === 'VERIFY_RESIZE' && { label: 'Hoàn tác resize', onClick: () => act(s, 'revert-resize', 'Đã hoàn tác resize') },
-                      s.status === 'VERIFY_RESIZE' && 'divider',
-                      s.status !== 'ACTIVE' && s.status !== 'VERIFY_RESIZE' && { label: 'Bật máy', onClick: () => act(s, 'start', 'Đã bật') },
-                      s.status === 'ACTIVE' && { label: 'Tắt máy', onClick: () => act(s, 'stop', 'Đã gửi lệnh tắt') },
-                      s.status === 'ACTIVE' && { label: 'Khởi động lại (mềm)', onClick: () => act(s, 'reboot-soft', 'Đang khởi động lại') },
-                      s.status === 'ACTIVE' && { label: 'Khởi động lại (cứng)', onClick: () => act(s, 'reboot-hard', 'Đang khởi động lại') },
-                      (s.status === 'ACTIVE' || s.status === 'SHUTOFF') && { label: 'Đổi cấu hình (resize)', onClick: () => setResizeFor(s) },
-                      { label: 'Đổi tên', onClick: () => rename(s) },
-                      { label: 'Mở console', onClick: () => openInstanceConsole(s.id) },
-                      { label: 'Đổi mật khẩu', onClick: () => setPasswordFor(s) },
-                      { label: 'Biểu đồ giám sát', onClick: () => setMonFor(s) },
-                      { label: 'Xem log console', onClick: () => setLogFor(s) },
-                      { label: 'Quản lý card mạng', onClick: () => setNicFor(s) },
-                      { label: 'Đổi security group', onClick: () => setSgFor(s) },
-                      (s.status === 'ACTIVE' || s.status === 'SHUTOFF') && { label: 'Cài lại HĐH (rebuild)', onClick: () => setRebuildFor(s) },
-                      s.status === 'ACTIVE' && { label: 'Shelve (tắt sâu, giải phóng tài nguyên)', onClick: () => act(s, 'shelve', 'Đang shelve') },
-                      (s.status === 'SHELVED' || s.status === 'SHELVED_OFFLOADED') && { label: 'Unshelve (khôi phục)', onClick: () => act(s, 'unshelve', 'Đang khôi phục') },
-                      { label: 'Tạo snapshot', onClick: () => snapshot(s) },
-                      { label: 'Gắn Floating IP', onClick: () => setFipTarget(s) },
+                      canFinalizeResize(s, pendingResize.has(s.id)) && { label: t('instances.confirmResize'), onClick: () => act(s, 'confirm-resize', t('instances.confirmResizeSent')) },
+                      canFinalizeResize(s, pendingResize.has(s.id)) && { label: t('instances.revertResize'), onClick: () => act(s, 'revert-resize', t('instances.revertResizeSent')) },
+                      canFinalizeResize(s, pendingResize.has(s.id)) && 'divider',
+                      !['ACTIVE', 'VERIFY_RESIZE', 'RESIZE', 'RESIZE_MIGRATING'].includes(s.status) && { label: t('instances.start'), onClick: () => act(s, 'start', t('instances.started')) },
+                      s.status === 'ACTIVE' && { label: t('instances.stop'), onClick: () => act(s, 'stop', t('instances.stopSent')) },
+                      s.status === 'ACTIVE' && { label: t('instances.softReboot'), onClick: () => act(s, 'reboot-soft', t('instances.rebooting')) },
+                      s.status === 'ACTIVE' && { label: t('instances.hardReboot'), onClick: () => act(s, 'reboot-hard', t('instances.rebooting')) },
+                      canStartResize(s, pendingResize.has(s.id)) && { label: t('instances.resize'), onClick: () => setResizeFor(s) },
+                      { label: t('instances.rename'), onClick: () => rename(s) },
+                      { label: t('instances.console'), onClick: () => openInstanceConsole(s.id) },
+                      { label: t('instances.changePassword'), onClick: () => setPasswordFor(s) },
+                      { label: t('instances.monitor'), onClick: () => setMonFor(s) },
+                      { label: t('instances.consoleLog'), onClick: () => setLogFor(s) },
+                      { label: t('instances.networkCards'), onClick: () => setNicFor(s) },
+                      { label: t('instances.securityGroups'), onClick: () => setSgFor(s) },
+                      (s.status === 'ACTIVE' || s.status === 'SHUTOFF') && { label: t('instances.rebuild'), onClick: () => setRebuildFor(s) },
+                      s.status === 'ACTIVE' && { label: t('instances.shelve'), onClick: () => act(s, 'shelve', t('instances.shelving')) },
+                      (s.status === 'SHELVED' || s.status === 'SHELVED_OFFLOADED') && { label: t('instances.unshelve'), onClick: () => act(s, 'unshelve', t('instances.unshelving')) },
+                      { label: t('instances.snapshot'), onClick: () => snapshot(s) },
+                      { label: t('instances.floatingIp'), onClick: () => setFipTarget(s) },
                       'divider',
-                      { label: 'Xoá máy ảo', danger: true, onClick: () => openDelete(s) },
+                      { label: t('instances.delete'), danger: true, onClick: () => openDelete(s) },
                     ]} />
                   </td>
                 </tr>
@@ -181,18 +205,23 @@ export default function Instances() {
       {passwordFor && <ChangePasswordModal key={passwordFor.id} server={passwordFor}
         onClose={() => setPasswordFor(null)} onDone={() => setPasswordFor(null)} />}
       {fipTarget && <FipModal server={fipTarget} onClose={() => setFipTarget(null)} onDone={() => { setFipTarget(null); load(); }} />}
-      {resizeFor && <ResizeModal server={resizeFor} onClose={() => setResizeFor(null)} onDone={() => { setResizeFor(null); setTimeout(load, 800); }} />}
+      {resizeFor && <ResizeModal server={resizeFor} onClose={() => setResizeFor(null)} onDone={() => {
+        setPendingResize((current) => new Map(current).set(resizeFor.id, resizeFor.status));
+        setResizeFor(null);
+        load();
+        setTimeout(load, 800);
+      }} />}
       {logFor && <ConsoleLogModal server={logFor} onClose={() => setLogFor(null)} />}
       {monFor && <MonitorModal server={monFor} status={monStatus} onClose={() => setMonFor(null)} />}
       {rebuildFor && <RebuildModal server={rebuildFor} onClose={() => setRebuildFor(null)} onDone={() => { setRebuildFor(null); setTimeout(load, 800); }} />}
       {nicFor && <NicModal server={nicFor} onClose={() => setNicFor(null)} onDone={load} />}
       {sgFor && <SgModal server={sgFor} onClose={() => setSgFor(null)} onDone={() => { setSgFor(null); load(); }} />}
       {deleteFor && <TypeToConfirmDialog
-        title="Xoá máy ảo"
-        description="Máy ảo và dữ liệu trên đĩa gốc sẽ bị xoá vĩnh viễn. Hành động này không thể hoàn tác."
+        title={t('instances.delete')}
+        description={t('instances.deleteDescription')}
         resourceName={deleteFor.name}
         resourceId={deleteFor.id}
-        confirmLabel="Xoá máy ảo"
+        confirmLabel={t('instances.delete')}
         loading={deleting}
         onConfirm={confirmDelete}
         onCancel={closeDelete}
@@ -203,6 +232,7 @@ export default function Instances() {
 
 // ---------- Tạo máy ảo ----------
 function CreateModal({ onClose, onDone }) {
+  const { t } = useI18n();
   const [opts, setOpts] = useState(null);
   const [busy, setBusy] = useState(false);
   const [f, setF] = useState({
@@ -238,8 +268,8 @@ function CreateModal({ onClose, onDone }) {
   }
 
   async function submit() {
-    if (!f.name.trim()) return toast('Nhập tên máy ảo', 'error');
-    if (!f.networks.length) return toast('Chọn ít nhất một network', 'error');
+    if (!f.name.trim()) return toast(t('instances.nameRequired'), 'error');
+    if (!f.networks.length) return toast(t('instances.networkRequired'), 'error');
     setBusy(true);
     try {
       await api('/servers', {
@@ -252,50 +282,50 @@ function CreateModal({ onClose, onDone }) {
           user_data: f.show_ud && f.user_data.trim() ? f.user_data : undefined,
         },
       });
-      toast(`Đang khởi tạo "${f.name}"…`, 'ok');
+      toast(t('instances.creatingName', { name: f.name }), 'ok');
       onDone();
     } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
   }
 
   return (
-    <Modal title="Tạo máy ảo mới" onClose={onClose} wide
+    <Modal title={t('instances.createTitle')} onClose={onClose} wide
       footer={<>
-        <button className="btn ghost" onClick={onClose}>Huỷ</button>
-        <button className="btn primary" onClick={submit} disabled={busy || !opts}>{busy ? 'Đang tạo…' : 'Tạo máy ảo'}</button>
+        <button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
+        <button className="btn primary" onClick={submit} disabled={busy || !opts}>{t(busy ? 'instances.creating' : 'instances.create')}</button>
       </>}>
-      {!opts ? <p>Đang tải tuỳ chọn…</p> : (
+      {!opts ? <p>{t('instances.loadingOptions')}</p> : (
         <div className="form-grid">
-          <Field label="Tên máy ảo">
+          <Field label={t('instances.vmName')}>
             <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="vd: web-portal-02" autoFocus />
           </Field>
-          <Field label="Số lượng" hint="Tạo nhiều máy cùng cấu hình (tối đa 10)">
+          <Field label={t('instances.count')} hint={t('instances.countHint')}>
             <input type="number" min="1" max="10" value={f.count} onChange={(e) => setF({ ...f, count: e.target.value })} />
           </Field>
-          <Field label="Image (hệ điều hành)">
+          <Field label={t('instances.image')}>
             <select value={f.imageRef} onChange={(e) => setF({ ...f, imageRef: e.target.value })}>
               {opts.images.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
             </select>
           </Field>
-          <Field label="Cấu hình (flavor)">
+          <Field label={t('instances.flavor')}>
             <select value={f.flavorRef} onChange={(e) => setF({ ...f, flavorRef: e.target.value })}>
               {opts.flavors.map((x) => <option key={x.id} value={x.id}>{x.name} — {x.vcpus} vCPU / {ramGB(x.ram)} / {x.disk} GB</option>)}
             </select>
           </Field>
           <Field label="SSH key">
             <select value={f.key_name} onChange={(e) => setF({ ...f, key_name: e.target.value })}>
-              <option value="">— Không dùng —</option>
+              <option value="">— {t('instances.none')} —</option>
               {opts.keypairs.map((k) => <option key={k.name} value={k.name}>{k.name}</option>)}
             </select>
           </Field>
-          <Field label="Boot từ volume" hint="Tạo volume mới từ image, giữ được đĩa khi rebuild">
+          <Field label={t('instances.bootFromVolume')} hint={t('instances.bootFromVolumeHint')}>
             <div className="row-inline">
               <input type="checkbox" checked={f.bfv} onChange={(e) => setF({ ...f, bfv: e.target.checked })} id="bfv" />
-              <label htmlFor="bfv">Bật</label>
+              <label htmlFor="bfv">{t('instances.enable')}</label>
               {f.bfv && <><input type="number" min="10" style={{ width: 90 }} value={f.boot_volume_gb}
                 onChange={(e) => setF({ ...f, boot_volume_gb: e.target.value })} /> <span className="dim">GB</span></>}
             </div>
           </Field>
-          <Field label="Network (chọn một hoặc nhiều)">
+          <Field label={t('instances.networkSelection')}>
             <div className="check-list">
               {opts.networks.map((n) => (
                 <label key={n.id} className="check-item">
@@ -304,16 +334,16 @@ function CreateModal({ onClose, onDone }) {
                   <span className="mono dim">{n.subnet_details?.map((s) => s.cidr).join(', ')}</span>
                 </label>
               ))}
-              {opts.networks.length === 0 && <p className="dim">Chưa có network nội bộ — tạo ở mục “Mạng & Router”.</p>}
+              {opts.networks.length === 0 && <p className="dim">{t('instances.noInternalNetwork')}</p>}
             </div>
           </Field>
-          <Field label="Script khởi tạo (cloud-init user-data)" hint="Chạy một lần khi máy boot lần đầu — cài phần mềm, cấu hình tự động">
+          <Field label={t('instances.initScript')} hint={t('instances.initScriptHint')}>
             <label className="check-item" style={{ marginBottom: 6 }}>
-              <input type="checkbox" checked={f.show_ud} onChange={(e) => setF({ ...f, show_ud: e.target.checked })} /> Thêm script
+              <input type="checkbox" checked={f.show_ud} onChange={(e) => setF({ ...f, show_ud: e.target.checked })} /> {t('instances.addScript')}
             </label>
             {f.show_ud && (
               <textarea className="mono" rows={6} value={f.user_data} onChange={(e) => setF({ ...f, user_data: e.target.value })}
-                placeholder={'#!/bin/bash\napt update && apt install -y nginx\n# hoặc #cloud-config'} />
+                placeholder={t('instances.scriptPlaceholder')} />
             )}
           </Field>
           <Field label="Security group">
@@ -335,6 +365,7 @@ function CreateModal({ onClose, onDone }) {
 
 // ---------- Chi tiết máy ảo ----------
 function DetailModal({ server, onClose, onChangePassword }) {
+  const { t } = useI18n();
   const [s, setS] = useState(server);
   const [vols, setVols] = useState(null);
 
@@ -350,24 +381,25 @@ function DetailModal({ server, onClose, onChangePassword }) {
 
   return (
     <Modal title={s.name} onClose={onClose}
-      footer={<button className="btn ghost" type="button" onClick={onChangePassword}>Đổi mật khẩu</button>}>
+      footer={<button className="btn ghost" type="button" onClick={onChangePassword}>{t('instances.changePassword')}</button>}>
       <div className="kv">
         <div><span>ID</span><span className="mono">{s.id}</span></div>
-        <div><span>Trạng thái</span><span><StatusBadge status={s.status} /></span></div>
-        <div><span>Cấu hình</span><span>{s.flavor?.original_name || s.flavor?.id} {s.flavor?.vcpus != null && `· ${s.flavor.vcpus} vCPU / ${ramGB(s.flavor.ram)} / ${s.flavor.disk} GB`}</span></div>
-        <div><span>Địa chỉ IP</span><span>{serverIps(s).map((x) => <span key={x.ip} className="mono chip">{x.ip} <em className="dim">({x.type})</em></span>)}</span></div>
+        <div><span>{t('common.status')}</span><span><StatusBadge status={s.status} /></span></div>
+        <div><span>{t('instances.flavor')}</span><span>{s.flavor?.original_name || s.flavor?.id} {s.flavor?.vcpus != null && `· ${s.flavor.vcpus} vCPU / ${ramGB(s.flavor.ram)} / ${s.flavor.disk} GB`}</span></div>
+        <div><span>{t('common.ipAddress')}</span><span>{serverIps(s).map((x) => <span key={x.ip} className="mono chip">{x.ip} <em className="dim">({x.type})</em></span>)}</span></div>
         <div><span>Security group</span><span>{(s.security_groups || []).map((g) => g.name).join(', ') || '—'}</span></div>
         <div><span>SSH key</span><span>{s.key_name || '—'}</span></div>
-        <div><span>Volume gắn kèm</span><span>{attached.length ? attached.join(', ') : '—'}</span></div>
+        <div><span>{t('instances.attachedVolumes')}</span><span>{attached.length ? attached.join(', ') : '—'}</span></div>
         <div><span>Availability zone</span><span>{s['OS-EXT-AZ:availability_zone'] || '—'}</span></div>
-        <div><span>Tạo lúc</span><span>{fmtDate(s.created)}</span></div>
-        {s.fault?.message && <div><span>Lỗi</span><span className="err-text">{s.fault.message}</span></div>}
+        <div><span>{t('common.createdAt')}</span><span>{fmtDate(s.created)}</span></div>
+        {s.fault?.message && <div><span>{t('instances.fault')}</span><span className="err-text">{s.fault.message}</span></div>}
       </div>
     </Modal>
   );
 }
 
 function ChangePasswordModal({ server, onClose, onDone }) {
+  const { t } = useI18n();
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [busy, setBusy] = useState(false);
@@ -391,11 +423,11 @@ function ChangePasswordModal({ server, onClose, onDone }) {
       const result = await api(`/servers/${encodeURIComponent(server.id)}/change-password`, {
         method: 'POST', body: { password },
       });
-      if (result?.success !== true) throw new Error('Nova chưa xác nhận đã nhận yêu cầu.');
-      toast('Đổi mật khẩu VM thành công.', 'ok');
+      if (result?.success !== true) throw new Error(t('instances.passwordUnconfirmed'));
+      toast(t('instances.passwordAccepted'), 'ok');
       onDone();
     } catch (failure) {
-      setError(failure.message || 'Không thể đổi mật khẩu VM.');
+      setError(failure.message || t('instances.passwordFailure'));
     } finally {
       setPassword('');
       setConfirmation('');
@@ -405,25 +437,25 @@ function ChangePasswordModal({ server, onClose, onDone }) {
   }
 
   return (
-    <Modal title="Đổi mật khẩu VM" onClose={close}>
+    <Modal title={t('instances.changePasswordTitle')} onClose={close}>
       <form onSubmit={submit}>
         <div className="kv">
           <div><span>VM</span><strong>{server.name}</strong></div>
         </div>
-        <Field label="Mật khẩu mới">
+        <Field label={t('instances.newPassword')}>
           <input type="password" autoComplete="off" value={password}
             onChange={(event) => setPassword(event.target.value)} disabled={busy} />
         </Field>
-        <Field label="Xác nhận mật khẩu">
+        <Field label={t('instances.confirmPassword')}>
           <input type="password" autoComplete="off" value={confirmation}
             onChange={(event) => setConfirmation(event.target.value)} disabled={busy} />
         </Field>
-        {confirmation && password !== confirmation && <p className="err-text" role="alert">Mật khẩu xác nhận không khớp.</p>}
+        {confirmation && password !== confirmation && <p className="err-text" role="alert">{t('instances.passwordMismatch')}</p>}
         {error && <p className="err-text" role="alert">{error}</p>}
         <div className="modal-foot password-modal-actions">
-          <button className="btn ghost" type="button" onClick={close} disabled={busy}>Huỷ</button>
+          <button className="btn ghost" type="button" onClick={close} disabled={busy}>{t('common.cancel')}</button>
           <button className="btn primary" type="submit" disabled={busy || !password || password !== confirmation}>
-            {busy ? 'Đang gửi…' : 'Đổi mật khẩu'}
+            {t(busy ? 'instances.loadingRequest' : 'instances.changePassword')}
           </button>
         </div>
       </form>
@@ -433,9 +465,12 @@ function ChangePasswordModal({ server, onClose, onDone }) {
 
 // ---------- Đổi cấu hình (resize) ----------
 function ResizeModal({ server, onClose, onDone }) {
+  const { t } = useI18n();
   const [flavors, setFlavors] = useState([]);
   const [flavorRef, setFlavorRef] = useState('');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const requestPending = useRef(false);
   const curId = server.flavor?.id;
 
   useEffect(() => {
@@ -446,53 +481,63 @@ function ResizeModal({ server, onClose, onDone }) {
     }).catch((e) => toast(e.message, 'error'));
   }, [curId]);
 
+  function close() {
+    if (!requestPending.current) onClose();
+  }
+
   async function submit() {
-    if (!flavorRef) return;
-    setBusy(true);
-    try {
-      await api(`/servers/${server.id}/action`, { method: 'POST', body: { action: 'resize', flavorRef } });
-      toast(`Đang resize ${server.name} — chờ trạng thái VERIFY_RESIZE rồi bấm "Xác nhận resize"`, 'ok');
-      onDone();
-    } catch (e) { toast(e.message, 'error'); setBusy(false); }
+    await submitResizeOnce({
+      pending: requestPending, server, flavorRef, currentFlavorId: curId, flavors, request: api,
+      onStart: () => { setBusy(true); setError(''); },
+      onAccepted: () => {
+        setFlavorRef('');
+        toast(t('instances.resizeWaiting', { name: server.name }), 'ok');
+        onDone();
+      },
+      onError: (failure) => { setError(failure.message || t('instances.resizeFailed')); setBusy(false); },
+    });
   }
 
   return (
-    <Modal title={`Đổi cấu hình — ${server.name}`} onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Huỷ</button>
-        <button className="btn primary" onClick={submit} disabled={busy || !flavorRef}>{busy ? 'Đang gửi…' : 'Resize'}</button></>}>
-      <p className="dim">Hiện tại: <b>{server.flavor?.original_name || curId}</b>{server.flavor?.vcpus != null && ` — ${server.flavor.vcpus} vCPU / ${ramGB(server.flavor.ram)} / ${server.flavor.disk} GB`}</p>
-      <Field label="Cấu hình mới">
-        <select value={flavorRef} onChange={(e) => setFlavorRef(e.target.value)}>
+    <Modal title={t('instances.resizeTitle', { name: server.name })} onClose={close}
+      footer={<><button className="btn ghost" onClick={close} disabled={busy}>{t('common.cancel')}</button>
+        <button className="btn primary" onClick={submit} disabled={busy || !validResizeFlavor(flavorRef, curId, flavors)}>{t(busy ? 'instances.loadingRequest' : 'instances.resizeSubmit')}</button></>}>
+      <p className="dim">{t('instances.currentFlavor')}: <b>{server.flavor?.original_name || curId}</b>{server.flavor?.vcpus != null && ` — ${server.flavor.vcpus} vCPU / ${ramGB(server.flavor.ram)} / ${server.flavor.disk} GB`}</p>
+      <Field label={t('instances.newFlavor')}>
+        <select value={flavorRef} onChange={(e) => setFlavorRef(e.target.value)} disabled={busy}>
           {flavors.map((f) => <option key={f.id} value={f.id}>{f.name} — {f.vcpus} vCPU / {ramGB(f.ram)} / {f.disk} GB</option>)}
         </select>
       </Field>
-      <p className="warn-text">Máy sẽ tắt và di chuyển trong lúc resize. Sau khi lên VERIFY_RESIZE phải bấm "Xác nhận resize" (hoặc "Hoàn tác") trong menu hành động.</p>
+      {error && <p className="err-text" role="alert">{error}</p>}
+      <p className="warn-text">{t('instances.resizeWarning')}</p>
     </Modal>
   );
 }
 
 // ---------- Log console ----------
 function ConsoleLogModal({ server, onClose }) {
+  const { t } = useI18n();
   const [log, setLog] = useState(null);
 
   async function load() {
     setLog(null);
     try {
       const d = await api(`/servers/${server.id}/console-log?lines=300`);
-      setLog(d.output || '(log trống)');
-    } catch (e) { setLog(`Không lấy được log: ${e.message}`); }
+      setLog(d.output || t('instances.logEmpty'));
+    } catch (e) { setLog(t('instances.logFailed', { message: e.message })); }
   }
   useEffect(() => { load(); }, []); // eslint-disable-line
 
   return (
-    <Modal title={`Log console — ${server.name}`} onClose={onClose} wide
-      footer={<button className="btn ghost" onClick={load}>Tải lại log</button>}>
-      {log === null ? <p>Đang tải log…</p> : <pre className="console-pre">{log}</pre>}
+    <Modal title={t('instances.logTitle', { name: server.name })} onClose={onClose} wide
+      footer={<button className="btn ghost" onClick={load}>{t('instances.reloadLog')}</button>}>
+      {log === null ? <p>{t('instances.loadingLog')}</p> : <pre className="console-pre">{log}</pre>}
     </Modal>
   );
 }
 
 function FipModal({ server, onClose, onDone }) {
+  const { t } = useI18n();
   const [fips, setFips] = useState(null);
   const [extNets, setExtNets] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -508,35 +553,35 @@ function FipModal({ server, onClose, onDone }) {
     setBusy(true);
     try {
       await api(`/floatingips/${fipId}/associate`, { method: 'POST', body: { server_id: server.id } });
-      toast(`Đã gắn Floating IP vào ${server.name}`, 'ok');
+      toast(t('instances.fipAttached', { name: server.name }), 'ok');
       onDone();
     } catch (e) { toast(e.message, 'error'); setBusy(false); }
   }
 
   async function allocateAndAssociate() {
-    if (!extNets.length) return toast('Không có mạng external nào', 'error');
+    if (!extNets.length) return toast(t('instances.noExternalNetwork'), 'error');
     setBusy(true);
     try {
       const d = await api('/floatingips', { method: 'POST', body: { floating_network_id: extNets[0].id } });
       await api(`/floatingips/${d.floatingip.id}/associate`, { method: 'POST', body: { server_id: server.id } });
-      toast(`Đã cấp ${d.floatingip.floating_ip_address} cho ${server.name}`, 'ok');
+      toast(t('instances.fipAllocated', { ip: d.floatingip.floating_ip_address, name: server.name }), 'ok');
       onDone();
     } catch (e) { toast(e.message, 'error'); setBusy(false); }
   }
 
   return (
-    <Modal title={`Gắn Floating IP — ${server.name}`} onClose={onClose}
-      footer={<button className="btn primary" onClick={allocateAndAssociate} disabled={busy}>Cấp IP mới & gắn luôn</button>}>
-      {!fips ? <p>Đang tải…</p> : fips.length === 0 ? (
-        <p className="dim">Không có Floating IP trống. Bấm “Cấp IP mới & gắn luôn” để lấy IP từ pool.</p>
+    <Modal title={t('instances.fipTitle', { name: server.name })} onClose={onClose}
+      footer={<button className="btn primary" onClick={allocateAndAssociate} disabled={busy}>{t('instances.allocateAndAttach')}</button>}>
+      {!fips ? <p>{t('common.loading')}</p> : fips.length === 0 ? (
+        <p className="dim">{t('instances.noAvailableFip')}</p>
       ) : (
         <table className="tbl">
-          <thead><tr><th>IP trống</th><th /></tr></thead>
+          <thead><tr><th>{t('instances.availableIp')}</th><th /></tr></thead>
           <tbody>
             {fips.map((f) => (
               <tr key={f.id}>
                 <td className="mono">{f.floating_ip_address}</td>
-                <td><button className="btn sm" disabled={busy} onClick={() => associate(f.id)}>Gắn IP này</button></td>
+                <td><button className="btn sm" disabled={busy} onClick={() => associate(f.id)}>{t('instances.attachThisIp')}</button></td>
               </tr>
             ))}
           </tbody>
@@ -548,6 +593,7 @@ function FipModal({ server, onClose, onDone }) {
 
 // ---------- Cài lại hệ điều hành ----------
 function RebuildModal({ server, onClose, onDone }) {
+  const { t } = useI18n();
   const [images, setImages] = useState([]);
   const [f, setF] = useState({ imageRef: '', confirm: '' });
   const [busy, setBusy] = useState(false);
@@ -561,26 +607,26 @@ function RebuildModal({ server, onClose, onDone }) {
   }, []);
 
   async function submit() {
-    if (f.confirm !== server.name) return toast('Gõ đúng tên máy để xác nhận', 'error');
+    if (f.confirm !== server.name) return toast(t('instances.rebuildConfirmRequired'), 'error');
     setBusy(true);
     try {
       await api(`/servers/${server.id}/rebuild`, { method: 'POST', body: { imageRef: f.imageRef } });
-      toast('Đang cài lại hệ điều hành…', 'ok');
+      toast(t('instances.rebuilding'), 'ok');
       onDone();
     } catch (e) { toast(e.message, 'error'); setBusy(false); }
   }
 
   return (
-    <Modal title={`Cài lại HĐH — ${server.name}`} onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Huỷ</button>
-        <button className="btn primary" onClick={submit} disabled={busy || f.confirm !== server.name}>Cài lại</button></>}>
-      <p className="warn-text">Toàn bộ dữ liệu trên đĩa gốc sẽ MẤT. Máy giữ nguyên IP, ID, security group và các volume gắn kèm.</p>
-      <Field label="Image mới">
+    <Modal title={t('instances.rebuildTitle', { name: server.name })} onClose={onClose}
+      footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
+        <button className="btn primary" onClick={submit} disabled={busy || f.confirm !== server.name}>{t('instances.rebuildSubmit')}</button></>}>
+      <p className="warn-text">{t('instances.rebuildWarning')}</p>
+      <Field label={t('instances.newImage')}>
         <select value={f.imageRef} onChange={(e) => setF({ ...f, imageRef: e.target.value })}>
           {images.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
         </select>
       </Field>
-      <Field label={`Gõ "${server.name}" để xác nhận`}>
+      <Field label={t('instances.rebuildTypeName', { name: server.name })}>
         <input value={f.confirm} onChange={(e) => setF({ ...f, confirm: e.target.value })} placeholder={server.name} />
       </Field>
     </Modal>
@@ -589,6 +635,7 @@ function RebuildModal({ server, onClose, onDone }) {
 
 // ---------- Card mạng (NIC) ----------
 function NicModal({ server, onClose, onDone }) {
+  const { t } = useI18n();
   const [ifaces, setIfaces] = useState(null);
   const [nets, setNets] = useState([]);
   const [netId, setNetId] = useState('');
@@ -605,14 +652,14 @@ function NicModal({ server, onClose, onDone }) {
 
   async function attach() {
     setBusy(true);
-    try { await api(`/servers/${server.id}/interfaces`, { method: 'POST', body: { net_id: netId } }); toast('Đã gắn card mạng', 'ok'); await load(); onDone(); }
+    try { await api(`/servers/${server.id}/interfaces`, { method: 'POST', body: { net_id: netId } }); toast(t('instances.nicAttached'), 'ok'); await load(); onDone(); }
     catch (e) { toast(e.message, 'error'); }
     setBusy(false);
   }
   async function detach(portId) {
-    if (!window.confirm('Gỡ card mạng này khỏi máy?')) return;
+    if (!window.confirm(t('instances.nicDetachConfirm'))) return;
     setBusy(true);
-    try { await api(`/servers/${server.id}/interfaces/${portId}`, { method: 'DELETE' }); toast('Đã gỡ card mạng', 'ok'); await load(); onDone(); }
+    try { await api(`/servers/${server.id}/interfaces/${portId}`, { method: 'DELETE' }); toast(t('instances.nicDetached'), 'ok'); await load(); onDone(); }
     catch (e) { toast(e.message, 'error'); }
     setBusy(false);
   }
@@ -620,18 +667,18 @@ function NicModal({ server, onClose, onDone }) {
   const netName = (id) => nets.find((n) => n.id === id)?.name || id?.slice(0, 8);
 
   return (
-    <Modal title={`Card mạng — ${server.name}`} onClose={onClose}>
-      {!ifaces ? <p>Đang tải…</p> : (
+    <Modal title={t('instances.nicTitle', { name: server.name })} onClose={onClose}>
+      {!ifaces ? <p>{t('common.loading')}</p> : (
         <>
           <table className="tbl">
-            <thead><tr><th>Network</th><th>IP</th><th>Trạng thái</th><th /></tr></thead>
+            <thead><tr><th>Network</th><th>IP</th><th>{t('common.status')}</th><th /></tr></thead>
             <tbody>
               {ifaces.map((i) => (
                 <tr key={i.port_id}>
                   <td>{netName(i.net_id)}</td>
                   <td className="mono">{i.fixed_ips?.map((x) => x.ip_address).join(', ')}</td>
                   <td><StatusBadge status={i.port_state} /></td>
-                  <td><button className="btn sm danger-ghost" disabled={busy || ifaces.length <= 1} onClick={() => detach(i.port_id)}>Gỡ</button></td>
+                  <td><button className="btn sm danger-ghost" disabled={busy || ifaces.length <= 1} onClick={() => detach(i.port_id)}>{t('instances.detach')}</button></td>
                 </tr>
               ))}
             </tbody>
@@ -640,9 +687,9 @@ function NicModal({ server, onClose, onDone }) {
             <select value={netId} onChange={(e) => setNetId(e.target.value)} style={{ flex: 1 }}>
               {nets.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
             </select>
-            <button className="btn primary sm" onClick={attach} disabled={busy || !netId}>Gắn thêm</button>
+            <button className="btn primary sm" onClick={attach} disabled={busy || !netId}>{t('instances.attachMore')}</button>
           </div>
-          <p className="dim">Card mạng mới cần cấu hình trong OS (netplan/NetworkManager) để lên IP; card cuối cùng không gỡ được.</p>
+          <p className="dim">{t('instances.nicHint')}</p>
         </>
       )}
     </Modal>
@@ -651,6 +698,7 @@ function NicModal({ server, onClose, onDone }) {
 
 // ---------- Đổi security group của máy đang chạy ----------
 function SgModal({ server, onClose, onDone }) {
+  const { t } = useI18n();
   const [all, setAll] = useState([]);
   const [sel, setSel] = useState((server.security_groups || []).map((g) => g.name));
   const [busy, setBusy] = useState(false);
@@ -665,15 +713,15 @@ function SgModal({ server, onClose, onDone }) {
     setBusy(true);
     try {
       await api(`/servers/${server.id}/security-groups`, { method: 'POST', body: { add, remove } });
-      toast('Đã cập nhật security group', 'ok');
+      toast(t('instances.sgUpdated'), 'ok');
       onDone();
     } catch (e) { toast(e.message, 'error'); setBusy(false); }
   }
 
   return (
     <Modal title={`Security group — ${server.name}`} onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Huỷ</button>
-        <button className="btn primary" onClick={submit} disabled={busy}>Lưu</button></>}>
+      footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
+        <button className="btn primary" onClick={submit} disabled={busy}>{t('common.save')}</button></>}>
       <div className="check-list">
         {all.map((g) => (
           <label key={g.id} className="check-item">
@@ -683,7 +731,7 @@ function SgModal({ server, onClose, onDone }) {
           </label>
         ))}
       </div>
-      <p className="dim">Thay đổi có hiệu lực ngay, không cần khởi động lại máy.</p>
+      <p className="dim">{t('instances.sgHint')}</p>
     </Modal>
   );
 }

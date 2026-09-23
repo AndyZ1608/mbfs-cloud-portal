@@ -3,8 +3,10 @@ import { useParams } from 'react-router-dom';
 import { api } from '../api.js';
 import useCmpSession from '../useCmpSession.js';
 import VncConsole from '../components/VncConsole.jsx';
+import { useI18n } from '../i18n/react.jsx';
 
 export default function ConsolePage() {
+  const { t } = useI18n();
   const { instanceId } = useParams();
   const session = useCmpSession();
   const [server, setServer] = useState(null);
@@ -21,10 +23,10 @@ export default function ConsolePage() {
 
   useEffect(() => {
     const previous = document.title;
-    document.title = `Console — ${name}`;
+    document.title = t('console.title', { name });
     return () => { document.title = previous; };
-  }, [name]);
+  }, [name, t]);
 
-  if (!session) return <div className="boot">Đang tải…</div>;
+  if (!session) return <div className="boot">{t('common.loading')}</div>;
   return <VncConsole key={instanceId} instanceId={instanceId} name={name} />;
 }

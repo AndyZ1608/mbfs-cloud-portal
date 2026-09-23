@@ -1,9 +1,9 @@
-const vndFormatter = new Intl.NumberFormat('vi-VN', {
-  style: 'currency',
-  currency: 'VND',
-  maximumFractionDigits: 0,
-  minimumFractionDigits: 0,
-});
+import { getLocale, intlLocale, text } from '../i18n/index.js';
+
+const vndFormatters = {
+  vi: new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0, minimumFractionDigits: 0 }),
+  en: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'VND', currencyDisplay: 'code', maximumFractionDigits: 0, minimumFractionDigits: 0 }),
+};
 
 const DATE_FIELD = /(date|time|as_of|updated|created|period_(start|end))/i;
 const MONEY_FIELD = /(^|[._])(cost|amount|charge|price|total)([._]|$)/i;
@@ -96,22 +96,22 @@ export function decimalToRoundedBigInt(value) {
 
 export function formatVnd(value) {
   const rounded = decimalToRoundedBigInt(value);
-  return rounded === null ? '—' : vndFormatter.format(rounded);
+  return rounded === null ? '—' : vndFormatters[getLocale()].format(rounded);
 }
 
 export function formatDateTime(value) {
   if (value === null || value === undefined || value === '') return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+  return new Intl.DateTimeFormat(intlLocale(), { dateStyle: 'medium', timeStyle: 'short', hour12: false }).format(date);
 }
 
 export function displayBillingValue(value, key = '') {
   if (value === null || value === undefined || value === '') return '—';
-  if (typeof value === 'boolean') return value ? 'Có' : 'Không';
+  if (typeof value === 'boolean') return text(value ? 'common.yes' : 'common.no');
   if (MONEY_FIELD.test(key) && key !== 'currency') return formatVnd(value);
   if (DATE_FIELD.test(key)) return formatDateTime(value);
-  if (typeof value === 'number') return value.toLocaleString('vi-VN', { maximumFractionDigits: 2 });
+  if (typeof value === 'number') return value.toLocaleString(intlLocale(), { maximumFractionDigits: 2 });
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
 }

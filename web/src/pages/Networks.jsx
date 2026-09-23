@@ -2,8 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { api } from '../api.js';
 import { Modal, Field, StatusBadge, ActionsMenu, toast, Empty, PageHead } from '../components/ui.jsx';
+import { useI18n } from '../i18n/react.jsx';
 
 export default function Networks() {
+  const { t } = useI18n();
   const [nets, setNets] = useState(null);
   const [routers, setRouters] = useState([]);
   const [creating, setCreating] = useState(false);
@@ -19,14 +21,14 @@ export default function Networks() {
   useEffect(() => { load(); }, []);
 
   async function delNet(n) {
-    if (!window.confirm(`Xoá network "${n.name}" và subnet của nó?`)) return;
-    try { await api(`/networks/${n.id}`, { method: 'DELETE' }); toast('Đã xoá network', 'ok'); load(); }
+    if (!window.confirm(t('networks.deleteNetworkConfirm', { name: n.name }))) return;
+    try { await api(`/networks/${n.id}`, { method: 'DELETE' }); toast(t('networks.networkDeleted'), 'ok'); load(); }
     catch (e) { toast(e.message, 'error'); }
   }
 
   async function delRouter(r) {
-    if (!window.confirm(`Xoá router "${r.name}"? (phải gỡ hết interface trước)`)) return;
-    try { await api(`/routers/${r.id}`, { method: 'DELETE' }); toast('Đã xoá router', 'ok'); load(); }
+    if (!window.confirm(t('networks.deleteRouterConfirm', { name: r.name }))) return;
+    try { await api(`/routers/${r.id}`, { method: 'DELETE' }); toast(t('networks.routerDeleted'), 'ok'); load(); }
     catch (e) { toast(e.message, 'error'); }
   }
 
@@ -34,27 +36,27 @@ export default function Networks() {
 
   return (
     <>
-      <PageHead title="Mạng & Router" count={nets?.length} onRefresh={load}>
-        <button className="btn ghost" onClick={() => setCreatingRouter(true)}><Plus size={16} /> Tạo router</button>
-        <button className="btn primary" onClick={() => setCreating(true)}><Plus size={16} /> Tạo network</button>
+      <PageHead title={t('navigation.networks')} count={nets?.length} onRefresh={load}>
+        <button className="btn ghost" onClick={() => setCreatingRouter(true)}><Plus size={16} /> {t('networks.createRouter')}</button>
+        <button className="btn primary" onClick={() => setCreating(true)}><Plus size={16} /> {t('networks.createNetwork')}</button>
       </PageHead>
 
-      {!nets ? <Empty>Đang tải…</Empty> : (
+      {!nets ? <Empty>{t('common.loading')}</Empty> : (
         <div className="card">
           <div className="card-head"><h4>Networks</h4></div>
           <table className="tbl">
-            <thead><tr><th>Tên</th><th>Trạng thái</th><th>Subnet (CIDR)</th><th>Loại</th><th /></tr></thead>
+            <thead><tr><th>{t('common.name')}</th><th>{t('common.status')}</th><th>Subnet (CIDR)</th><th>{t('networks.type')}</th><th /></tr></thead>
             <tbody>
               {nets.map((n) => (
                 <tr key={n.id}>
                   <td><b>{n.name}</b></td>
                   <td><StatusBadge status={n.status} /></td>
                   <td>{(n.subnet_details || []).map((s) => (
-                    <span key={s.id} className="mono chip" title={`GW ${s.gateway_ip || '—'} · DHCP ${s.enable_dhcp ? 'bật' : 'tắt'}`}>{s.cidr}</span>
+                    <span key={s.id} className="mono chip" title={`GW ${s.gateway_ip || '—'} · DHCP ${t(s.enable_dhcp ? 'networks.on' : 'networks.off')}`}>{s.cidr}</span>
                   ))}</td>
-                  <td className="dim">{n['router:external'] ? 'External' : n.shared ? 'Shared' : 'Nội bộ'}</td>
+                  <td className="dim">{t(n['router:external'] ? 'networks.external' : n.shared ? 'networks.shared' : 'networks.internal')}</td>
                   <td>{!n['router:external'] && (
-                    <ActionsMenu items={[{ label: 'Xoá network', danger: true, onClick: () => delNet(n) }]} />
+                    <ActionsMenu items={[{ label: t('networks.deleteNetwork'), danger: true, onClick: () => delNet(n) }]} />
                   )}</td>
                 </tr>
               ))}
@@ -65,9 +67,9 @@ export default function Networks() {
 
       <div className="card">
         <div className="card-head"><h4>Routers</h4></div>
-        {routers.length === 0 ? <Empty>Chưa có router. Router kết nối network nội bộ ra mạng external.</Empty> : (
+        {routers.length === 0 ? <Empty>{t('networks.noRouters')}</Empty> : (
           <table className="tbl">
-            <thead><tr><th>Tên</th><th>Trạng thái</th><th>Gateway external</th><th /></tr></thead>
+            <thead><tr><th>{t('common.name')}</th><th>{t('common.status')}</th><th>{t('networks.externalGateway')}</th><th /></tr></thead>
             <tbody>
               {routers.map((r) => (
                 <tr key={r.id}>
@@ -76,9 +78,9 @@ export default function Networks() {
                   <td className="dim">{r.external_gateway_info ? extName(r.external_gateway_info.network_id) : '—'}</td>
                   <td>
                     <ActionsMenu items={[
-                      { label: 'Quản lý interface', onClick: () => setIfaceFor(r) },
+                      { label: t('networks.manageInterfaces'), onClick: () => setIfaceFor(r) },
                       'divider',
-                      { label: 'Xoá router', danger: true, onClick: () => delRouter(r) },
+                      { label: t('networks.deleteRouter'), danger: true, onClick: () => delRouter(r) },
                     ]} />
                   </td>
                 </tr>
@@ -96,55 +98,57 @@ export default function Networks() {
 }
 
 function CreateNetwork({ onClose, onDone }) {
+  const { t } = useI18n();
   const [f, setF] = useState({ name: '', cidr: '10.0.0.0/24', gateway_ip: '', enable_dhcp: true, dns: '8.8.8.8' });
   const [busy, setBusy] = useState(false);
 
   async function submit() {
-    if (!f.name.trim() || !f.cidr.trim()) return toast('Nhập tên và CIDR', 'error');
+    if (!f.name.trim() || !f.cidr.trim()) return toast(t('networks.nameCidrRequired'), 'error');
     setBusy(true);
     try {
       await api('/networks', { method: 'POST', body: f });
-      toast(`Đã tạo network ${f.name}`, 'ok');
+      toast(t('networks.networkCreated', { name: f.name }), 'ok');
       onDone();
     } catch (e) { toast(e.message, 'error'); setBusy(false); }
   }
 
   return (
-    <Modal title="Tạo network + subnet" onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Huỷ</button>
-        <button className="btn primary" onClick={submit} disabled={busy}>{busy ? 'Đang tạo…' : 'Tạo network'}</button></>}>
-      <Field label="Tên network"><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="vd: net-app" autoFocus /></Field>
+    <Modal title={t('networks.createNetworkTitle')} onClose={onClose}
+      footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
+        <button className="btn primary" onClick={submit} disabled={busy}>{t(busy ? 'instances.creating' : 'networks.createNetwork')}</button></>}>
+      <Field label={t('networks.networkName')}><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="e.g. net-app" autoFocus /></Field>
       <Field label="CIDR subnet"><input className="mono" value={f.cidr} onChange={(e) => setF({ ...f, cidr: e.target.value })} /></Field>
-      <Field label="Gateway IP" hint="Bỏ trống để lấy IP đầu tiên của dải"><input className="mono" value={f.gateway_ip} onChange={(e) => setF({ ...f, gateway_ip: e.target.value })} placeholder="tự động" /></Field>
-      <Field label="DNS" hint="Nhiều DNS cách nhau bằng dấu phẩy"><input className="mono" value={f.dns} onChange={(e) => setF({ ...f, dns: e.target.value })} /></Field>
-      <label className="check-item"><input type="checkbox" checked={f.enable_dhcp} onChange={(e) => setF({ ...f, enable_dhcp: e.target.checked })} /> Bật DHCP</label>
+      <Field label="Gateway IP" hint={t('networks.gatewayHint')}><input className="mono" value={f.gateway_ip} onChange={(e) => setF({ ...f, gateway_ip: e.target.value })} placeholder={t('networks.automatic')} /></Field>
+      <Field label="DNS" hint={t('networks.dnsHint')}><input className="mono" value={f.dns} onChange={(e) => setF({ ...f, dns: e.target.value })} /></Field>
+      <label className="check-item"><input type="checkbox" checked={f.enable_dhcp} onChange={(e) => setF({ ...f, enable_dhcp: e.target.checked })} /> {t('networks.enableDhcp')}</label>
     </Modal>
   );
 }
 
 function CreateRouter({ nets, onClose, onDone }) {
+  const { t } = useI18n();
   const ext = nets.filter((n) => n['router:external']);
   const [f, setF] = useState({ name: '', external_network_id: ext[0]?.id || '' });
   const [busy, setBusy] = useState(false);
 
   async function submit() {
-    if (!f.name.trim()) return toast('Nhập tên router', 'error');
+    if (!f.name.trim()) return toast(t('networks.routerNameRequired'), 'error');
     setBusy(true);
     try {
       await api('/routers', { method: 'POST', body: { name: f.name, external_network_id: f.external_network_id || undefined } });
-      toast(`Đã tạo router ${f.name}`, 'ok');
+      toast(t('networks.routerCreated', { name: f.name }), 'ok');
       onDone();
     } catch (e) { toast(e.message, 'error'); setBusy(false); }
   }
 
   return (
-    <Modal title="Tạo router" onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Huỷ</button>
-        <button className="btn primary" onClick={submit} disabled={busy}>{busy ? 'Đang tạo…' : 'Tạo router'}</button></>}>
-      <Field label="Tên router"><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} autoFocus /></Field>
-      <Field label="Gateway external" hint="Chọn mạng external để máy ảo ra Internet / dùng Floating IP">
+    <Modal title={t('networks.createRouter')} onClose={onClose}
+      footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
+        <button className="btn primary" onClick={submit} disabled={busy}>{t(busy ? 'instances.creating' : 'networks.createRouter')}</button></>}>
+      <Field label={t('networks.routerName')}><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} autoFocus /></Field>
+      <Field label={t('networks.externalGateway')} hint={t('networks.externalGatewayHint')}>
         <select value={f.external_network_id} onChange={(e) => setF({ ...f, external_network_id: e.target.value })}>
-          <option value="">— Không đặt —</option>
+          <option value="">— {t('networks.notSet')} —</option>
           {ext.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
         </select>
       </Field>
@@ -153,6 +157,7 @@ function CreateRouter({ nets, onClose, onDone }) {
 }
 
 function IfaceModal({ router, nets, onClose }) {
+  const { t } = useI18n();
   const [ifaces, setIfaces] = useState(null);
   const [subnetId, setSubnetId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -168,14 +173,14 @@ function IfaceModal({ router, nets, onClose }) {
   async function add() {
     if (!subnetId) return;
     setBusy(true);
-    try { await api(`/routers/${router.id}/interfaces`, { method: 'POST', body: { subnet_id: subnetId } }); toast('Đã gắn subnet vào router', 'ok'); await load(); }
+    try { await api(`/routers/${router.id}/interfaces`, { method: 'POST', body: { subnet_id: subnetId } }); toast(t('networks.subnetAttached'), 'ok'); await load(); }
     catch (e) { toast(e.message, 'error'); }
     setBusy(false);
   }
 
   async function remove(sid) {
     setBusy(true);
-    try { await api(`/routers/${router.id}/interfaces/${sid}`, { method: 'DELETE' }); toast('Đã gỡ interface', 'ok'); await load(); }
+    try { await api(`/routers/${router.id}/interfaces/${sid}`, { method: 'DELETE' }); toast(t('networks.interfaceDetached'), 'ok'); await load(); }
     catch (e) { toast(e.message, 'error'); }
     setBusy(false);
   }
@@ -189,12 +194,12 @@ function IfaceModal({ router, nets, onClose }) {
     <Modal title={`Interface — ${router.name}`} onClose={onClose}>
       <div className="row-inline" style={{ marginBottom: 14 }}>
         <select value={subnetId} onChange={(e) => setSubnetId(e.target.value)} style={{ flex: 1 }}>
-          <option value="">— Chọn subnet để gắn —</option>
+          <option value="">— {t('networks.selectSubnet')} —</option>
           {allSubnets.map((s) => <option key={s.id} value={s.id}>{s.netName} — {s.cidr}</option>)}
         </select>
-        <button className="btn primary sm" onClick={add} disabled={busy || !subnetId}>Gắn</button>
+        <button className="btn primary sm" onClick={add} disabled={busy || !subnetId}>{t('networks.attach')}</button>
       </div>
-      {!ifaces ? <p>Đang tải…</p> : ifaces.length === 0 ? <p className="dim">Router chưa có interface nào.</p> : (
+      {!ifaces ? <p>{t('common.loading')}</p> : ifaces.length === 0 ? <p className="dim">{t('networks.noInterfaces')}</p> : (
         <table className="tbl">
           <thead><tr><th>Subnet</th><th>IP</th><th /></tr></thead>
           <tbody>
@@ -202,7 +207,7 @@ function IfaceModal({ router, nets, onClose }) {
               <tr key={p.id}>
                 <td>{subnetLabel(p.fixed_ips?.[0]?.subnet_id)}</td>
                 <td className="mono">{p.fixed_ips?.[0]?.ip_address}</td>
-                <td><button className="btn sm danger-ghost" disabled={busy} onClick={() => remove(p.fixed_ips?.[0]?.subnet_id)}>Gỡ</button></td>
+                <td><button className="btn sm danger-ghost" disabled={busy} onClick={() => remove(p.fixed_ips?.[0]?.subnet_id)}>{t('instances.detach')}</button></td>
               </tr>
             ))}
           </tbody>

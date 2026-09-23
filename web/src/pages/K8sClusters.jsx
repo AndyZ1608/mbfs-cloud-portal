@@ -2,8 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { api, fmtDate, ramGB } from '../api.js';
 import { Modal, Field, StatusBadge, ActionsMenu, toast, Empty, PageHead } from '../components/ui.jsx';
+import { useI18n } from '../i18n/react.jsx';
 
 export default function K8sClusters() {
+  const { t } = useI18n();
   const [clusters, setClusters] = useState(null);
   const [creating, setCreating] = useState(false);
   const [detail, setDetail] = useState(null);
@@ -20,10 +22,10 @@ export default function K8sClusters() {
   }, []);
 
   async function del(c) {
-    if (!window.confirm(`Xoá cluster "${c.name}" gồm ${c.nodes.length} máy ảo + security group? Dữ liệu trong cluster sẽ mất.`)) return;
+    if (!window.confirm(t('k8s.deleteConfirm', { name: c.name, count: c.nodes.length }))) return;
     try {
       const r = await api(`/k8s/clusters/${c.id}`, { method: 'DELETE' });
-      toast('Đã xoá cluster' + (r.warnings?.length ? ' (có cảnh báo)' : ''), 'ok');
+      toast(t(r.warnings?.length ? 'k8s.deletedWithWarnings' : 'k8s.deleted'), 'ok');
       r.warnings?.forEach((w) => toast(w, 'error'));
       load();
     } catch (e) { toast(e.message, 'error'); }
@@ -31,17 +33,17 @@ export default function K8sClusters() {
 
   return (
     <>
-      <PageHead title="Kubernetes (RKE2)" count={clusters?.length} onRefresh={load}>
-        <button className="btn primary" onClick={() => setCreating(true)}><Plus size={16} /> Tạo cluster</button>
+      <PageHead title={t('k8s.title')} count={clusters?.length} onRefresh={load}>
+        <button className="btn primary" onClick={() => setCreating(true)}><Plus size={16} /> {t('k8s.create')}</button>
       </PageHead>
-      <p className="dim page-desc">Dựng cụm RKE2 tự động: 1 server + N worker, tự mở firewall nội bộ cụm và cổng quản trị. RKE2 cài 5–10 phút mỗi node sau khi VM ACTIVE (tải từ get.rke2.io).</p>
+      <p className="dim page-desc">{t('k8s.description')}</p>
 
-      {!clusters ? <Empty>Đang tải…</Empty> : clusters.length === 0 ? (
-        <Empty>Chưa có cluster nào. Đây chính là cách team dựng nhanh môi trường RKE2 test/staging.</Empty>
+      {!clusters ? <Empty>{t('common.loading')}</Empty> : clusters.length === 0 ? (
+        <Empty>{t('k8s.empty')}</Empty>
       ) : (
         <div className="card">
           <table className="tbl">
-            <thead><tr><th>Tên</th><th>Node sẵn sàng</th><th>Server IP</th><th>Floating IP</th><th>Tạo lúc</th><th /></tr></thead>
+            <thead><tr><th>{t('common.name')}</th><th>{t('k8s.readyNodes')}</th><th>Server IP</th><th>Floating IP</th><th>{t('common.createdAt')}</th><th /></tr></thead>
             <tbody>
               {clusters.map((c) => (
                 <tr key={c.id}>
@@ -52,9 +54,9 @@ export default function K8sClusters() {
                   <td className="dim">{fmtDate(c.created_at)}</td>
                   <td>
                     <ActionsMenu items={[
-                      { label: 'Chi tiết / Kubeconfig', onClick: () => setDetail(c) },
+                      { label: t('k8s.details'), onClick: () => setDetail(c) },
                       'divider',
-                      { label: 'Xoá cluster', danger: true, onClick: () => del(c) },
+                      { label: t('k8s.delete'), danger: true, onClick: () => del(c) },
                     ]} />
                   </td>
                 </tr>
@@ -71,6 +73,7 @@ export default function K8sClusters() {
 }
 
 function CreateCluster({ onClose, onDone }) {
+  const { t } = useI18n();
   const [opts, setOpts] = useState(null);
   const [busy, setBusy] = useState(false);
   const [f, setF] = useState({ name: '', workers: 2, flavorRef: '', imageRef: '', network_id: '', key_name: '', admin_cidr: '0.0.0.0/0', assign_fip: true });
@@ -88,26 +91,26 @@ function CreateCluster({ onClose, onDone }) {
   }, []);
 
   async function submit() {
-    if (!f.name.trim()) return toast('Nhập tên cluster', 'error');
-    if (!f.key_name) return toast('Bắt buộc chọn SSH key để lấy kubeconfig', 'error');
+    if (!f.name.trim()) return toast(t('k8s.nameRequired'), 'error');
+    if (!f.key_name) return toast(t('k8s.keyRequired'), 'error');
     setBusy(true);
     try {
       const r = await api('/k8s/deploy', { method: 'POST', body: { ...f, workers: Number(f.workers) } });
-      toast(`Đang dựng cluster ${f.name} (${1 + Number(f.workers)} node)`, 'ok');
+      toast(t('k8s.deploying', { name: f.name, count: 1 + Number(f.workers) }), 'ok');
       r.warnings?.forEach((w) => toast(w, 'error'));
       onDone();
     } catch (e) { toast(e.message, 'error'); setBusy(false); }
   }
 
   return (
-    <Modal title="Tạo cluster RKE2" onClose={onClose} wide
-      footer={<><button className="btn ghost" onClick={onClose}>Huỷ</button>
-        <button className="btn primary" onClick={submit} disabled={busy || !opts}>{busy ? 'Đang dựng (chờ IP server node)…' : 'Tạo cluster'}</button></>}>
-      {!opts ? <p>Đang tải…</p> : (
+    <Modal title={t('k8s.createTitle')} onClose={onClose} wide
+      footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
+        <button className="btn primary" onClick={submit} disabled={busy || !opts}>{t(busy ? 'k8s.deployingWait' : 'k8s.create')}</button></>}>
+      {!opts ? <p>{t('common.loading')}</p> : (
         <div className="form-grid">
-          <Field label="Tên cluster" hint="chữ thường, số, gạch ngang"><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="vd: k8s-staging" autoFocus /></Field>
-          <Field label="Số worker (0–9)" hint="Tổng node = 1 server + N worker"><input type="number" min="0" max="9" value={f.workers} onChange={(e) => setF({ ...f, workers: e.target.value })} /></Field>
-          <Field label="Cấu hình node" hint={opts.fitted ? 'RKE2 cần tối thiểu 2 vCPU / 4 GB' : 'Không flavor nào đạt 2 vCPU/4GB — hiển thị tất cả'}>
+          <Field label={t('k8s.clusterName')} hint={t('k8s.nameHint')}><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="e.g. k8s-staging" autoFocus /></Field>
+          <Field label={t('k8s.workerCount')} hint={t('k8s.workerHint')}><input type="number" min="0" max="9" value={f.workers} onChange={(e) => setF({ ...f, workers: e.target.value })} /></Field>
+          <Field label={t('k8s.nodeFlavor')} hint={t(opts.fitted ? 'k8s.minimumFlavor' : 'k8s.noSuitableFlavor')}>
             <select value={f.flavorRef} onChange={(e) => setF({ ...f, flavorRef: e.target.value })}>
               {opts.flavors.map((x) => <option key={x.id} value={x.id}>{x.name} — {x.vcpus} vCPU / {ramGB(x.ram)} / {x.disk} GB</option>)}
             </select>
@@ -122,17 +125,17 @@ function CreateCluster({ onClose, onDone }) {
               {opts.nets.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
             </select>
           </Field>
-          <Field label="SSH key (bắt buộc)">
+          <Field label={t('k8s.requiredKey')}>
             <select value={f.key_name} onChange={(e) => setF({ ...f, key_name: e.target.value })}>
-              <option value="">— Chọn key —</option>
+              <option value="">— {t('k8s.selectKey')} —</option>
               {opts.keypairs.map((k) => <option key={k.name} value={k.name}>{k.name}</option>)}
             </select>
           </Field>
-          <Field label="CIDR quản trị" hint="Được phép truy cập kube-api 6443, 9345, SSH 22">
+          <Field label={t('k8s.adminCidr')} hint={t('k8s.adminCidrHint')}>
             <input className="mono" value={f.admin_cidr} onChange={(e) => setF({ ...f, admin_cidr: e.target.value })} />
           </Field>
           <Field label="Floating IP">
-            <label className="check-item"><input type="checkbox" checked={f.assign_fip} onChange={(e) => setF({ ...f, assign_fip: e.target.checked })} /> Gắn Floating IP vào server node</label>
+            <label className="check-item"><input type="checkbox" checked={f.assign_fip} onChange={(e) => setF({ ...f, assign_fip: e.target.checked })} /> {t('k8s.assignFip')}</label>
           </Field>
         </div>
       )}
@@ -141,6 +144,7 @@ function CreateCluster({ onClose, onDone }) {
 }
 
 function ClusterDetail({ cluster, onClose }) {
+  const { t } = useI18n();
   const [tok, setTok] = useState(null);
   const ip = cluster.fip || cluster.server_ip;
 
@@ -152,22 +156,22 @@ function ClusterDetail({ cluster, onClose }) {
   return (
     <Modal title={`Cluster ${cluster.name}`} onClose={onClose} wide>
       <table className="tbl" style={{ marginBottom: 14 }}>
-        <thead><tr><th>Node</th><th>Vai trò</th><th>Trạng thái VM</th></tr></thead>
+        <thead><tr><th>Node</th><th>{t('k8s.role')}</th><th>{t('k8s.vmStatus')}</th></tr></thead>
         <tbody>
           {cluster.nodes.map((n) => (
             <tr key={n.id}><td><b>{n.name}</b></td><td className="dim">{n.role}</td><td><StatusBadge status={n.status} /></td></tr>
           ))}
         </tbody>
       </table>
-      <p className="mk-section">Lấy kubeconfig</p>
+      <p className="mk-section">{t('k8s.getKubeconfig')}</p>
       <pre className="console-pre">{`ssh ubuntu@${ip} "sudo cat /etc/rancher/rke2/rke2.yaml" > ${cluster.name}.yaml
-# sửa trong file: 127.0.0.1 → ${ip}
+# ${t('k8s.replaceAddress')}: 127.0.0.1 → ${ip}
 export KUBECONFIG=./${cluster.name}.yaml && kubectl get nodes`}</pre>
-      <p className="dim">Trạng thái VM ACTIVE ≠ RKE2 đã cài xong — chờ 5–10 phút/node rồi <span className="mono">kubectl get nodes</span> phải thấy đủ {cluster.nodes.length} node Ready. Debug: <span className="mono">journalctl -u rke2-server -f</span> trên node.</p>
-      <p className="mk-section">Thêm node thủ công sau này</p>
+      <p className="dim">{t('k8s.readyHint', { count: cluster.nodes.length })} <span className="mono">kubectl get nodes</span>. Debug: <span className="mono">journalctl -u rke2-server -f</span>.</p>
+      <p className="mk-section">{t('k8s.addNodeLater')}</p>
       {tok
         ? <p className="mono wrap">token: {tok}</p>
-        : <button className="btn sm" onClick={revealToken}>Hiện token join</button>}
+        : <button className="btn sm" onClick={revealToken}>{t('k8s.showJoinToken')}</button>}
     </Modal>
   );
 }

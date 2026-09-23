@@ -32,6 +32,10 @@ npm test
 
 The CI workflow also syntax-checks every backend module and builds the Docker image.
 
+## UI languages
+
+The portal supports Vietnamese (`vi`) and English (`en`). Vietnamese is the default; the language selector in the header (and on the login screen) changes labels immediately without changing the OpenStack session or selected project. The non-sensitive preference is stored in browser `localStorage` as `cmp.locale`. Translation resources live in `web/src/i18n/locales/vi.js` and `en.js`; keep their semantic keys in sync when adding UI text. OpenStack resource names, identifiers, and raw status values are not translated.
+
 ## Architecture and security
 
 - [Architecture and module boundaries](./docs/ARCHITECTURE.md)

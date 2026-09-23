@@ -1,61 +1,63 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api, fmtDate } from '../api.js';
 import { StatusBadge, toast, Empty, PageHead } from '../components/ui.jsx';
+import { useI18n } from '../i18n/react.jsx';
 
-// Ánh xạ method+path → mô tả tiếng Việt (thứ tự quan trọng: cụ thể trước)
+// Match specific method/path pairs before broad resource operations.
 const RULES = [
-  [/^POST \/auth\/login$/, 'Đăng nhập'],
-  [/^POST \/auth\/logout$/, 'Đăng xuất'],
-  [/^POST \/auth\/switch-project$/, 'Đổi project'],
-  [/^JOB \/backup\/run\//, 'Backup tự động (job)'],
-  [/^POST \/backup\/policies\/[^/]+\/run$/, 'Chạy backup thủ công'],
-  [/^POST \/backup\/policies$/, 'Tạo policy backup'],
-  [/^PATCH \/backup\/policies\//, 'Sửa policy backup'],
-  [/^DELETE \/backup\/policies\//, 'Xoá policy backup'],
-  [/^POST \/servers\/[^/]+\/action$/, 'Thao tác máy ảo (start/stop/resize/snapshot…)'],
-  [/^POST \/servers\/[^/]+\/console$/, 'Mở console'],
-  [/^PUT \/servers\//, 'Đổi tên máy ảo'],
-  [/^POST \/servers$/, 'Tạo máy ảo'],
-  [/^DELETE \/servers\//, 'Xoá máy ảo'],
-  [/^POST \/volumes\/[^/]+\/attach$/, 'Gắn volume'],
-  [/^POST \/volumes\/[^/]+\/detach$/, 'Tháo volume'],
-  [/^POST \/volumes\/[^/]+\/extend$/, 'Mở rộng volume'],
-  [/^POST \/volumes$/, 'Tạo volume'],
-  [/^DELETE \/volumes\//, 'Xoá volume'],
-  [/^POST \/snapshots$/, 'Tạo snapshot'],
-  [/^DELETE \/snapshots\//, 'Xoá snapshot'],
-  [/^POST \/images\/[^/]+\/file$/, 'Upload dữ liệu image'],
-  [/^PUT \/images\/[^/]+\/file$/, 'Upload dữ liệu image'],
-  [/^POST \/images$/, 'Tạo image'],
-  [/^DELETE \/images\//, 'Xoá image'],
-  [/^POST \/networks$/, 'Tạo network'],
-  [/^DELETE \/networks\//, 'Xoá network'],
-  [/^POST \/routers\/[^/]+\/interfaces$/, 'Gắn interface router'],
-  [/^DELETE \/routers\/[^/]+\/interfaces\//, 'Gỡ interface router'],
-  [/^POST \/routers$/, 'Tạo router'],
-  [/^DELETE \/routers\//, 'Xoá router'],
-  [/^POST \/floatingips\/[^/]+\/associate$/, 'Gắn Floating IP'],
-  [/^POST \/floatingips\/[^/]+\/disassociate$/, 'Gỡ Floating IP'],
-  [/^POST \/floatingips$/, 'Cấp Floating IP'],
-  [/^DELETE \/floatingips\//, 'Trả Floating IP'],
-  [/^POST \/security-group-rules$/, 'Thêm rule security group'],
-  [/^DELETE \/security-group-rules\//, 'Xoá rule security group'],
-  [/^POST \/security-groups$/, 'Tạo security group'],
-  [/^DELETE \/security-groups\//, 'Xoá security group'],
-  [/^POST \/keypairs$/, 'Thêm SSH key'],
-  [/^DELETE \/keypairs\//, 'Xoá SSH key'],
-  [/^POST \/lb\/pools\/[^/]+\/members$/, 'Thêm backend LB'],
-  [/^DELETE \/lb\/pools\/[^/]+\/members\//, 'Gỡ backend LB'],
-  [/^POST \/lb$/, 'Tạo load balancer'],
-  [/^DELETE \/lb\//, 'Xoá load balancer'],
+  [/^POST \/auth\/login$/, 'login'],
+  [/^POST \/auth\/logout$/, 'logout'],
+  [/^POST \/auth\/switch-project$/, 'switchProject'],
+  [/^JOB \/backup\/run\//, 'automatedBackup'],
+  [/^POST \/backup\/policies\/[^/]+\/run$/, 'runBackup'],
+  [/^POST \/backup\/policies$/, 'createBackupPolicy'],
+  [/^PATCH \/backup\/policies\//, 'editBackupPolicy'],
+  [/^DELETE \/backup\/policies\//, 'deleteBackupPolicy'],
+  [/^POST \/servers\/[^/]+\/action$/, 'instanceAction'],
+  [/^POST \/servers\/[^/]+\/console$/, 'openConsole'],
+  [/^PUT \/servers\//, 'renameInstance'],
+  [/^POST \/servers$/, 'createInstance'],
+  [/^DELETE \/servers\//, 'deleteInstance'],
+  [/^POST \/volumes\/[^/]+\/attach$/, 'attachVolume'],
+  [/^POST \/volumes\/[^/]+\/detach$/, 'detachVolume'],
+  [/^POST \/volumes\/[^/]+\/extend$/, 'extendVolume'],
+  [/^POST \/volumes$/, 'createVolume'],
+  [/^DELETE \/volumes\//, 'deleteVolume'],
+  [/^POST \/snapshots$/, 'createSnapshot'],
+  [/^DELETE \/snapshots\//, 'deleteSnapshot'],
+  [/^POST \/images\/[^/]+\/file$/, 'uploadImageData'],
+  [/^PUT \/images\/[^/]+\/file$/, 'uploadImageData'],
+  [/^POST \/images$/, 'createImage'],
+  [/^DELETE \/images\//, 'deleteImage'],
+  [/^POST \/networks$/, 'createNetwork'],
+  [/^DELETE \/networks\//, 'deleteNetwork'],
+  [/^POST \/routers\/[^/]+\/interfaces$/, 'attachRouterInterface'],
+  [/^DELETE \/routers\/[^/]+\/interfaces\//, 'detachRouterInterface'],
+  [/^POST \/routers$/, 'createRouter'],
+  [/^DELETE \/routers\//, 'deleteRouter'],
+  [/^POST \/floatingips\/[^/]+\/associate$/, 'associateFloatingIp'],
+  [/^POST \/floatingips\/[^/]+\/disassociate$/, 'disassociateFloatingIp'],
+  [/^POST \/floatingips$/, 'allocateFloatingIp'],
+  [/^DELETE \/floatingips\//, 'releaseFloatingIp'],
+  [/^POST \/security-group-rules$/, 'addSecurityRule'],
+  [/^DELETE \/security-group-rules\//, 'deleteSecurityRule'],
+  [/^POST \/security-groups$/, 'createSecurityGroup'],
+  [/^DELETE \/security-groups\//, 'deleteSecurityGroup'],
+  [/^POST \/keypairs$/, 'addSshKey'],
+  [/^DELETE \/keypairs\//, 'deleteSshKey'],
+  [/^POST \/lb\/pools\/[^/]+\/members$/, 'addLbBackend'],
+  [/^DELETE \/lb\/pools\/[^/]+\/members\//, 'removeLbBackend'],
+  [/^POST \/lb$/, 'createLoadBalancer'],
+  [/^DELETE \/lb\//, 'deleteLoadBalancer'],
 ];
-function actionLabel(e) {
+function actionLabel(e, t) {
   const key = `${e.method} ${e.path}`;
-  for (const [re, label] of RULES) if (re.test(key)) return label;
+  for (const [re, label] of RULES) if (re.test(key)) return t(`audit.action.${label}`);
   return key;
 }
 
 export default function AuditLog() {
+  const { t } = useI18n();
   const [entries, setEntries] = useState(null);
   const [q, setQ] = useState('');
 
@@ -71,29 +73,29 @@ export default function AuditLog() {
     if (!s) return entries;
     return entries.filter((e) =>
       (e.user || '').toLowerCase().includes(s) ||
-      actionLabel(e).toLowerCase().includes(s) ||
+      actionLabel(e, t).toLowerCase().includes(s) ||
       (e.path || '').toLowerCase().includes(s));
-  }, [entries, q]);
+  }, [entries, q, t]);
 
   return (
     <>
-      <PageHead title="Nhật ký hoạt động" count={filtered?.length} onRefresh={load}>
-        <input placeholder="Tìm người dùng / hành động…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 240 }} />
+      <PageHead title={t('navigation.audit')} count={filtered?.length} onRefresh={load}>
+        <input placeholder={t('audit.search')} value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 240 }} />
       </PageHead>
-      <p className="dim page-desc">Ghi lại các thao tác thay đổi trong project này (500 dòng gần nhất): ai làm, làm gì, lúc nào, thành công hay không. Job backup tự động cũng được ghi.</p>
+      <p className="dim page-desc">{t('audit.description')}</p>
 
-      {!filtered ? <Empty>Đang tải…</Empty> : filtered.length === 0 ? (
-        <Empty>Chưa có hoạt động nào được ghi.</Empty>
+      {!filtered ? <Empty>{t('common.loading')}</Empty> : filtered.length === 0 ? (
+        <Empty>{t('audit.empty')}</Empty>
       ) : (
         <div className="card">
           <table className="tbl">
-            <thead><tr><th>Thời gian</th><th>Người dùng</th><th>Hành động</th><th>Đường dẫn</th><th>Kết quả</th></tr></thead>
+            <thead><tr><th>{t('audit.time')}</th><th>{t('audit.user')}</th><th>{t('common.action')}</th><th>{t('audit.path')}</th><th>{t('audit.result')}</th></tr></thead>
             <tbody>
               {filtered.map((e, i) => (
                 <tr key={e.ts + i}>
                   <td className="dim" style={{ whiteSpace: 'nowrap' }}>{fmtDate(e.ts)}</td>
                   <td><b>{e.user || '—'}</b></td>
-                  <td>{actionLabel(e)}</td>
+                  <td>{actionLabel(e, t)}</td>
                   <td className="mono dim" style={{ wordBreak: 'break-all' }}>{e.path}</td>
                   <td>
                     <StatusBadge status={e.status >= 200 && e.status < 300 ? 'ACTIVE' : e.status === 401 || e.status === 403 ? 'ERROR' : e.status >= 400 ? 'ERROR' : String(e.status)} />

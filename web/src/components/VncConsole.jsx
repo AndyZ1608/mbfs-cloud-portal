@@ -5,10 +5,16 @@ import ConsoleInput from './ConsoleInput.jsx';
 import { getNovaConsoleUrl, novaConsoleToWebSocket } from '../console/novaConsole.js';
 import { createRfbSession } from '../console/rfbSession.js';
 import { createConsoleDiagnostics, createObservedRfb } from '../console/diagnostics.js';
+import { useI18n } from '../i18n/react.jsx';
 
 const INITIAL_CONNECTION = { status: 'idle', message: '' };
+const CONNECTION_MESSAGE_KEYS = {
+  requesting_console: 'console.requesting', connecting: 'console.connecting',
+  disconnected: 'console.disconnected', error: 'console.openFailed',
+};
 
 export default function VncConsole({ instanceId, name }) {
+  const { t } = useI18n();
   const screenRef = useRef(null);
   const rfbRef = useRef(null);
   const sessionRef = useRef(null);
@@ -94,17 +100,17 @@ export default function VncConsole({ instanceId, name }) {
   return (
     <main className="console-page">
       <header className="console-page-header">
-        <h1>Console — {name}</h1>
+        <h1>{t('console.title', { name })}</h1>
         <button className="btn ghost sm" type="button" onClick={reconnect} disabled={waiting}>
-          <RefreshCw size={14} /> Kết nối lại
+          <RefreshCw size={14} /> {t('console.reconnect')}
         </button>
       </header>
       <div className="vnc-console-shell">
         <div className="vnc-screen" ref={screenRef} tabIndex={0} onMouseDown={() => rfbRef.current?.focus()} />
         {!connected && <div className="vnc-connection-state" role="status">
-          <span>{connection.message || 'Đang chuẩn bị console…'}</span>
+          <span>{t(CONNECTION_MESSAGE_KEYS[connection.status] || 'console.preparing')}</span>
           {!waiting && <button className="btn ghost sm" type="button" onClick={reconnect}>
-            <RefreshCw size={14} /> Kết nối lại
+            <RefreshCw size={14} /> {t('console.reconnect')}
           </button>}
         </div>}
       </div>

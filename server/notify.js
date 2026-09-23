@@ -5,8 +5,10 @@ const MAX = 500;
 const MEM = readJsonlTail('notifications.jsonl', MAX);
 let readState = loadJson('notify-read.json', {}); // "user@project" -> ts đọc gần nhất
 
-export function pushNotice({ project_id, project_name, level = 'info', title, detail = '', link = '' }) {
+export function pushNotice({ project_id, project_name, level = 'info', title, detail = '', link = '', code, values }) {
   const n = { id: crypto.randomUUID(), ts: new Date().toISOString(), project_id, project_name, level, title, detail, link };
+  if (code) n.code = code;
+  if (values) n.values = values;
   MEM.push(n);
   if (MEM.length > MAX) MEM.shift();
   appendJsonl('notifications.jsonl', n);

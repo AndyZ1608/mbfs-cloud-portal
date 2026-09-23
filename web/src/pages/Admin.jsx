@@ -1,15 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { api, ramGB } from '../api.js';
 import { Modal, Field, UsageBar, toast, Empty, PageHead } from '../components/ui.jsx';
+import { useI18n } from '../i18n/react.jsx';
 
 export default function Admin() {
+  const { t } = useI18n();
   const [tab, setTab] = useState('overview');
   return (
     <>
-      <PageHead title="Quản trị cụm" />
+      <PageHead title={t('navigation.admin')} />
       <div className="tab-row" style={{ marginBottom: 16 }}>
-        {[['overview', 'Tổng quan cụm'], ['projects', 'Projects & Quota'], ['users', 'Users']].map(([k, label]) => (
-          <button key={k} className={`tab ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>{label}</button>
+        {['overview', 'projects', 'users'].map((key) => (
+          <button key={key} className={`tab ${tab === key ? 'active' : ''}`} onClick={() => setTab(key)}>{t(`admin.tab.${key}`)}</button>
         ))}
       </div>
       {tab === 'overview' && <Overview />}
@@ -21,25 +23,26 @@ export default function Admin() {
 
 // ---------- Tổng quan hypervisor ----------
 function Overview() {
+  const { t, locale } = useI18n();
   const [data, setData] = useState(null);
   useEffect(() => { api('/admin/overview').then(setData).catch((e) => toast(e.message, 'error')); }, []);
-  if (!data) return <Empty>Đang tải…</Empty>;
+  if (!data) return <Empty>{t('common.loading')}</Empty>;
   const h = data.hypervisors;
   return (
     <>
       {!h ? (
-        <div className="card notice-card">Không đọc được thống kê hypervisor: {data.hypervisors_error || 'Nova từ chối (cần role admin toàn cụm)'}.</div>
+        <div className="card notice-card">{t('admin.hypervisorUnavailable')} {locale === 'vi' ? data.hypervisors_error || t('admin.novaDenied') : t('admin.novaDenied')}</div>
       ) : (
         <div className="grid-cards">
           <div className="card">
-            <h4>Tài nguyên vật lý toàn cụm</h4>
-            <UsageBar label={`vCPU (${h.count} hypervisor)`} used={h.vcpus_used} max={h.vcpus} />
+            <h4>{t('admin.clusterResources')}</h4>
+            <UsageBar label={t(h.count === 1 ? 'admin.hypervisorCount.one' : 'admin.hypervisorCount.other', { count: h.count })} used={h.vcpus_used} max={h.vcpus} />
             <UsageBar label="RAM" used={h.memory_mb_used} max={h.memory_mb} render={(x) => ramGB(x)} />
-            <UsageBar label="Đĩa local" used={h.local_gb_used} max={h.local_gb} unit="GB" />
+            <UsageBar label={t('admin.localDisk')} used={h.local_gb_used} max={h.local_gb} unit="GB" />
           </div>
-          <div className="card stat"><span className="stat-label">VM đang chạy toàn cụm</span><span className="stat-val mono">{h.running_vms}</span></div>
+          <div className="card stat"><span className="stat-label">{t('admin.runningVms')}</span><span className="stat-val mono">{h.running_vms}</span></div>
           <div className="card stat"><span className="stat-label">Hypervisor</span><span className="stat-val mono">{h.count}</span>
-            <span className="stat-sub dim">Tỉ lệ cấp phát vCPU {Math.round((h.vcpus_used / h.vcpus) * 100)}% · RAM {Math.round((h.memory_mb_used / h.memory_mb) * 100)}%</span></div>
+            <span className="stat-sub dim">{t('admin.allocationRate')} vCPU {Math.round((h.vcpus_used / h.vcpus) * 100)}% · RAM {Math.round((h.memory_mb_used / h.memory_mb) * 100)}%</span></div>
           <div className="card stat"><span className="stat-label">Projects</span><span className="stat-val mono">{data.projects.length}</span></div>
         </div>
       )}
@@ -49,12 +52,13 @@ function Overview() {
 
 // ---------- Projects & Quota ----------
 const QUOTA_FIELDS = [
-  ['instances', 'Máy ảo'], ['cores', 'vCPU'], ['ram', 'RAM (MB)'],
-  ['volumes', 'Số volume'], ['gigabytes', 'Volume (GB)'], ['snapshots', 'Snapshot'],
-  ['floatingip', 'Floating IP'], ['network', 'Network'], ['security_group', 'Security group'],
+  ['instances', 'navigation.instances'], ['cores', 'admin.vcpu'], ['ram', 'admin.ram'],
+  ['volumes', 'admin.volumeCount'], ['gigabytes', 'admin.volumeCapacity'], ['snapshots', 'admin.snapshots'],
+  ['floatingip', 'navigation.floatingIps'], ['network', 'admin.network'], ['security_group', 'admin.securityGroup'],
 ];
 
 function Projects() {
+  const { t } = useI18n();
   const [projects, setProjects] = useState(null);
   const [selId, setSelId] = useState(null);
   const [quota, setQuota] = useState(null);
@@ -79,7 +83,7 @@ function Projects() {
     setBusy(true);
     try {
       await api(`/admin/projects/${selId}/quota`, { method: 'PUT', body: quota });
-      toast('Đã cập nhật quota', 'ok');
+      toast(t('admin.quotaUpdated'), 'ok');
     } catch (e) { toast(e.message, 'error'); }
     setBusy(false);
   }
@@ -87,7 +91,7 @@ function Projects() {
   return (
     <div className="split">
       <div className="card split-left">
-        <button className="btn sm primary block" style={{ marginBottom: 8 }} onClick={() => setCreating(true)}>+ Tạo project</button>
+        <button className="btn sm primary block" style={{ marginBottom: 8 }} onClick={() => setCreating(true)}>+ {t('admin.createProject')}</button>
         {(projects || []).map((p) => (
           <button key={p.id} className={`sg-item ${p.id === selId ? 'active' : ''}`} onClick={() => setSelId(p.id)}>
             <b>{p.name}</b><span className="dim mono">{p.id.slice(0, 12)}…</span>
@@ -95,19 +99,19 @@ function Projects() {
         ))}
       </div>
       <div className="card split-right">
-        {!selId ? <Empty>Chọn project.</Empty> : !quota ? <Empty>Đang tải quota…</Empty> : (
+        {!selId ? <Empty>{t('admin.selectProject')}</Empty> : !quota ? <Empty>{t('admin.loadingQuota')}</Empty> : (
           <>
             <div className="card-head"><h4>Quota — {projects.find((p) => p.id === selId)?.name}</h4>
-              <button className="btn sm primary" onClick={saveQuota} disabled={busy}>{busy ? 'Đang lưu…' : 'Lưu quota'}</button></div>
+              <button className="btn sm primary" onClick={saveQuota} disabled={busy}>{t(busy ? 'admin.saving' : 'admin.saveQuota')}</button></div>
             <div className="form-grid" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
-              {QUOTA_FIELDS.map(([k, label]) => (
-                <Field key={k} label={label}>
+              {QUOTA_FIELDS.map(([k, labelKey]) => (
+                <Field key={k} label={t(labelKey)}>
                   <input type="number" className="mono" value={quota[k] ?? ''} placeholder="—"
                     onChange={(e) => setQuota({ ...quota, [k]: e.target.value })} />
                 </Field>
               ))}
             </div>
-            <p className="dim">-1 = không giới hạn. Bỏ trống = giữ nguyên giá trị hiện tại.</p>
+            <p className="dim">{t('admin.quotaHint')}</p>
           </>
         )}
       </div>
@@ -117,27 +121,29 @@ function Projects() {
 }
 
 function CreateProject({ onClose, onDone }) {
+  const { t } = useI18n();
   const [f, setF] = useState({ name: '', description: '' });
   const [busy, setBusy] = useState(false);
   async function submit() {
-    if (!f.name.trim()) return toast('Nhập tên project', 'error');
+    if (!f.name.trim()) return toast(t('admin.projectNameRequired'), 'error');
     setBusy(true);
-    try { await api('/admin/projects', { method: 'POST', body: f }); toast(`Đã tạo project ${f.name}`, 'ok'); onDone(); }
+    try { await api('/admin/projects', { method: 'POST', body: f }); toast(t('admin.projectCreated', { name: f.name }), 'ok'); onDone(); }
     catch (e) { toast(e.message, 'error'); setBusy(false); }
   }
   return (
-    <Modal title="Tạo project" onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Huỷ</button>
-        <button className="btn primary" onClick={submit} disabled={busy}>Tạo project</button></>}>
-      <Field label="Tên project"><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="vd: team-qa" autoFocus /></Field>
-      <Field label="Mô tả"><input value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></Field>
-      <p className="dim">Sau khi tạo, sang tab Users để gán người dùng vào project (role member).</p>
+    <Modal title={t('admin.createProject')} onClose={onClose}
+      footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
+        <button className="btn primary" onClick={submit} disabled={busy}>{t('admin.createProject')}</button></>}>
+      <Field label={t('billing.projectName')}><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="e.g. team-qa" autoFocus /></Field>
+      <Field label={t('securityGroups.description')}><input value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></Field>
+      <p className="dim">{t('admin.projectHint')}</p>
     </Modal>
   );
 }
 
 // ---------- Users ----------
 function Users() {
+  const { t } = useI18n();
   const [users, setUsers] = useState(null);
   const [projects, setProjects] = useState([]);
   const [creating, setCreating] = useState(false);
@@ -152,28 +158,28 @@ function Users() {
   useEffect(() => { load(); }, []);
 
   async function resetPass(u) {
-    const pw = window.prompt(`Mật khẩu mới cho ${u.name} (≥8 ký tự):`);
+    const pw = window.prompt(t('admin.passwordPrompt', { name: u.name }));
     if (!pw) return;
-    try { await api(`/admin/users/${u.id}/password`, { method: 'POST', body: { password: pw } }); toast('Đã đổi mật khẩu', 'ok'); }
+    try { await api(`/admin/users/${u.id}/password`, { method: 'POST', body: { password: pw } }); toast(t('admin.passwordChanged'), 'ok'); }
     catch (e) { toast(e.message, 'error'); }
   }
 
   return (
     <div className="card">
-      <div className="card-head"><h4>Người dùng Keystone</h4>
-        <button className="btn sm primary" onClick={() => setCreating(true)}>+ Tạo user</button></div>
-      {!users ? <Empty>Đang tải…</Empty> : (
+      <div className="card-head"><h4>{t('admin.keystoneUsers')}</h4>
+        <button className="btn sm primary" onClick={() => setCreating(true)}>+ {t('admin.createUser')}</button></div>
+      {!users ? <Empty>{t('common.loading')}</Empty> : (
         <table className="tbl">
-          <thead><tr><th>Tên</th><th>Trạng thái</th><th>Email</th><th /></tr></thead>
+          <thead><tr><th>{t('common.name')}</th><th>{t('common.status')}</th><th>Email</th><th /></tr></thead>
           <tbody>
             {users.map((u) => (
               <tr key={u.id}>
                 <td><b>{u.name}</b></td>
-                <td className="dim">{u.enabled ? 'Hoạt động' : 'Khoá'}</td>
+                <td className="dim">{t(u.enabled ? 'admin.active' : 'admin.locked')}</td>
                 <td className="dim">{u.email || '—'}</td>
                 <td style={{ whiteSpace: 'nowrap' }}>
-                  <button className="btn sm" onClick={() => setAssignFor(u)}>Gán project</button>{' '}
-                  <button className="btn sm ghost" onClick={() => resetPass(u)}>Đổi mật khẩu</button>
+                  <button className="btn sm" onClick={() => setAssignFor(u)}>{t('admin.assignProject')}</button>{' '}
+                  <button className="btn sm ghost" onClick={() => resetPass(u)}>{t('instances.changePassword')}</button>
                 </td>
               </tr>
             ))}
@@ -187,38 +193,40 @@ function Users() {
 }
 
 function CreateUser({ onClose, onDone }) {
+  const { t } = useI18n();
   const [f, setF] = useState({ name: '', password: '' });
   const [busy, setBusy] = useState(false);
   async function submit() {
     setBusy(true);
-    try { await api('/admin/users', { method: 'POST', body: f }); toast(`Đã tạo user ${f.name} — nhớ gán vào project`, 'ok'); onDone(); }
+    try { await api('/admin/users', { method: 'POST', body: f }); toast(t('admin.userCreated', { name: f.name }), 'ok'); onDone(); }
     catch (e) { toast(e.message, 'error'); setBusy(false); }
   }
   return (
-    <Modal title="Tạo user Keystone" onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Huỷ</button>
-        <button className="btn primary" onClick={submit} disabled={busy}>Tạo user</button></>}>
-      <Field label="Tên đăng nhập"><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} autoFocus /></Field>
-      <Field label="Mật khẩu (≥8 ký tự)"><input type="password" autoComplete="new-password" className="mono" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>
+    <Modal title={t('admin.createUserTitle')} onClose={onClose}
+      footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
+        <button className="btn primary" onClick={submit} disabled={busy}>{t('admin.createUser')}</button></>}>
+      <Field label={t('auth.username')}><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} autoFocus /></Field>
+      <Field label={t('admin.passwordMinimum')}><input type="password" autoComplete="new-password" className="mono" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>
     </Modal>
   );
 }
 
 function AssignModal({ user, projects, onClose }) {
+  const { t } = useI18n();
   const [f, setF] = useState({ project_id: projects[0]?.id || '', role: 'member' });
   const [busy, setBusy] = useState(false);
   async function submit() {
     setBusy(true);
     try {
       await api('/admin/assign', { method: 'POST', body: { user_id: user.id, ...f } });
-      toast(`Đã gán ${user.name} vào project (${f.role})`, 'ok');
+      toast(t('admin.assigned', { name: user.name, role: f.role }), 'ok');
       onClose();
     } catch (e) { toast(e.message, 'error'); setBusy(false); }
   }
   return (
-    <Modal title={`Gán project — ${user.name}`} onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Huỷ</button>
-        <button className="btn primary" onClick={submit} disabled={busy || !f.project_id}>Gán</button></>}>
+    <Modal title={t('admin.assignTitle', { name: user.name })} onClose={onClose}
+      footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
+        <button className="btn primary" onClick={submit} disabled={busy || !f.project_id}>{t('admin.assign')}</button></>}>
       <Field label="Project">
         <select value={f.project_id} onChange={(e) => setF({ ...f, project_id: e.target.value })}>
           {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -226,8 +234,8 @@ function AssignModal({ user, projects, onClose }) {
       </Field>
       <Field label="Role">
         <select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>
-          <option value="member">member — dùng portal bình thường</option>
-          <option value="admin">admin — kèm quyền quản trị cụm</option>
+          <option value="member">{t('admin.memberRole')}</option>
+          <option value="admin">{t('admin.adminRole')}</option>
         </select>
       </Field>
     </Modal>
