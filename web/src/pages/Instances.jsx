@@ -21,6 +21,8 @@ export default function Instances() {
   const [monStatus, setMonStatus] = useState(null);
   const [latest, setLatest] = useState({});
   const [deleteFor, setDeleteFor] = useState(null);
+  const [passwordFor, setPasswordFor] = useState(null);
+  const [passwordCapabilities, setPasswordCapabilities] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const deleteRequest = useRef(false);
   const timer = useRef(null);
@@ -33,11 +35,22 @@ export default function Instances() {
     } catch (e) { toast(e.message, 'error'); }
   }
 
+  async function loadPasswordCapabilities() {
+    try {
+      const data = await api('/servers/password-change-eligibility');
+      setPasswordCapabilities(data.capabilities || {});
+    } catch {
+      setPasswordCapabilities(null);
+    }
+  }
+
   useEffect(() => {
     load();
+    loadPasswordCapabilities();
     api('/monitor/status').then(setMonStatus).catch(() => {});
     timer.current = setInterval(load, 10000);
-    return () => clearInterval(timer.current);
+    const capabilityTimer = setInterval(loadPasswordCapabilities, 60000);
+    return () => { clearInterval(timer.current); clearInterval(capabilityTimer); };
   }, []);
 
   async function act(s, action, label) {
@@ -113,7 +126,7 @@ export default function Instances() {
 
   return (
     <>
-      <PageHead title="Máy ảo" count={shown?.length} onRefresh={load}>
+      <PageHead title="Máy ảo" count={shown?.length} onRefresh={() => { load(); loadPasswordCapabilities(); }}>
         <input placeholder="Tìm tên / IP…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 190 }} />
         <button className="btn primary" onClick={() => setCreating(true)}><Plus size={16} /> Tạo máy ảo</button>
       </PageHead>
@@ -153,6 +166,10 @@ export default function Instances() {
                       (s.status === 'ACTIVE' || s.status === 'SHUTOFF') && { label: 'Đổi cấu hình (resize)', onClick: () => setResizeFor(s) },
                       { label: 'Đổi tên', onClick: () => rename(s) },
                       { label: 'Mở console', onClick: () => openInstanceConsole(s.id) },
+                      { label: 'Đổi mật khẩu', disabled: !passwordCapabilities?.[s.id]?.allowed,
+                        reason: !passwordCapabilities?.[s.id]?.allowed
+                          ? passwordCapabilities?.[s.id]?.message || 'Đang kiểm tra điều kiện đổi mật khẩu.' : undefined,
+                        onClick: () => setPasswordFor(s) },
                       { label: 'Biểu đồ giám sát', onClick: () => setMonFor(s) },
                       { label: 'Xem log console', onClick: () => setLogFor(s) },
                       { label: 'Quản lý card mạng', onClick: () => setNicFor(s) },
@@ -174,7 +191,11 @@ export default function Instances() {
       )}
 
       {creating && <CreateModal onClose={() => setCreating(false)} onDone={() => { setCreating(false); load(); }} />}
-      {detail && <DetailModal server={detail} onClose={() => setDetail(null)} />}
+      {detail && <DetailModal server={detail} onClose={() => setDetail(null)}
+        passwordCapability={passwordCapabilities?.[detail.id]}
+        onChangePassword={() => { setPasswordFor(detail); setDetail(null); }} />}
+      {passwordFor && <ChangePasswordModal key={passwordFor.id} server={passwordFor}
+        onClose={() => setPasswordFor(null)} onDone={() => { setPasswordFor(null); loadPasswordCapabilities(); }} />}
       {fipTarget && <FipModal server={fipTarget} onClose={() => setFipTarget(null)} onDone={() => { setFipTarget(null); load(); }} />}
       {resizeFor && <ResizeModal server={resizeFor} onClose={() => setResizeFor(null)} onDone={() => { setResizeFor(null); setTimeout(load, 800); }} />}
       {logFor && <ConsoleLogModal server={logFor} onClose={() => setLogFor(null)} />}
@@ -329,7 +350,7 @@ function CreateModal({ onClose, onDone }) {
 }
 
 // ---------- Chi tiết máy ảo ----------
-function DetailModal({ server, onClose }) {
+function DetailModal({ server, onClose, passwordCapability, onChangePassword }) {
   const [s, setS] = useState(server);
   const [vols, setVols] = useState(null);
 
@@ -344,7 +365,11 @@ function DetailModal({ server, onClose }) {
   });
 
   return (
-    <Modal title={s.name} onClose={onClose}>
+    <Modal title={s.name} onClose={onClose}
+      footer={<button className="btn ghost" type="button" onClick={onChangePassword}
+        disabled={!passwordCapability?.allowed}
+        title={!passwordCapability?.allowed
+          ? passwordCapability?.message || 'Đang kiểm tra điều kiện đổi mật khẩu.' : undefined}>Đổi mật khẩu</button>}>
       <div className="kv">
         <div><span>ID</span><span className="mono">{s.id}</span></div>
         <div><span>Trạng thái</span><span><StatusBadge status={s.status} /></span></div>
@@ -357,6 +382,71 @@ function DetailModal({ server, onClose }) {
         <div><span>Tạo lúc</span><span>{fmtDate(s.created)}</span></div>
         {s.fault?.message && <div><span>Lỗi</span><span className="err-text">{s.fault.message}</span></div>}
       </div>
+    </Modal>
+  );
+}
+
+function ChangePasswordModal({ server, onClose, onDone }) {
+  const [password, setPassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const submitted = useRef(false);
+
+  function close() {
+    if (submitted.current) return;
+    setPassword('');
+    setConfirmation('');
+    onClose();
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    if (submitted.current || !password || password !== confirmation) return;
+    submitted.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      const result = await api(`/servers/${encodeURIComponent(server.id)}/change-password`, {
+        method: 'POST', body: { password },
+      });
+      if (!result?.accepted || result?.username !== 'ubuntu') throw new Error('Nova chưa xác nhận đã nhận yêu cầu.');
+      toast('Nova đã nhận yêu cầu đổi mật khẩu cho ubuntu. Hãy kiểm tra đăng nhập VM để xác nhận.', 'ok');
+      onDone();
+    } catch (failure) {
+      setError(failure.message || 'Không thể đổi mật khẩu VM.');
+    } finally {
+      setPassword('');
+      setConfirmation('');
+      submitted.current = false;
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="Đổi mật khẩu VM" onClose={close}>
+      <form onSubmit={submit}>
+        <div className="kv">
+          <div><span>VM</span><strong>{server.name}</strong></div>
+          <div><span>Tài khoản</span><strong>ubuntu</strong></div>
+        </div>
+        <Field label="Mật khẩu mới">
+          <input type="password" autoComplete="off" value={password}
+            onChange={(event) => setPassword(event.target.value)} disabled={busy} />
+        </Field>
+        <Field label="Xác nhận mật khẩu">
+          <input type="password" autoComplete="off" value={confirmation}
+            onChange={(event) => setConfirmation(event.target.value)} disabled={busy} />
+        </Field>
+        {confirmation && password !== confirmation && <p className="err-text" role="alert">Mật khẩu xác nhận không khớp.</p>}
+        {error && <p className="err-text" role="alert">{error}</p>}
+        <div className="modal-foot password-modal-actions">
+          <button className="btn ghost" type="button" onClick={close} disabled={busy}>Huỷ</button>
+          <button className="btn primary" type="submit" disabled={busy || !password || password !== confirmation}>
+            {busy ? 'Đang gửi…' : 'Đổi mật khẩu'}
+          </button>
+        </div>
+      </form>
     </Modal>
   );
 }

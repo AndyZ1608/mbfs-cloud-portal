@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { osFetch, OSError } from '../openstack.js';
 import { traceNovaConsole } from '../consoleDiagnostics.js';
+import { changeInstancePassword, listPasswordChangeEligibility } from '../passwordChange.js';
 
 const router = Router();
 
@@ -10,6 +11,14 @@ router.get('/servers', async (req, res, next) => {
   try {
     const data = await osFetch(req.session.os, 'compute', '/servers/detail');
     res.json({ servers: data.servers || [] });
+  } catch (e) { next(e); }
+});
+
+router.get('/servers/password-change-eligibility', async (req, res, next) => {
+  try {
+    const capabilities = await listPasswordChangeEligibility(req.session.os);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ capabilities });
   } catch (e) { next(e); }
 });
 
@@ -55,6 +64,15 @@ router.get('/servers/:id', async (req, res, next) => {
   try {
     const data = await osFetch(req.session.os, 'compute', `/servers/${req.params.id}`);
     res.json(data);
+  } catch (e) { next(e); }
+});
+
+router.post('/servers/:id/change-password', async (req, res, next) => {
+  try {
+    const result = await changeInstancePassword(req.session.os, req.params.id, req.body?.password);
+    res.locals.passwordChangeInstanceName = result.instanceName;
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(202).json({ accepted: true, username: result.username });
   } catch (e) { next(e); }
 });
 

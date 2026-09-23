@@ -35,6 +35,9 @@ export function auditMiddleware(req, res, next) {
   const t0 = Date.now();
   res.on('finish', () => {
     const os = req.session?.os;
+    const passwordChangeId = req.method === 'POST'
+      ? (req.originalUrl || req.url).split('?')[0].match(/^\/api\/servers\/([^/]+)\/change-password$/)?.[1]
+      : null;
     record({
       request_id: req.id,
       user: os?.user?.name || null,
@@ -44,7 +47,8 @@ export function auditMiddleware(req, res, next) {
       region: config.region || null,
       method: req.method,
       path: (req.originalUrl || req.url).replace(/^\/api/, '').split('?')[0],
-      action: `${req.method.toLowerCase()}.${(req.originalUrl || req.url).replace(/^\/api\/?/, '').split(/[/?]/)[0] || 'api'}`,
+      action: passwordChangeId ? 'instance.change_password' : `${req.method.toLowerCase()}.${(req.originalUrl || req.url).replace(/^\/api\/?/, '').split(/[/?]/)[0] || 'api'}`,
+      ...(passwordChangeId ? { instance_id: passwordChangeId, instance_name: res.locals.passwordChangeInstanceName || null, username: 'ubuntu' } : {}),
       status: res.statusCode,
       result: res.statusCode < 400 ? 'success' : 'failure',
       source_ip: clientIp(req),

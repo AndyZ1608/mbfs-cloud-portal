@@ -13,8 +13,8 @@ const flavors = [
 ];
 
 const images = [
-  { id: uid(), name: 'Ubuntu 22.04 LTS', status: 'active', visibility: 'public', size: 652804096, disk_format: 'qcow2', created_at: '2026-01-10T03:00:00Z' },
-  { id: uid(), name: 'Ubuntu 24.04 LTS', status: 'active', visibility: 'public', size: 701235200, disk_format: 'qcow2', created_at: '2026-03-02T03:00:00Z' },
+  { id: uid(), name: 'Ubuntu 22.04 LTS', status: 'active', visibility: 'public', size: 652804096, disk_format: 'qcow2', created_at: '2026-01-10T03:00:00Z', os_distro: 'ubuntu', os_admin_user: 'ubuntu', hw_qemu_guest_agent: 'yes' },
+  { id: uid(), name: 'Ubuntu 24.04 LTS', status: 'active', visibility: 'public', size: 701235200, disk_format: 'qcow2', created_at: '2026-03-02T03:00:00Z', os_distro: 'ubuntu', os_admin_user: 'ubuntu', hw_qemu_guest_agent: 'no' },
   { id: uid(), name: 'Rocky Linux 9', status: 'active', visibility: 'public', size: 1258291200, disk_format: 'qcow2', created_at: '2026-02-15T03:00:00Z' },
   { id: uid(), name: 'Windows Server 2022', status: 'active', visibility: 'private', size: 12884901888, disk_format: 'qcow2', created_at: '2026-04-20T03:00:00Z' },
 ];
@@ -49,7 +49,7 @@ const servers = [];
 const ports = [];
 function seedServer(name, flavor, imageIdx, ip, status) {
   const s = {
-    id: uid(), name, status, created: '2026-05-11T08:30:00Z', updated: now(),
+    id: uid(), name, status, tenant_id: 'p-demo', created: '2026-05-11T08:30:00Z', updated: now(),
     flavor: { ...flavors.find((f) => f.id === flavor), original_name: flavors.find((f) => f.id === flavor).name },
     image: { id: images[imageIdx].id }, key_name: 'hieptd-key',
     security_groups: [{ name: 'default' }],
@@ -147,7 +147,7 @@ function mockCompute(m, path, body) {
       const net = networks.find((n) => n.id === netId) || netInternal;
       const ip = '10.10.10.' + (20 + servers.length + i);
       const s = {
-        id: uid(), name, status: 'BUILD', created: now(), updated: now(),
+        id: uid(), name, status: 'BUILD', tenant_id: 'p-demo', created: now(), updated: now(),
         flavor: { ...fl, original_name: fl.name },
         image: { id: b.imageRef || (b.block_device_mapping_v2 ? b.block_device_mapping_v2[0].uuid : images[0].id) },
         key_name: b.key_name || null,
@@ -204,6 +204,7 @@ function mockCompute(m, path, body) {
       s.status = 'ACTIVE';
     }
     else if ('revertResize' in body) { delete s._pendingFlavor; s.status = 'ACTIVE'; }
+    else if ('changePassword' in body) return null;
     else if ('os-getConsoleOutput' in body) {
       const lines = [
         `[    0.000000] Linux version 5.15.0-generic (buildd@mock) #mock SMP`,
@@ -493,6 +494,11 @@ function mockVolume(m, path, body) {
 function mockImage(m, path, body) {
   let mt;
   if (m === 'GET' && path === '/v2/images') return { images };
+  if ((mt = path.match(/^\/v2\/images\/([^/]+)$/)) && m === 'GET') {
+    const image = images.find((item) => item.id === mt[1]);
+    if (!image) throw notFound();
+    return image;
+  }
   if (m === 'POST' && path === '/v2/images') {
     const img = {
       id: uid(), name: body.name, status: 'queued', visibility: body.visibility || 'private',

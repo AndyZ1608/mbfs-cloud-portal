@@ -65,6 +65,30 @@ openstack role add --project team-devops --user hieptd member
 User `member` là đủ cho mọi chức năng portal. Quota chỉnh bằng
 `openstack quota set --instances 20 --cores 40 --ram 81920 team-devops`.
 
+### Đổi mật khẩu VM Ubuntu
+
+CMP chỉ cho phép **Đổi mật khẩu** đối với VM `ACTIVE` có image Glance xác định được và các thuộc tính:
+
+```text
+os_distro=ubuntu
+os_admin_user=ubuntu
+hw_qemu_guest_agent=yes
+```
+
+Ví dụ cấu hình Golden Image (thực hiện bởi quản trị viên OpenStack, không phải bởi thao tác đổi mật khẩu trong CMP):
+
+```bash
+openstack image set \
+  --property os_distro=ubuntu \
+  --property os_admin_user=ubuntu \
+  --property hw_qemu_guest_agent=yes \
+  <IMAGE_ID>
+```
+
+`qemu-guest-agent` cũng phải được cài đặt và đang chạy bên trong guest. CMP dùng Keystone token của project hiện tại để đọc Nova VM, Glance image, rồi gọi Nova `changePassword` cho tài khoản `ubuntu`. CMP không lưu hoặc ghi log mật khẩu. VM boot từ volume hoặc không còn image gốc đọc được sẽ bị từ chối do không thể kiểm tra metadata an toàn.
+
+Nova trả HTTP 202 khi **nhận** yêu cầu, không xác nhận đồng bộ rằng mật khẩu trong guest đã đổi. Sau khi gửi, xác minh bằng đăng nhập `ubuntu` trên một VM thử nghiệm; nếu Guest Agent lỗi bất đồng bộ, kiểm tra trạng thái VM và log Nova. Tính năng hiện chỉ hỗ trợ Ubuntu.
+
 ### Billing Integration
 
 Billing chạy như dịch vụ độc lập. CMP không đọc database Billing và không tính giá.
