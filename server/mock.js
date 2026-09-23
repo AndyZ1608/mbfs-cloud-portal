@@ -13,8 +13,8 @@ const flavors = [
 ];
 
 const images = [
-  { id: uid(), name: 'Ubuntu 22.04 LTS', status: 'active', visibility: 'public', size: 652804096, disk_format: 'qcow2', created_at: '2026-01-10T03:00:00Z', os_distro: 'ubuntu', os_admin_user: 'ubuntu', hw_qemu_guest_agent: 'yes' },
-  { id: uid(), name: 'Ubuntu 24.04 LTS', status: 'active', visibility: 'public', size: 701235200, disk_format: 'qcow2', created_at: '2026-03-02T03:00:00Z', os_distro: 'ubuntu', os_admin_user: 'ubuntu', hw_qemu_guest_agent: 'no' },
+  { id: uid(), name: 'Ubuntu 22.04 LTS', status: 'active', visibility: 'public', size: 652804096, disk_format: 'qcow2', created_at: '2026-01-10T03:00:00Z' },
+  { id: uid(), name: 'Ubuntu 24.04 LTS', status: 'active', visibility: 'public', size: 701235200, disk_format: 'qcow2', created_at: '2026-03-02T03:00:00Z' },
   { id: uid(), name: 'Rocky Linux 9', status: 'active', visibility: 'public', size: 1258291200, disk_format: 'qcow2', created_at: '2026-02-15T03:00:00Z' },
   { id: uid(), name: 'Windows Server 2022', status: 'active', visibility: 'private', size: 12884901888, disk_format: 'qcow2', created_at: '2026-04-20T03:00:00Z' },
 ];

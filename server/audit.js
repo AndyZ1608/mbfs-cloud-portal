@@ -48,7 +48,7 @@ export function auditMiddleware(req, res, next) {
       method: req.method,
       path: (req.originalUrl || req.url).replace(/^\/api/, '').split('?')[0],
       action: passwordChangeId ? 'instance.change_password' : `${req.method.toLowerCase()}.${(req.originalUrl || req.url).replace(/^\/api\/?/, '').split(/[/?]/)[0] || 'api'}`,
-      ...(passwordChangeId ? { instance_id: passwordChangeId, instance_name: res.locals.passwordChangeInstanceName || null, username: 'ubuntu' } : {}),
+      ...(passwordChangeId ? { instance_id: passwordChangeId, instance_name: res.locals.passwordChangeInstanceName || null } : {}),
       status: res.statusCode,
       result: res.statusCode < 400 ? 'success' : 'failure',
       source_ip: clientIp(req),

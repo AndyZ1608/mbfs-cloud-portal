@@ -15,7 +15,7 @@ Sessions are HTTP-only, `SameSite=Lax`, and optionally Secure. State-changing AP
 
 Every request receives an `X-Request-Id`. Mutation audit records include request ID, user, project, provider, cloud, region, action, result, source address, status, and duration. Passwords, cookies, bearer tokens, and request bodies are not written to the audit log.
 
-VM password changes use the current Keystone project token, a portal-side `member`/`admin` gate, and a fresh Nova server plus Glance image check. The audit entry records only actor, project, VM, action, result, and timing. The submitted password is neither returned nor persisted; provider errors from this operation are mapped to messages that cannot echo it.
+VM password changes use the current Keystone project token, a portal-side `member`/`admin` gate, and a fresh Nova server lookup to confirm the VM belongs to the current project. Nova decides whether the password-change operation is supported; CMP does not inspect image metadata or guest configuration. The audit entry records only actor, project, VM, action, result, and timing. The submitted password is neither returned nor persisted; provider errors from this operation are mapped to messages that cannot echo it.
 
 Billing requests forward the current project-scoped Keystone token in `X-Auth-Token`. The token is never sent to the browser as Billing configuration, placed in a URL, or written to logs. CMP does not send `project_id`; the Billing service validates the token with Keystone and derives project scope itself.
 

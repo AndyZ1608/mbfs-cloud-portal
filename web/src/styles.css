@@ -177,7 +177,6 @@ a { color: var(--accent); }
 }
 .menu-item:hover:not(:disabled) { background: var(--muted-bg); }
 .menu-item:disabled { opacity: 0.45; cursor: not-allowed; }
-.menu-item-reason { display: block; max-width: 270px; margin-top: 3px; white-space: normal; line-height: 1.35; }
 .menu-item.danger { color: var(--err); }
 .menu-item.danger:hover:not(:disabled) { background: var(--err-bg); }
 .menu-div { height: 1px; background: var(--border); margin: 4px 2px; }
