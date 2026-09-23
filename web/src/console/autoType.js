@@ -1,4 +1,4 @@
-import { DEFAULT_SPEED, ENTER_DELAY_MS, SPEED_PRESETS, sendConsoleToken, tokenizeConsoleText } from './keyboard.js';
+import { CHARACTER_DELAY_MS, ENTER_DELAY_MS, sendConsoleToken, tokenizeConsoleText } from './keyboard.js';
 
 export class ConsoleTypingBusyError extends Error {
   constructor() {
@@ -17,19 +17,21 @@ export class ConsoleSessionUnavailableError extends Error {
 export function abortableDelay(ms, signal) {
   return new Promise((resolve, reject) => {
     if (signal.aborted) { reject(signal.reason); return; }
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+    const onAbort = () => { clearTimeout(timer); reject(signal.reason); };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
   });
 }
 
 export function createConsoleAutoTyper({ getSession, isSessionAvailable, sleep = abortableDelay }) {
   let operation = null;
 
-  async function start(text, { appendEnter = false, speed = DEFAULT_SPEED, onProgress = () => {} } = {}) {
+  async function start(text, { appendEnter = false, onProgress = () => {} } = {}) {
     if (operation) throw new ConsoleTypingBusyError();
     const tokens = tokenizeConsoleText(text, appendEnter);
-    const preset = SPEED_PRESETS[speed];
-    if (!preset) throw new Error('Tốc độ auto-type không hợp lệ.');
 
     const session = getSession();
     if (!session || !isSessionAvailable(session)) throw new ConsoleSessionUnavailableError();
@@ -38,7 +40,6 @@ export function createConsoleAutoTyper({ getSession, isSessionAvailable, sleep =
     onProgress({ current: 0, total: tokens.length });
 
     try {
-      session.focus?.({ preventScroll: true });
       for (let index = 0; index < tokens.length; index += 1) {
         if (abortController.signal.aborted) throw abortController.signal.reason;
         if (getSession() !== session || !isSessionAvailable(session)) throw new ConsoleSessionUnavailableError();
@@ -46,10 +47,13 @@ export function createConsoleAutoTyper({ getSession, isSessionAvailable, sleep =
         sendConsoleToken(session, token);
         onProgress({ current: index + 1, total: tokens.length });
         if (index < tokens.length - 1) {
-          const delayMs = token.kind === 'enter' ? ENTER_DELAY_MS : preset.delayMs;
+          const delayMs = token.kind === 'enter' ? ENTER_DELAY_MS : CHARACTER_DELAY_MS;
           await sleep(delayMs, abortController.signal);
         }
       }
+      if (abortController.signal.aborted) throw abortController.signal.reason;
+      if (getSession() !== session || !isSessionAvailable(session)) throw new ConsoleSessionUnavailableError();
+      session.focus?.({ preventScroll: true });
       return { current: tokens.length, total: tokens.length };
     } finally {
       if (operation?.abortController === abortController) operation = null;

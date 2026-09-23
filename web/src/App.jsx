@@ -20,12 +20,15 @@ import ObjectStorage from './pages/ObjectStorage.jsx';
 import Marketplace from './pages/Marketplace.jsx';
 import K8sClusters from './pages/K8sClusters.jsx';
 import Admin from './pages/Admin.jsx';
+import ConsolePage from './pages/ConsolePage.jsx';
+import { CONSOLE_ROUTE } from './console/navigation.js';
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path={CONSOLE_ROUTE} element={<ConsolePage />} />
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />
           <Route path="/instances" element={<Instances />} />

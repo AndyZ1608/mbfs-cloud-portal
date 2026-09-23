@@ -1,11 +1,4 @@
-export const SPEED_PRESETS = Object.freeze({
-  fast: { label: 'Nhanh', delayMs: 5 },
-  normal: { label: 'Bình thường', delayMs: 15 },
-  safe: { label: 'An toàn', delayMs: 30 },
-  slow: { label: 'Chậm', delayMs: 50 },
-});
-
-export const DEFAULT_SPEED = 'normal';
+export const CHARACTER_DELAY_MS = 50;
 export const ENTER_DELAY_MS = 100;
 
 const KEYSYM = Object.freeze({

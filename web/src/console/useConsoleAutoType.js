@@ -21,12 +21,11 @@ export default function useConsoleAutoType({ rfbRef, connected, sessionKey }) {
     typerRef.current.cancel();
   }, []);
 
-  const start = useCallback(async (text, appendEnter, speed) => {
+  const start = useCallback(async (text) => {
     setState({ phase: 'typing', current: 0, total: 0, message: '' });
     try {
       const result = await typerRef.current.start(text, {
-        appendEnter,
-        speed,
+        appendEnter: true,
         onProgress: ({ current, total }) => {
           if (mountedRef.current) setState({ phase: 'typing', current, total, message: '' });
         },
@@ -53,10 +52,15 @@ export default function useConsoleAutoType({ rfbRef, connected, sessionKey }) {
     setState(INITIAL_STATE);
   }, [sessionKey]);
 
-  useEffect(() => () => {
-    mountedRef.current = false;
-    typerRef.current.cancel();
-  }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    window.addEventListener('pagehide', cancel);
+    return () => {
+      mountedRef.current = false;
+      window.removeEventListener('pagehide', cancel);
+      typerRef.current.cancel();
+    };
+  }, [cancel]);
 
   return { state, start, cancel, typing: state.phase === 'typing' };
 }

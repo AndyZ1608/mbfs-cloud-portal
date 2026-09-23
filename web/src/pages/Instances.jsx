@@ -4,13 +4,12 @@ import { api, fmtDate, ramGB, serverIps } from '../api.js';
 import { Modal, Field, StatusBadge, ActionsMenu, toast, Empty, PageHead } from '../components/ui.jsx';
 import MonitorModal from '../components/MonitorModal.jsx';
 import TypeToConfirmDialog from '../components/TypeToConfirmDialog.jsx';
-import ConsoleModal from '../components/ConsoleModal.jsx';
+import { openInstanceConsole } from '../console/navigation.js';
 
 export default function Instances() {
   const [servers, setServers] = useState(null);
   const [creating, setCreating] = useState(false);
   const [detail, setDetail] = useState(null);
-  const [consoleFor, setConsoleFor] = useState(null);
   const [fipTarget, setFipTarget] = useState(null);
   const [resizeFor, setResizeFor] = useState(null);
   const [logFor, setLogFor] = useState(null);
@@ -106,9 +105,6 @@ export default function Instances() {
       toast(`Đang tạo snapshot "${name}" — xem ở mục Images`, 'ok');
     } catch (e) { toast(e.message, 'error'); }
   }
-
-  function openConsole(s) { setConsoleFor(s); }
-
   const shown = !servers ? null : servers.filter((s) => {
     const t = q.trim().toLowerCase();
     if (!t) return true;
@@ -156,7 +152,7 @@ export default function Instances() {
                       s.status === 'ACTIVE' && { label: 'Khởi động lại (cứng)', onClick: () => act(s, 'reboot-hard', 'Đang khởi động lại') },
                       (s.status === 'ACTIVE' || s.status === 'SHUTOFF') && { label: 'Đổi cấu hình (resize)', onClick: () => setResizeFor(s) },
                       { label: 'Đổi tên', onClick: () => rename(s) },
-                      { label: 'Mở console', onClick: () => openConsole(s) },
+                      { label: 'Mở console', onClick: () => openInstanceConsole(s.id) },
                       { label: 'Biểu đồ giám sát', onClick: () => setMonFor(s) },
                       { label: 'Xem log console', onClick: () => setLogFor(s) },
                       { label: 'Quản lý card mạng', onClick: () => setNicFor(s) },
@@ -196,7 +192,6 @@ export default function Instances() {
         onConfirm={confirmDelete}
         onCancel={closeDelete}
       />}
-      {consoleFor && <ConsoleModal server={consoleFor} onClose={() => setConsoleFor(null)} />}
     </>
   );
 }

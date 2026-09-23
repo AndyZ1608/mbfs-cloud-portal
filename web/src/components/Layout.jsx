@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Server, HardDrive, Network, Globe, Shield, Disc3, KeyRound, BarChart3, Scale, DatabaseBackup, History, Store, Boxes, Wrench, PiggyBank, CalendarClock, Archive, Bell, Moon, Sun, LogOut } from 'lucide-react';
 import { api, fmtDate } from '../api.js';
 import { Toasts, toast } from './ui.jsx';
+import useCmpSession from '../useCmpSession.js';
 
 const NAV = [
   { to: '/', label: 'Tổng quan', icon: LayoutDashboard, end: true },
@@ -25,16 +26,13 @@ const NAV = [
 ];
 
 export default function Layout() {
-  const [sess, setSess] = useState(null);
+  const sess = useCmpSession();
   const [cfg, setCfg] = useState({ cloudName: 'MBFS Cloud' });
   const nav = useNavigate();
 
   useEffect(() => {
     api('/auth/config').then(setCfg).catch(() => {});
-    api('/auth/session')
-      .then(setSess)
-      .catch(() => nav('/login', { replace: true }));
-  }, [nav]);
+  }, []);
 
   async function switchProject(projectId) {
     try {

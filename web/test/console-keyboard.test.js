@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { getEventListeners } from 'node:events';
 import {
-  ENTER_DELAY_MS, SPEED_PRESETS, UnsupportedConsoleCharacterError,
-  mapConsoleCharacter, tokenizeConsoleText,
+  CHARACTER_DELAY_MS, ENTER_DELAY_MS, UnsupportedConsoleCharacterError,
+  mapConsoleCharacter, sendConsoleToken, tokenizeConsoleText,
 } from '../src/console/keyboard.js';
 import {
-  ConsoleSessionUnavailableError, ConsoleTypingBusyError, createConsoleAutoTyper,
+  ConsoleSessionUnavailableError, ConsoleTypingBusyError, abortableDelay, createConsoleAutoTyper,
 } from '../src/console/autoType.js';
 import { getNovaConsoleUrl, novaConsoleToWebSocket } from '../src/console/novaConsole.js';
 import { createRfbSession } from '../src/console/rfbSession.js';
@@ -44,24 +45,26 @@ test('normalizes multiline CRLF and maps newline and tab to VNC keys', () => {
   assert.equal(tokens.find((token) => token.kind === 'tab').keysym, 0xff09);
 });
 
-test('Type does not append Enter and Type + Enter adds exactly one final Enter', () => {
+test('Type + Enter adds exactly one final Enter, including trailing newline input', () => {
   assert.equal(tokenizeConsoleText('ip -br a', false).at(-1).kind, 'character');
   assert.equal(tokenizeConsoleText('ip -br a', true).filter((token) => token.kind === 'enter').length, 1);
   assert.equal(tokenizeConsoleText('ip -br a\n', true).filter((token) => token.kind === 'enter').length, 1);
 });
 
-test('typing sends balanced Shift events and central timing presets are correct', async () => {
+test('typing uses fixed 50 ms character / 100 ms Enter delays and focuses only after success', async () => {
   const rfb = mockRfb();
   const delays = [];
   const typer = createConsoleAutoTyper({
     getSession: () => rfb,
     isSessionAvailable: () => true,
-    sleep: async (delay) => delays.push(delay),
+    sleep: async (delay) => { assert.equal(rfb.focused, 0); delays.push(delay); },
   });
-  await typer.start('A\na', { speed: 'normal' });
+  await typer.start('A\na');
   assert.deepEqual(rfb.calls.slice(0, 3), [[0xffe1, 'ShiftLeft', true], [65, 'KeyA'], [0xffe1, 'ShiftLeft', false]]);
   assert.deepEqual(rfb.calls.at(-1), [97, 'KeyA']);
-  assert.deepEqual(delays, [SPEED_PRESETS.normal.delayMs, ENTER_DELAY_MS]);
+  assert.equal(CHARACTER_DELAY_MS, 50);
+  assert.equal(ENTER_DELAY_MS, 100);
+  assert.deepEqual(delays, [50, 100]);
   assert.equal(rfb.focused, 1);
 });
 
@@ -74,6 +77,25 @@ test('unsupported Unicode fails before any key is sent without exposing command 
   assert.equal(rfb.calls.length, 0);
 });
 
+test('simulated Shift is released even when sending its character fails', () => {
+  const calls = [];
+  assert.throws(() => sendConsoleToken({ sendKey(...args) {
+    calls.push(args);
+    if (args[1] === 'KeyA') throw new Error('disconnected');
+  } }, mapConsoleCharacter('A')), /disconnected/);
+  assert.deepEqual(calls.at(-1), [0xffe1, 'ShiftLeft', false]);
+});
+
+test('typing delays release abort listeners on completion and cancellation', async () => {
+  const controller = new AbortController();
+  await abortableDelay(1, controller.signal);
+  assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+  const pending = abortableDelay(1000, controller.signal);
+  controller.abort();
+  await assert.rejects(pending, { name: 'AbortError' });
+  assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+});
+
 test('cancellation stops all remaining characters', async () => {
   const rfb = mockRfb();
   const typer = immediateTyper(rfb);
@@ -84,6 +106,16 @@ test('cancellation stops all remaining characters', async () => {
     (error) => error?.name === 'AbortError',
   );
   assert.equal(rfb.calls.length, 3);
+  assert.equal(rfb.focused, 0);
+});
+
+test('Type + Enter sends multiline commands with no duplicate final Enter', async () => {
+  for (const ending of ['', '\n', '\r\n']) {
+    const rfb = mockRfb();
+    await immediateTyper(rfb).start(`ip -br a\r\nip route\r\ndf -h${ending}`, { appendEnter: true });
+    const actual = rfb.calls.map(([keysym]) => keysym === 0xff0d ? '\n' : String.fromCodePoint(keysym)).join('');
+    assert.equal(actual, 'ip -br a\nip route\ndf -h\n');
+  }
 });
 
 test('a second operation cannot start while typing', async () => {
@@ -175,7 +207,7 @@ test('RFB lifecycle owns one session, reconnects with a fresh URL, and cleans up
   created[0].emit('connect');
   assert.equal(states.at(-1), 'connected');
 
-  // Console Input text, speed, and progress are component-local and never call this controller.
+  // Console Input text and progress are component-local and never call this controller.
   assert.equal(session.current, created[0]);
   assert.equal(created.length, 1);
 
@@ -192,4 +224,24 @@ test('RFB lifecycle owns one session, reconnects with a fresh URL, and cleans up
   assert.equal(created[1].listenerCount, 0);
   assert.equal(active, null);
   assert.equal(session.current, null);
+});
+
+test('disposing a pending console request prevents a late RFB session from being created', async () => {
+  let resolve;
+  let creations = 0;
+  let active = null;
+  const session = createRfbSession({
+    target: { replaceChildren() {} },
+    requestConsole: () => new Promise((done) => { resolve = done; }),
+    parseConsoleUrl: () => 'wss://novnc.example/websockify?token=redacted',
+    createRfb: () => { creations += 1; return lifecycleRfb(); },
+    onState() {},
+    onRfb: (rfb) => { active = rfb; },
+  });
+  const pending = session.connect();
+  session.dispose();
+  resolve({});
+  await pending;
+  assert.equal(creations, 0);
+  assert.equal(active, null);
 });
