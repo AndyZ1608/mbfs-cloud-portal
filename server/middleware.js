@@ -46,6 +46,7 @@ export function errorHandler(err, req, res, _next) {
     error: expose ? (err.message || 'Lỗi máy chủ nội bộ') : 'Lỗi máy chủ nội bộ',
     code: err.code || (status >= 500 ? 'internal_error' : 'request_error'),
     requestId: req.id,
+    ...(err.code === 'network_partial_failure' && err.resourceIds ? { resourceIds: err.resourceIds } : {}),
   });
 }
 
@@ -53,4 +54,3 @@ export function clientIp(req) {
   // Express only honors forwarding headers when trust proxy is explicitly enabled.
   return config.trustProxy ? req.ip : (req.socket?.remoteAddress || req.ip || 'unknown');
 }
-

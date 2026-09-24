@@ -59,6 +59,10 @@ All non-safe `/api` requests require `X-CMP-Request: 1`. This protects cookie-au
 
 Application/service integration settings are loaded from `server/config/application.yml` (or `CMP_CONFIG_FILE`). Billing is scoped exclusively by the current project-scoped Keystone token; CMP never sends a project selector to Billing.
 
+### Create Network contract
+
+`POST /api/networks` accepts the existing flat `name`, `cidr`, optional `gateway_ip`, and `dns` fields plus `mode: "isolated" | "routed"`. `isolated` is the default for legacy callers that omit `mode`; an isolated request ignores any stale `router_id`. Routed requests require `router_id`, which is verified against the current Keystone project before creation. The backend creates network and subnet, then attaches the new subnet to that router. Both modes always send `enable_dhcp: true` to Neutron, ignoring any deprecated client `enable_dhcp` value. Gateway remains configurable in either mode. If subnet creation or router attachment fails, CMP attempts to delete only resources created by that request. On attachment errors it first attempts to remove any interface created for the new subnet, including a possible late success after a timeout. An incomplete rollback returns `network_partial_failure` with the created resource IDs for operator cleanup.
+
 ## State and background work
 
 Policies, cluster metadata, notifications, and audit records live under `DATA_DIR` (normally `/data`). Sessions may use memory, files, or Redis. The scheduler, power controller, monitor, report generator, and alerts execute in the web process, so only one replica may run them safely today.

@@ -324,7 +324,9 @@ function mockNetwork(m, path, q, body, projectId) {
   if ((mt = path.match(/^\/v2\.0\/networks\/([^/]+)$/)) && m === 'DELETE') {
     const i = networks.findIndex((n) => n.id === mt[1]);
     if (i < 0) throw notFound();
-    if (ports.some((p) => p.network_id === mt[1] && p.device_owner.startsWith('compute'))) { const e = new Error('Network đang được máy ảo sử dụng'); e.status = 409; throw e; }
+    if (ports.some((p) => p.network_id === mt[1] && (p.device_owner.startsWith('compute') || p.device_owner.includes('router_interface')))) {
+      throw conflict('Network còn port máy ảo hoặc Router');
+    }
     for (let j = subnets.length - 1; j >= 0; j--) if (subnets[j].network_id === mt[1]) subnets.splice(j, 1);
     networks.splice(i, 1);
     return null;
@@ -342,6 +344,15 @@ function mockNetwork(m, path, q, body, projectId) {
     const subnet = subnets.find((s) => s.id === mt[1]);
     if (!subnet) throw notFound();
     return { subnet };
+  }
+  if ((mt = path.match(/^\/v2\.0\/subnets\/([^/]+)$/)) && m === 'DELETE') {
+    const index = subnets.findIndex((subnet) => subnet.id === mt[1]);
+    if (index < 0) throw notFound();
+    if (ports.some((port) => port.fixed_ips?.some((ip) => ip.subnet_id === mt[1]))) throw conflict('Subnet còn port mạng');
+    const [subnet] = subnets.splice(index, 1);
+    const network = networks.find((item) => item.id === subnet.network_id);
+    if (network) network.subnets = network.subnets.filter((id) => id !== subnet.id);
+    return null;
   }
   if (path === '/v2.0/ports' && m === 'GET') {
     let list = ports;

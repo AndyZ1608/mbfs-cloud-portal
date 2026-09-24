@@ -204,6 +204,12 @@ a { color: var(--accent); }
 .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 13px; }
 .field-label { font-size: 12.5px; font-weight: 600; color: var(--text); }
 .field-hint { font-size: 12px; color: var(--dim); }
+.network-mode-field { border: 0; padding: 0; margin: 0 0 13px; min-width: 0; }
+.network-mode-field legend { margin-bottom: 7px; }
+.network-mode-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.network-mode-option { display: flex; align-items: center; gap: 9px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 7px; cursor: pointer; font-size: 13px; }
+.network-mode-option.selected { border-color: var(--accent); background: var(--accent-soft); }
+.network-mode-option input { width: auto; margin: 0; accent-color: var(--accent); }
 .password-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin: 16px -18px -16px; }
 input, select, textarea {
   border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { osFetch, OSError } from '../openstack.js';
 import { currentProjectId, fetchOwned, isOwned, isUsableNetwork, owned, projectQuery } from '../projectScope.js';
+import { createNetwork } from '../networkCreation.js';
 
 const router = Router();
 
@@ -63,24 +64,13 @@ router.get('/networks/:id', async (req, res, next) => {
   catch (error) { next(error); }
 });
 
-// Tạo network + subnet trong một bước (rollback network nếu subnet lỗi)
+// Tạo network + subnet, và gắn Router chỉ khi người dùng chọn Routed.
 router.post('/networks', async (req, res, next) => {
   const sess = req.session.os;
   try {
-    const { name, cidr, gateway_ip, enable_dhcp = true, dns } = req.body || {};
-    if (!name || !cidr) throw new OSError(400, 'Thiếu tên network hoặc CIDR');
-    const net = await osFetch(sess, 'network', '/v2.0/networks', { method: 'POST', body: { network: { name, project_id: currentProjectId(sess) } } });
-    try {
-      const subnet = { network_id: net.network.id, project_id: currentProjectId(sess), name: `${name}-subnet`, cidr, ip_version: 4, enable_dhcp: !!enable_dhcp };
-      if (gateway_ip) subnet.gateway_ip = gateway_ip;
-      if (dns) subnet.dns_nameservers = String(dns).split(',').map((s) => s.trim()).filter(Boolean);
-      const sub = await osFetch(sess, 'network', '/v2.0/subnets', { method: 'POST', body: { subnet } });
-      console.log(`[network] CREATE network name=${name} cidr=${cidr} by=${sess.user.name}`);
-      res.json({ network: { ...net.network, subnet_details: [sub.subnet] }, subnet: sub.subnet });
-    } catch (e) {
-      await osFetch(sess, 'network', `/v2.0/networks/${net.network.id}`, { method: 'DELETE' }).catch(() => {});
-      throw e;
-    }
+    const result = await createNetwork(sess, req.body);
+    console.log(`[network] CREATE network=${result.network.id} mode=${result.mode} by=${sess.user.name}`);
+    res.json(result);
   } catch (e) { next(e); }
 });
 

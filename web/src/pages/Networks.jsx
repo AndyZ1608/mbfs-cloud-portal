@@ -90,37 +90,74 @@ export default function Networks() {
         )}
       </div>
 
-      {creating && <CreateNetwork onClose={() => setCreating(false)} onDone={() => { setCreating(false); load(); }} />}
+      {creating && <CreateNetwork routers={routers} onClose={() => setCreating(false)} onDone={() => { setCreating(false); load(); }} />}
       {creatingRouter && <CreateRouter nets={nets || []} onClose={() => setCreatingRouter(false)} onDone={() => { setCreatingRouter(false); load(); }} />}
       {ifaceFor && <IfaceModal router={ifaceFor} nets={nets || []} onClose={() => setIfaceFor(null)} />}
     </>
   );
 }
 
-function CreateNetwork({ onClose, onDone }) {
+export function createNetworkValidationKey(form) {
+  if (!form.name.trim() || !form.cidr.trim()) return 'networks.nameCidrRequired';
+  if (form.mode === 'routed' && !form.router_id) return 'networks.create.routerRequired';
+  return null;
+}
+
+export function createNetworkBody(form) {
+  return {
+    name: form.name, cidr: form.cidr, gateway_ip: form.gateway_ip, dns: form.dns, mode: form.mode,
+    ...(form.mode === 'routed' ? { router_id: form.router_id } : {}),
+  };
+}
+
+export async function runNetworkCreate(form, { request, notify, translate, onDone }) {
+  await request('/networks', { method: 'POST', body: createNetworkBody(form) });
+  notify(translate(form.mode === 'routed' ? 'networks.create.routedSuccess' : 'networks.create.isolatedSuccess'), 'ok');
+  onDone();
+}
+
+export function CreateNetwork({ routers = [], onClose, onDone, initialMode = 'isolated' }) {
   const { t } = useI18n();
-  const [f, setF] = useState({ name: '', cidr: '10.0.0.0/24', gateway_ip: '', enable_dhcp: true, dns: '8.8.8.8' });
+  const [f, setF] = useState({ name: '', cidr: '10.0.0.0/24', gateway_ip: '', dns: '8.8.8.8', mode: initialMode, router_id: '' });
   const [busy, setBusy] = useState(false);
 
   async function submit() {
-    if (!f.name.trim() || !f.cidr.trim()) return toast(t('networks.nameCidrRequired'), 'error');
+    if (busy) return;
+    const validation = createNetworkValidationKey(f);
+    if (validation) return toast(t(validation), 'error');
     setBusy(true);
     try {
-      await api('/networks', { method: 'POST', body: f });
-      toast(t('networks.networkCreated', { name: f.name }), 'ok');
-      onDone();
+      await runNetworkCreate(f, { request: api, notify: toast, translate: t, onDone });
     } catch (e) { toast(e.message, 'error'); setBusy(false); }
   }
 
   return (
-    <Modal title={t('networks.createNetworkTitle')} onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
+    <Modal title={t('networks.createNetworkTitle')} onClose={() => { if (!busy) onClose(); }}
+      footer={<><button className="btn ghost" onClick={onClose} disabled={busy}>{t('common.cancel')}</button>
         <button className="btn primary" onClick={submit} disabled={busy}>{t(busy ? 'instances.creating' : 'networks.createNetwork')}</button></>}>
       <Field label={t('networks.networkName')}><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="e.g. net-app" autoFocus /></Field>
-      <Field label="CIDR subnet"><input className="mono" value={f.cidr} onChange={(e) => setF({ ...f, cidr: e.target.value })} /></Field>
-      <Field label="Gateway IP" hint={t('networks.gatewayHint')}><input className="mono" value={f.gateway_ip} onChange={(e) => setF({ ...f, gateway_ip: e.target.value })} placeholder={t('networks.automatic')} /></Field>
-      <Field label="DNS" hint={t('networks.dnsHint')}><input className="mono" value={f.dns} onChange={(e) => setF({ ...f, dns: e.target.value })} /></Field>
-      <label className="check-item"><input type="checkbox" checked={f.enable_dhcp} onChange={(e) => setF({ ...f, enable_dhcp: e.target.checked })} /> {t('networks.enableDhcp')}</label>
+      <Field label={t('networks.create.cidr')}><input className="mono" value={f.cidr} onChange={(e) => setF({ ...f, cidr: e.target.value })} /></Field>
+      <fieldset className="network-mode-field">
+        <legend className="field-label">{t('networks.create.mode')}</legend>
+        <div className="network-mode-options">
+          {['isolated', 'routed'].map((mode) => (
+            <label key={mode} className={`network-mode-option${f.mode === mode ? ' selected' : ''}`}>
+              <input type="radio" name="network-mode" value={mode} checked={f.mode === mode} onChange={() => setF({ ...f, mode, router_id: '' })} />
+              <span>{t(mode === 'routed' ? 'networks.create.modeRouted' : 'networks.create.modeIsolated')}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <Field label={t('networks.create.gateway')} hint={f.mode === 'isolated' ? t('networks.create.isolatedGatewayHint') : t('networks.gatewayHint')}>
+        <input className="mono" value={f.gateway_ip} onChange={(e) => setF({ ...f, gateway_ip: e.target.value })} placeholder={t('networks.automatic')} />
+      </Field>
+      {f.mode === 'routed' && <Field label={t('networks.create.router')}>
+        <select value={f.router_id} required onChange={(e) => setF({ ...f, router_id: e.target.value })}>
+          <option value="">— {t('networks.create.selectRouter')} —</option>
+          {routers.map((router) => <option key={router.id} value={router.id}>{router.name}</option>)}
+        </select>
+      </Field>}
+      <Field label={t('networks.create.dns')} hint={t('networks.dnsHint')}><input className="mono" value={f.dns} onChange={(e) => setF({ ...f, dns: e.target.value })} /></Field>
     </Modal>
   );
 }
