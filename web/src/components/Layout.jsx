@@ -1,32 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Server, HardDrive, Network, Globe, Shield, Disc3, KeyRound, BarChart3, Scale, DatabaseBackup, History, Store, Boxes, Wrench, PiggyBank, CalendarClock, Archive, Bell, Moon, Sun, LogOut } from 'lucide-react';
+import { Outlet, useNavigate } from 'react-router-dom';
+import { Bell, Moon, Sun, LogOut } from 'lucide-react';
 import { api, fmtDate } from '../api.js';
 import { Toasts, toast } from './ui.jsx';
 import useCmpSession from '../useCmpSession.js';
 import { useI18n } from '../i18n/react.jsx';
 import LanguageSwitcher from './LanguageSwitcher.jsx';
 import { noticeDetail, noticeTitle } from '../i18n/notifications.js';
-
-const NAV = [
-  { to: '/', key: 'overview', icon: LayoutDashboard, end: true },
-  { to: '/instances', key: 'instances', icon: Server },
-  { to: '/marketplace', key: 'marketplace', icon: Store },
-  { to: '/kubernetes', key: 'kubernetes', icon: Boxes },
-  { to: '/volumes', key: 'volumes', icon: HardDrive },
-  { to: '/networks', key: 'networks', icon: Network },
-  { to: '/floating-ips', key: 'floatingIps', icon: Globe },
-  { to: '/load-balancers', key: 'loadBalancers', icon: Scale },
-  { to: '/security-groups', key: 'securityGroups', icon: Shield },
-  { to: '/object-storage', key: 'objectStorage', icon: Archive },
-  { to: '/images', key: 'images', icon: Disc3 },
-  { to: '/keypairs', key: 'keypairs', icon: KeyRound },
-  { to: '/backup', key: 'backup', icon: DatabaseBackup },
-  { to: '/power', key: 'power', icon: CalendarClock },
-  { to: '/optimize', key: 'optimize', icon: PiggyBank },
-  { to: '/audit', key: 'audit', icon: History },
-  { to: '/billing', key: 'billing', icon: BarChart3, feature: 'billing' },
-];
+import SidebarNavigation from './SidebarNavigation.jsx';
 
 export default function Layout() {
   const { t } = useI18n();
@@ -72,20 +53,7 @@ export default function Layout() {
           <img className="brand-logo brand-logo-full" src="/asset/logo.png" alt="MobiFone Solutions Cloud" />
           <img className="brand-logo brand-logo-mark" src="/asset/favicon.png" alt="" aria-hidden="true" />
         </div>
-        <nav>
-          {NAV.filter((item) => !item.feature || (item.feature === 'billing' && cfg.billingEnabled)).map(({ to, key, icon: Icon, end }) => (
-            <NavLink key={to} to={to} end={end} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-              <Icon size={17} />
-              <span>{t(`navigation.${key}`)}</span>
-            </NavLink>
-          ))}
-          {sess?.roles?.includes('admin') && (
-            <NavLink to="/admin" className={({ isActive }) => `nav-item nav-admin ${isActive ? 'active' : ''}`}>
-              <Wrench size={17} />
-              <span>{t('navigation.admin')}</span>
-            </NavLink>
-          )}
-        </nav>
+        <SidebarNavigation config={cfg} roles={sess.roles} />
         <div className="sidebar-foot">
           {cfg.mock && <div className="mock-flag">{t('common.demoMode')}</div>}
           <span className="ver">portal v2.4</span>
