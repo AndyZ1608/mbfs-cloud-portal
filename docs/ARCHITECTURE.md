@@ -43,7 +43,7 @@ The backend is a modular monolith. This is deliberate: there is one deployed ser
 - `server/store.js`, `server/sessionstore.js`: lightweight local persistence and session-store adapters.
 - `web/src/api.js`: shared JSON API client; pages contain feature presentation state.
 
-The React sidebar has one data-driven route map in `web/src/components/SidebarNavigation.jsx`. Dashboard stands alone; Compute contains Virtual Machines, Images, and SSH Keys; Storage contains Volumes, Object Storage, and Backup; Network contains Networks & Routers, Floating IPs, Security Groups, and Load Balancers; Platform / Services contains Kubernetes, Marketplace, and feature-gated Billing; Operations contains Power Schedule, Resource Optimization, Activity Log, and the admin-only Cloud Administration link. Routers, Snapshots, Flavors, and Monitoring do not have standalone routes and therefore have no duplicate menu entries. Grouping does not change URLs or backend authorization.
+The React sidebar has one data-driven route map in `web/src/components/SidebarNavigation.jsx`. Dashboard stands alone; Compute contains Virtual Machines, Images, and SSH Keys; Storage contains Volumes, Object Storage, and Backup; Network contains Networks & Routers, Floating IPs, Security Groups, and Load Balancers. Feature-gated Billing is a standalone top-level link to `/billing`. Platform / Services contains Kubernetes and Marketplace; Operations contains Power Schedule, Resource Optimization, Activity Log, and the admin-only Cloud Administration link. Routers, Snapshots, Flavors, and Monitoring do not have standalone routes and therefore have no duplicate menu entries. Grouping does not change URLs or backend authorization.
 
 ## API conventions
 

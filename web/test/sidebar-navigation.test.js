@@ -10,13 +10,16 @@ import { translate } from '../src/i18n/index.js';
 
 const storage = (locale) => ({ getItem: (key) => key === 'cmp.locale' ? locale : null });
 
-test('navigation maps only existing routes, with Dashboard standalone and admin gated', async () => {
+test('navigation maps only existing routes, with Dashboard and feature-gated Billing standalone', async () => {
   const vite = await createServer({ server: { middlewareMode: true, watch: null }, appType: 'custom' });
   try {
     const { NAVIGATION, visibleNavigation } = await vite.ssrLoadModule('/src/components/SidebarNavigation.jsx');
     assert.equal(NAVIGATION[0].to, '/');
     assert.ok(!NAVIGATION[0].children);
-    assert.deepEqual(NAVIGATION.slice(1).map((group) => group.key), ['compute', 'storage', 'network', 'platform', 'operations']);
+    assert.deepEqual(NAVIGATION.filter((entry) => entry.children).map((group) => group.key), ['compute', 'storage', 'network', 'platform', 'operations']);
+    assert.equal(NAVIGATION[4].to, '/billing');
+    assert.ok(!NAVIGATION[4].children);
+    assert.deepEqual(NAVIGATION[5].children.map((item) => item.to), ['/kubernetes', '/marketplace']);
     const all = NAVIGATION.flatMap((entry) => entry.children || [entry]).map((item) => item.to);
     assert.equal(new Set(all).size, all.length);
     const appSource = readFileSync(fileURLToPath(new URL('../src/App.jsx', import.meta.url)), 'utf8');
@@ -26,9 +29,10 @@ test('navigation maps only existing routes, with Dashboard standalone and admin 
     for (const nonRoute of ['/flavors', '/snapshots', '/routers', '/monitoring']) assert.ok(!all.includes(nonRoute));
     const member = visibleNavigation({ config: { billingEnabled: false }, roles: ['member'] });
     assert.ok(!member.flatMap((entry) => entry.children || [entry]).some((item) => ['/billing', '/admin'].includes(item.to)));
+    assert.ok(member.some((entry) => entry.key === 'platform'));
     const admin = visibleNavigation({ config: { billingEnabled: true }, roles: ['member', 'admin'] });
     assert.ok(admin.flatMap((entry) => entry.children || [entry]).some((item) => item.to === '/admin'));
-    assert.ok(admin.flatMap((entry) => entry.children || [entry]).some((item) => item.to === '/billing'));
+    assert.ok(admin.some((entry) => entry.to === '/billing' && !entry.children));
     const empty = visibleNavigation({
       config: { billingEnabled: false }, roles: ['member'],
       navigation: [{ key: 'platform', children: [{ to: '/billing', feature: 'billing' }] }],
@@ -45,7 +49,8 @@ test('route state expands the matching group, including deep links and browser-h
     assert.equal(activeGroupForPath('/networks'), 'network');
     assert.equal(activeGroupForPath('/networks/net-1'), 'network');
     assert.equal(activeGroupForPath('/instances/vm-1'), 'compute');
-    assert.equal(activeGroupForPath('/billing/instances/vm-1'), 'platform');
+    assert.equal(activeGroupForPath('/billing'), null);
+    assert.equal(activeGroupForPath('/billing/instances/vm-1'), null);
     assert.equal(activeGroupForPath('/volumes/vol-1'), 'storage');
     assert.equal(routeMatchesItem('/instances-extra', { to: '/instances' }), false);
     assert.equal(toggleOpenGroup('compute', 'storage'), 'storage');
@@ -67,6 +72,9 @@ test('rendered sidebar uses accessible accordion controls and active child links
     };
     const network = render('/networks', 'en');
     assert.match(network, /aria-label="Dashboard"/);
+    const billingLink = (markup) => markup.match(/<a[^>]*href="\/billing"[^>]*>/)?.[0] || '';
+    assert.match(billingLink(network), /aria-label="Billing"/);
+    assert.match(billingLink(network), /class="nav-item nav-standalone"/);
     assert.match(network, /aria-label="Network" aria-expanded="true"/);
     assert.match(network, /aria-label="Compute" aria-expanded="false"/);
     assert.match(network, /aria-current="page"[^>]*href="\/networks"/);
@@ -75,6 +83,12 @@ test('rendered sidebar uses accessible accordion controls and active child links
     const deep = render('/instances/vm-1', 'en');
     assert.match(deep, /aria-label="Compute" aria-expanded="true"/);
     assert.match(deep, /aria-current="page"[^>]*href="\/instances"/);
+    for (const path of ['/billing', '/billing/instances/vm-1']) {
+      const billing = render(path, 'en');
+      assert.match(billingLink(billing), /class="nav-item nav-standalone active"/);
+      assert.match(billingLink(billing), /aria-current="page"/);
+      assert.equal((billing.match(/aria-expanded="true"/g) || []).length, 0);
+    }
     const vi = render('/networks', 'vi');
     assert.match(vi, /Nền tảng \/ Dịch vụ/);
     assert.match(vi, /Vận hành/);

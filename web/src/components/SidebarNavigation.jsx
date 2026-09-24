@@ -27,10 +27,10 @@ export const NAVIGATION = [
     { to: '/security-groups', labelKey: 'navigation.securityGroups', icon: Shield },
     { to: '/load-balancers', labelKey: 'navigation.loadBalancers', icon: Scale },
   ] },
+  { to: '/billing', labelKey: 'navigation.billing', icon: BarChart3, feature: 'billing' },
   { key: 'platform', labelKey: 'navigation.platform', icon: Boxes, children: [
     { to: '/kubernetes', labelKey: 'navigation.kubernetes', icon: Boxes },
     { to: '/marketplace', labelKey: 'navigation.marketplace', icon: Store },
-    { to: '/billing', labelKey: 'navigation.billing', icon: BarChart3, feature: 'billing' },
   ] },
   { key: 'operations', labelKey: 'navigation.operations', icon: Activity, children: [
     { to: '/power', labelKey: 'navigation.power', icon: CalendarClock },
@@ -78,7 +78,7 @@ export default function SidebarNavigation({ config, roles }) {
         if (!entry.children) {
           const Icon = entry.icon;
           return <NavLink key={entry.to} to={entry.to} end={entry.end} title={t(entry.labelKey)} aria-label={t(entry.labelKey)}
-            className={({ isActive }) => `nav-item nav-dashboard${isActive ? ' active' : ''}`}>
+            className={({ isActive }) => `nav-item nav-standalone${entry.to === '/' ? ' nav-dashboard' : ''}${isActive ? ' active' : ''}`}>
             <Icon size={17} aria-hidden="true" /><span>{t(entry.labelKey)}</span>
           </NavLink>;
         }
