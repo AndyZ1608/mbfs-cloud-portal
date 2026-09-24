@@ -186,7 +186,7 @@ a { color: var(--accent); }
 .menu-wrap { position: relative; display: inline-block; }
 .menu {
   position: absolute; right: 0; top: calc(100% + 4px); z-index: 50; min-width: 195px;
-  background: #fff; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 8px 24px rgba(20, 30, 50, 0.13); padding: 5px; display: flex; flex-direction: column;
 }
 .menu-item {
@@ -197,6 +197,9 @@ a { color: var(--accent); }
 .menu-item:disabled { opacity: 0.45; cursor: not-allowed; }
 .menu-item.danger { color: var(--err); }
 .menu-item.danger:hover:not(:disabled) { background: var(--err-bg); }
+.menu-item.destructive { color: var(--err); font-weight: 700; }
+.menu-item.destructive:hover:not(:disabled) { background: var(--err-bg); }
+.menu-item.danger:disabled, .menu-item.destructive:disabled { color: var(--dim); }
 .menu-div { height: 1px; background: var(--border); margin: 4px 2px; }
 
 /* ===== Modal ===== */

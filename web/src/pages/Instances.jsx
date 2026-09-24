@@ -5,7 +5,8 @@ import { Modal, Field, StatusBadge, ActionsMenu, toast, Empty, PageHead } from '
 import MonitorModal from '../components/MonitorModal.jsx';
 import TypeToConfirmDialog from '../components/TypeToConfirmDialog.jsx';
 import { openInstanceConsole } from '../console/navigation.js';
-import { canStartResize, canFinalizeResize, validResizeFlavor, submitResizeOnce } from '../resize.js';
+import { validResizeFlavor, submitResizeOnce } from '../resize.js';
+import { vmActionItems } from '../vmActions.js';
 import { useI18n } from '../i18n/react.jsx';
 import NetworkInterfaceFields, { addInterface, newInterface, removeInterface, validInterfaces } from '../components/NetworkInterfaceFields.jsx';
 
@@ -168,30 +169,26 @@ export default function Instances() {
                   <td className="dim">{s.key_name || '—'}</td>
                   <td className="dim">{fmtDate(s.created)}</td>
                   <td>
-                    <ActionsMenu items={[
-                      canFinalizeResize(s, pendingResize.has(s.id)) && { label: t('instances.confirmResize'), onClick: () => act(s, 'confirm-resize', t('instances.confirmResizeSent')) },
-                      canFinalizeResize(s, pendingResize.has(s.id)) && { label: t('instances.revertResize'), onClick: () => act(s, 'revert-resize', t('instances.revertResizeSent')) },
-                      canFinalizeResize(s, pendingResize.has(s.id)) && 'divider',
-                      !['ACTIVE', 'VERIFY_RESIZE', 'RESIZE', 'RESIZE_MIGRATING'].includes(s.status) && { label: t('instances.start'), onClick: () => act(s, 'start', t('instances.started')) },
-                      s.status === 'ACTIVE' && { label: t('instances.stop'), onClick: () => act(s, 'stop', t('instances.stopSent')) },
-                      s.status === 'ACTIVE' && { label: t('instances.softReboot'), onClick: () => act(s, 'reboot-soft', t('instances.rebooting')) },
-                      s.status === 'ACTIVE' && { label: t('instances.hardReboot'), onClick: () => act(s, 'reboot-hard', t('instances.rebooting')) },
-                      canStartResize(s, pendingResize.has(s.id)) && { label: t('instances.resize'), onClick: () => setResizeFor(s) },
-                      { label: t('instances.rename'), onClick: () => rename(s) },
-                      { label: t('instances.console'), onClick: () => openInstanceConsole(s.id) },
-                      { label: t('instances.changePassword'), onClick: () => setPasswordFor(s) },
-                      { label: t('instances.monitor'), onClick: () => setMonFor(s) },
-                      { label: t('instances.consoleLog'), onClick: () => setLogFor(s) },
-                      { label: t('instances.networkCards'), onClick: () => setNicFor(s) },
-                      { label: t('instances.securityGroups'), onClick: () => setSgFor(s) },
-                      (s.status === 'ACTIVE' || s.status === 'SHUTOFF') && { label: t('instances.rebuild'), onClick: () => setRebuildFor(s) },
-                      s.status === 'ACTIVE' && { label: t('instances.shelve'), onClick: () => act(s, 'shelve', t('instances.shelving')) },
-                      (s.status === 'SHELVED' || s.status === 'SHELVED_OFFLOADED') && { label: t('instances.unshelve'), onClick: () => act(s, 'unshelve', t('instances.unshelving')) },
-                      { label: t('instances.snapshot'), onClick: () => snapshot(s) },
-                      { label: t('instances.floatingIp'), onClick: () => setFipTarget(s) },
-                      'divider',
-                      { label: t('instances.delete'), danger: true, onClick: () => openDelete(s) },
-                    ]} />
+                    <ActionsMenu items={vmActionItems(s, { t, pendingResize: pendingResize.has(s.id), handlers: {
+                      console: () => openInstanceConsole(s.id),
+                      changePassword: () => setPasswordFor(s),
+                      rename: () => rename(s),
+                      networkCards: () => setNicFor(s),
+                      securityGroups: () => setSgFor(s),
+                      floatingIp: () => setFipTarget(s),
+                      snapshot: () => snapshot(s),
+                      start: () => act(s, 'start', t('instances.started')),
+                      stop: () => act(s, 'stop', t('instances.stopSent')),
+                      softReboot: () => act(s, 'reboot-soft', t('instances.rebooting')),
+                      hardReboot: () => act(s, 'reboot-hard', t('instances.rebooting')),
+                      resize: () => setResizeFor(s),
+                      confirmResize: () => act(s, 'confirm-resize', t('instances.confirmResizeSent')),
+                      revertResize: () => act(s, 'revert-resize', t('instances.revertResizeSent')),
+                      shelve: () => act(s, 'shelve', t('instances.shelving')),
+                      unshelve: () => act(s, 'unshelve', t('instances.unshelving')),
+                      rebuild: () => setRebuildFor(s),
+                      delete: () => openDelete(s),
+                    } })} />
                   </td>
                 </tr>
               ))}

@@ -109,8 +109,8 @@ export function ActionsMenu({ items }) {
       {open && (
         <div className="menu">
           {items.filter(Boolean).map((it, i) =>
-            it === 'divider' ? <div key={i} className="menu-div" /> : (
-              <button key={i} className={`menu-item ${it.danger ? 'danger' : ''}`} disabled={it.disabled}
+            it === 'divider' ? <div key={`divider-${i}`} className="menu-div" role="separator" /> : (
+              <button key={it.key || i} className={`menu-item${it.tone ? ` ${it.tone}` : it.danger ? ' danger' : ''}`} disabled={it.disabled}
                 onClick={() => { setOpen(false); it.onClick(); }}>
                 {it.label}
               </button>
