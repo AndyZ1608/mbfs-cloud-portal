@@ -234,6 +234,16 @@ textarea.mono, input.mono { font-family: var(--mono); font-size: 12.5px; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
 .form-grid .field:nth-last-child(-n+2) { grid-column: span 2; }
+.vm-interface-section { grid-column: 1 / -1; margin: 4px 0 14px; }
+.vm-interface-section h3 { font-size: 14px; margin: 0 0 9px; }
+.vm-interface-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px 0; margin-bottom: 8px; background: var(--card); }
+.vm-interface-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }
+.vm-interface-heading strong { font-size: 12.5px; }
+.vm-interface-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.vm-interface-grid .field { min-width: 0; margin-bottom: 10px; }
+.vm-interface-default { display: flex; align-items: center; min-height: 34px; color: var(--dim); }
+.vm-interface-table { max-width: 100%; overflow-x: auto; }
+.vm-interface-table .tbl { white-space: nowrap; }
 .row-inline { display: flex; align-items: center; gap: 10px; }
 .check-list { display: flex; flex-direction: column; gap: 6px; max-height: 170px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
 .check-item { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
@@ -438,6 +448,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   .content { padding: 14px; }
   .form-grid { grid-template-columns: 1fr; }
   .form-grid .field { grid-column: span 1 !important; }
+  .vm-interface-grid { grid-template-columns: 1fr; }
 }
 
 /* ===== v1.1: stat cards (usage report) ===== */

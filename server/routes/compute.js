@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { osFetch, OSError } from '../openstack.js';
 import { traceNovaConsole } from '../consoleDiagnostics.js';
 import { changeInstancePassword } from '../passwordChange.js';
-import { assertOwned, fetchOwned, fetchUsableImage, fetchUsableNetwork, owned } from '../projectScope.js';
+import { assertOwned, fetchOwned, fetchUsableImage, owned } from '../projectScope.js';
+import { attachInterface, createServerWithInterfaces, prepareInterfaces } from '../instanceInterfaces.js';
 
 const router = Router();
 
@@ -17,22 +18,19 @@ router.get('/servers', async (req, res, next) => {
 
 router.post('/servers', async (req, res, next) => {
   try {
-    const { name, flavorRef, imageRef, networks, key_name, security_groups, count, boot_volume_gb, user_data } = req.body || {};
-    if (!name || !flavorRef || !imageRef || !networks?.length) {
-      throw new OSError(400, 'Thiếu thông tin: tên, flavor, image và ít nhất một network là bắt buộc');
+    const sess = req.session.os;
+    const { name, flavorRef, imageRef, interfaces, key_name, count, boot_volume_gb, user_data } = req.body || {};
+    if (!name || !flavorRef || !imageRef) {
+      throw new OSError(400, 'Thiếu thông tin: tên, flavor và image là bắt buộc');
     }
-    for (const id of networks) await fetchUsableNetwork(req.session.os, id);
-    await fetchUsableImage(req.session.os, imageRef);
-    if (security_groups?.length) {
-      const groups = owned((await osFetch(req.session.os, 'network', '/v2.0/security-groups')).security_groups, req.session.os);
-      if (security_groups.some((group) => !groups.some((ownedGroup) => ownedGroup.name === group))) {
-        throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
-      }
+    await fetchUsableImage(sess, imageRef);
+    if (req.body?.networks !== undefined || req.body?.security_groups !== undefined) {
+      throw new OSError(400, 'Dùng danh sách interfaces; Security Group mặc định do CMP xác định.', 'interface_contract_invalid');
     }
+    const prepared = await prepareInterfaces(sess, interfaces);
     const server = {
       name,
       flavorRef,
-      networks: networks.map((uuid) => ({ uuid })),
     };
     if (boot_volume_gb && Number(boot_volume_gb) > 0) {
       server.block_device_mapping_v2 = [{
@@ -47,17 +45,38 @@ router.post('/servers', async (req, res, next) => {
       server.imageRef = imageRef;
     }
     if (key_name) server.key_name = key_name;
-    if (security_groups?.length) server.security_groups = security_groups.map((n) => ({ name: n }));
-    const n = Math.max(1, Math.min(Number(count) || 1, 10));
-    if (n > 1) { server.min_count = n; server.max_count = n; }
+    const n = Math.max(1, Math.min(Math.floor(Number(count)) || 1, 10));
+    if (n > 1 && prepared.specs.some((spec) => spec.ip_address)) {
+      throw new OSError(400, 'Không thể dùng cùng fixed IP khi tạo nhiều VM.', 'interface_batch_fixed_ip');
+    }
     if (user_data && String(user_data).trim()) {
       if (String(user_data).length > 60000) throw new OSError(400, 'user-data quá dài (tối đa ~60KB)');
       server.user_data = Buffer.from(String(user_data)).toString('base64');
     }
 
-    const data = await osFetch(req.session.os, 'compute', '/servers', { method: 'POST', body: { server } });
-    console.log(`[compute] CREATE server name=${name} x${n} by=${req.session.os.user.name}`);
-    res.status(202).json(data);
+    const created = [];
+    const interfaceAudit = [];
+    for (let index = 0; index < n; index++) {
+      try {
+        // A Neutron Port belongs to one server only; a multi-create needs a fresh set per VM.
+        const result = await createServerWithInterfaces(sess, {
+          ...server, name: n > 1 ? `${name}-${index + 1}` : name,
+        }, prepared);
+        created.push(result.data);
+        result.ports.forEach((port, at) => interfaceAudit.push({
+          instance_id: result.data?.server?.id || null, port_id: port.id,
+          network_id: prepared.specs[at].network_id, subnet_id: prepared.specs[at].subnet_id,
+          fixed_ip: port.fixed_ips?.[0]?.ip_address || null,
+        }));
+      } catch (error) {
+        if (!created.length) throw error;
+        console.error(`[compute] Partial VM batch project=${sess.project.id} servers=${created.map((item) => item?.server?.id).join(',')}`);
+        throw new OSError(502, 'Một số VM đã được tạo; kiểm tra danh sách trước khi thử lại.', 'interface_batch_partial_failure');
+      }
+    }
+    res.locals.interfaceAudit = interfaceAudit;
+    console.log(`[compute] CREATE server name=${name} x${n} by=${sess.user.name}`);
+    res.status(202).json(n === 1 ? created[0] : { server: created[0]?.server, servers: created.map((item) => item?.server) });
   } catch (e) { next(e); }
 });
 
@@ -143,22 +162,21 @@ router.post('/servers/:id/rebuild', async (req, res, next) => {
 router.get('/servers/:id/interfaces', async (req, res, next) => {
   try {
     await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
-    const d = await osFetch(req.session.os, 'compute', `/servers/${req.params.id}/os-interface`);
-    res.json({ interfaces: (d.interfaceAttachments || []).filter((entry) => !entry.project_id && !entry.tenant_id || owned([entry], req.session.os).length) });
+    const d = await osFetch(req.session.os, 'network', `/v2.0/ports?project_id=${encodeURIComponent(req.session.os.project.id)}&device_id=${encodeURIComponent(req.params.id)}`);
+    res.json({ interfaces: owned(d.ports, req.session.os) });
   } catch (e) { next(e); }
 });
 
 router.post('/servers/:id/interfaces', async (req, res, next) => {
   try {
-    const { net_id } = req.body || {};
-    if (!net_id) throw new OSError(400, 'Chọn network để gắn');
-    await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
-    await fetchUsableNetwork(req.session.os, net_id);
-    const d = await osFetch(req.session.os, 'compute', `/servers/${req.params.id}/os-interface`, {
-      method: 'POST', body: { interfaceAttachment: { net_id } },
-    });
-    console.log(`[compute] ATTACH nic server=${req.params.id} net=${net_id} by=${req.session.os.user.name}`);
-    res.json(d);
+    const sess = req.session.os;
+    await fetchOwned(sess, 'compute', `/servers/${req.params.id}`, 'server');
+    const { data, port } = await attachInterface(sess, req.params.id, req.body);
+    res.locals.interfaceAudit = [{ instance_id: req.params.id, port_id: port.id,
+      network_id: port.network_id, subnet_id: port.fixed_ips?.[0]?.subnet_id || null,
+      fixed_ip: port.fixed_ips?.[0]?.ip_address || null }];
+    console.log(`[compute] ATTACH nic server=${req.params.id} port=${port.id} net=${port.network_id} by=${sess.user.name}`);
+    res.json(data);
   } catch (e) { next(e); }
 });
 
@@ -168,6 +186,9 @@ router.delete('/servers/:id/interfaces/:portId', async (req, res, next) => {
     const port = await fetchOwned(req.session.os, 'network', `/v2.0/ports/${req.params.portId}`, 'port');
     if (port.device_id !== req.params.id) throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
     await osFetch(req.session.os, 'compute', `/servers/${req.params.id}/os-interface/${req.params.portId}`, { method: 'DELETE' });
+    res.locals.interfaceAudit = [{ instance_id: req.params.id, port_id: port.id,
+      network_id: port.network_id, subnet_id: port.fixed_ips?.[0]?.subnet_id || null,
+      fixed_ip: port.fixed_ips?.[0]?.ip_address || null }];
     console.log(`[compute] DETACH nic server=${req.params.id} port=${req.params.portId} by=${req.session.os.user.name}`);
     res.json({ ok: true });
   } catch (e) { next(e); }

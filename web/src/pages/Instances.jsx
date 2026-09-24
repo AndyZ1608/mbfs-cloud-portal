@@ -7,6 +7,7 @@ import TypeToConfirmDialog from '../components/TypeToConfirmDialog.jsx';
 import { openInstanceConsole } from '../console/navigation.js';
 import { canStartResize, canFinalizeResize, validResizeFlavor, submitResizeOnce } from '../resize.js';
 import { useI18n } from '../i18n/react.jsx';
+import NetworkInterfaceFields, { addInterface, newInterface, removeInterface, validInterfaces } from '../components/NetworkInterfaceFields.jsx';
 
 export default function Instances() {
   const { t } = useI18n();
@@ -235,62 +236,69 @@ function CreateModal({ onClose, onDone }) {
   const { t } = useI18n();
   const [opts, setOpts] = useState(null);
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
   const [f, setF] = useState({
-    name: '', flavorRef: '', imageRef: '', networks: [], key_name: '',
-    security_groups: ['default'], count: 1, bfv: false, boot_volume_gb: 40,
+    name: '', flavorRef: '', imageRef: '', interfaces: [newInterface()], key_name: '',
+    count: 1, bfv: false, boot_volume_gb: 40,
     show_ud: false, user_data: '',
   });
 
   useEffect(() => {
-    Promise.all([api('/flavors'), api('/images'), api('/available-networks'), api('/keypairs'), api('/security-groups')])
-      .then(([fl, im, ne, kp, sg]) => {
+    Promise.all([api('/flavors'), api('/images'), api('/available-networks'), api('/keypairs')])
+      .then(([fl, im, ne, kp]) => {
         const nets = ne.networks.filter((n) => !n['router:external']);
         setOpts({
           flavors: fl.flavors,
           images: im.images.filter((i) => i.status === 'active'),
           networks: nets,
           keypairs: kp.keypairs,
-          secgroups: sg.security_groups,
         });
         setF((x) => ({
           ...x,
           flavorRef: fl.flavors[0]?.id || '',
           imageRef: im.images[0]?.id || '',
-          networks: nets[0] ? [nets[0].id] : [],
+          interfaces: [newInterface(nets)],
           key_name: kp.keypairs[0]?.name || '',
         }));
       })
       .catch((e) => toast(e.message, 'error'));
   }, []);
 
-  function toggle(list, v) {
-    return list.includes(v) ? list.filter((x) => x !== v) : [...list, v];
+  function updateInterface(index, value) {
+    setF((current) => ({ ...current, interfaces: current.interfaces.map((item, at) => at === index ? value : item) }));
+  }
+
+  function close() {
+    if (!submitting.current) onClose();
   }
 
   async function submit() {
+    if (submitting.current) return;
     if (!f.name.trim()) return toast(t('instances.nameRequired'), 'error');
-    if (!f.networks.length) return toast(t('instances.networkRequired'), 'error');
+    if (!validInterfaces(f.interfaces, opts?.networks || [])) return toast(t('instance.networkInterfaces.required'), 'error');
+    if (Number(f.count) > 1 && f.interfaces.some((item) => item.ip_address.trim())) return toast(t('errors.interface_batch_fixed_ip'), 'error');
+    submitting.current = true;
     setBusy(true);
     try {
       await api('/servers', {
         method: 'POST',
         body: {
           name: f.name.trim(), flavorRef: f.flavorRef, imageRef: f.imageRef,
-          networks: f.networks, key_name: f.key_name || undefined,
-          security_groups: f.security_groups, count: Number(f.count) || 1,
+          interfaces: f.interfaces.map(({ network_id, subnet_id, ip_address }) => ({ network_id, subnet_id, ip_address: ip_address.trim() || null })),
+          key_name: f.key_name || undefined, count: Number(f.count) || 1,
           boot_volume_gb: f.bfv ? Number(f.boot_volume_gb) : undefined,
           user_data: f.show_ud && f.user_data.trim() ? f.user_data : undefined,
         },
       });
       toast(t('instances.creatingName', { name: f.name }), 'ok');
       onDone();
-    } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
+    } catch (e) { toast(e.message, 'error'); } finally { submitting.current = false; setBusy(false); }
   }
 
   return (
-    <Modal title={t('instances.createTitle')} onClose={onClose} wide
+    <Modal title={t('instances.createTitle')} onClose={close} wide
       footer={<>
-        <button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
+        <button className="btn ghost" onClick={close} disabled={busy}>{t('common.cancel')}</button>
         <button className="btn primary" onClick={submit} disabled={busy || !opts}>{t(busy ? 'instances.creating' : 'instances.create')}</button>
       </>}>
       {!opts ? <p>{t('instances.loadingOptions')}</p> : (
@@ -325,18 +333,17 @@ function CreateModal({ onClose, onDone }) {
                 onChange={(e) => setF({ ...f, boot_volume_gb: e.target.value })} /> <span className="dim">GB</span></>}
             </div>
           </Field>
-          <Field label={t('instances.networkSelection')}>
-            <div className="check-list">
-              {opts.networks.map((n) => (
-                <label key={n.id} className="check-item">
-                  <input type="checkbox" checked={f.networks.includes(n.id)} onChange={() => setF({ ...f, networks: toggle(f.networks, n.id) })} />
-                  <span>{n.name}</span>
-                  <span className="mono dim">{n.subnet_details?.map((s) => s.cidr).join(', ')}</span>
-                </label>
-              ))}
-              {opts.networks.length === 0 && <p className="dim">{t('instances.noInternalNetwork')}</p>}
-            </div>
-          </Field>
+          <div className="vm-interface-section">
+            <h3>{t('instance.networkInterfaces.title')}</h3>
+            {f.interfaces.map((item, index) => <NetworkInterfaceFields key={index} index={index} value={item}
+              networks={opts.networks} disabled={busy} onChange={(value) => updateInterface(index, value)}
+              onRemove={index > 0 ? () => setF((current) => ({ ...current, interfaces: removeInterface(current.interfaces, index) })) : null} />)}
+            {opts.networks.length === 0 && <p className="dim">{t('instances.noInternalNetwork')}</p>}
+            <button className="btn ghost sm" type="button" disabled={busy || !opts.networks.length}
+              onClick={() => setF((current) => ({ ...current, interfaces: addInterface(current.interfaces, opts.networks) }))}>
+              <Plus size={14} /> {t('instance.networkInterfaces.add')}
+            </button>
+          </div>
           <Field label={t('instances.initScript')} hint={t('instances.initScriptHint')}>
             <label className="check-item" style={{ marginBottom: 6 }}>
               <input type="checkbox" checked={f.show_ud} onChange={(e) => setF({ ...f, show_ud: e.target.checked })} /> {t('instances.addScript')}
@@ -345,17 +352,6 @@ function CreateModal({ onClose, onDone }) {
               <textarea className="mono" rows={6} value={f.user_data} onChange={(e) => setF({ ...f, user_data: e.target.value })}
                 placeholder={t('instances.scriptPlaceholder')} />
             )}
-          </Field>
-          <Field label="Security group">
-            <div className="check-list">
-              {opts.secgroups.map((g) => (
-                <label key={g.id} className="check-item">
-                  <input type="checkbox" checked={f.security_groups.includes(g.name)} onChange={() => setF({ ...f, security_groups: toggle(f.security_groups, g.name) })} />
-                  <span>{g.name}</span>
-                  <span className="dim">{g.description}</span>
-                </label>
-              ))}
-            </div>
           </Field>
         </div>
       )}
@@ -638,58 +634,76 @@ function NicModal({ server, onClose, onDone }) {
   const { t } = useI18n();
   const [ifaces, setIfaces] = useState(null);
   const [nets, setNets] = useState([]);
-  const [netId, setNetId] = useState('');
+  const [groups, setGroups] = useState([]);
+  const [nic, setNic] = useState(newInterface());
   const [busy, setBusy] = useState(false);
+  const operationPending = useRef(false);
 
   async function load() {
-    const [i, n] = await Promise.all([api(`/servers/${server.id}/interfaces`), api('/available-networks')]);
+    const [i, n, sg] = await Promise.all([api(`/servers/${server.id}/interfaces`), api('/available-networks'), api('/security-groups')]);
     setIfaces(i.interfaces);
     const inner = n.networks.filter((x) => !x['router:external']);
     setNets(inner);
-    if (!netId && inner[0]) setNetId(inner[0].id);
+    setGroups(sg.security_groups);
+    setNic(newInterface(inner));
   }
   useEffect(() => { load().catch((e) => toast(e.message, 'error')); }, []); // eslint-disable-line
 
   async function attach() {
+    if (operationPending.current || !validInterfaces([nic], nets)) return;
+    operationPending.current = true;
     setBusy(true);
-    try { await api(`/servers/${server.id}/interfaces`, { method: 'POST', body: { net_id: netId } }); toast(t('instances.nicAttached'), 'ok'); await load(); onDone(); }
+    try {
+      await api(`/servers/${server.id}/interfaces`, { method: 'POST', body: {
+        network_id: nic.network_id, subnet_id: nic.subnet_id, ip_address: nic.ip_address.trim() || null,
+      } });
+      toast(t('instances.nicAttached'), 'ok'); await load(); onDone();
+    }
     catch (e) { toast(e.message, 'error'); }
-    setBusy(false);
+    finally { operationPending.current = false; setBusy(false); }
   }
   async function detach(portId) {
+    if (operationPending.current) return;
     if (!window.confirm(t('instances.nicDetachConfirm'))) return;
+    operationPending.current = true;
     setBusy(true);
     try { await api(`/servers/${server.id}/interfaces/${portId}`, { method: 'DELETE' }); toast(t('instances.nicDetached'), 'ok'); await load(); onDone(); }
     catch (e) { toast(e.message, 'error'); }
-    setBusy(false);
+    finally { operationPending.current = false; setBusy(false); }
   }
 
   const netName = (id) => nets.find((n) => n.id === id)?.name || id?.slice(0, 8);
+  const subnetName = (id) => nets.flatMap((n) => n.subnet_details || []).find((subnet) => subnet.id === id)?.cidr || id?.slice(0, 8);
+  const groupNames = (ids) => (ids || []).map((id) => groups.find((group) => group.id === id)?.name || id.slice(0, 8)).join(', ') || '—';
 
   return (
-    <Modal title={t('instances.nicTitle', { name: server.name })} onClose={onClose}>
+    <Modal title={t('instances.nicTitle', { name: server.name })} onClose={() => { if (!operationPending.current) onClose(); }} wide>
       {!ifaces ? <p>{t('common.loading')}</p> : (
         <>
-          <table className="tbl">
-            <thead><tr><th>Network</th><th>IP</th><th>{t('common.status')}</th><th /></tr></thead>
+          <div className="vm-interface-table"><table className="tbl">
+            <thead><tr><th>{t('instance.networkInterfaces.network')}</th><th>{t('instance.networkInterfaces.subnet')}</th>
+              <th>{t('instance.networkInterfaces.ipAddress')}</th><th>MAC</th><th>Port UUID</th>
+              <th>{t('instance.networkInterfaces.securityGroup')}</th><th>{t('common.status')}</th><th /></tr></thead>
             <tbody>
               {ifaces.map((i) => (
-                <tr key={i.port_id}>
-                  <td>{netName(i.net_id)}</td>
+                <tr key={i.id}>
+                  <td>{netName(i.network_id)}</td>
+                  <td>{i.fixed_ips?.map((x) => subnetName(x.subnet_id)).join(', ') || '—'}</td>
                   <td className="mono">{i.fixed_ips?.map((x) => x.ip_address).join(', ')}</td>
-                  <td><StatusBadge status={i.port_state} /></td>
-                  <td><button className="btn sm danger-ghost" disabled={busy || ifaces.length <= 1} onClick={() => detach(i.port_id)}>{t('instances.detach')}</button></td>
+                  <td className="mono">{i.mac_address || '—'}</td>
+                  <td className="mono">{i.id}</td>
+                  <td>{groupNames(i.security_groups)}</td>
+                  <td><StatusBadge status={i.status} /></td>
+                  <td><button className="btn sm danger-ghost" disabled={busy || ifaces.length <= 1} onClick={() => detach(i.id)}>{t('instances.detach')}</button></td>
                 </tr>
               ))}
             </tbody>
-          </table>
-          <div className="row-inline" style={{ marginTop: 12 }}>
-            <select value={netId} onChange={(e) => setNetId(e.target.value)} style={{ flex: 1 }}>
-              {nets.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
-            </select>
-            <button className="btn primary sm" onClick={attach} disabled={busy || !netId}>{t('instances.attachMore')}</button>
+          </table></div>
+          <div className="vm-interface-section" style={{ marginTop: 14 }}>
+            <h3>{t('instance.networkInterfaces.addInterface')}</h3>
+            <NetworkInterfaceFields value={nic} onChange={setNic} networks={nets} index={0} disabled={busy} />
+            <button className="btn primary sm" onClick={attach} disabled={busy || !validInterfaces([nic], nets)}>{t('instance.networkInterfaces.add')}</button>
           </div>
-          <p className="dim">{t('instances.nicHint')}</p>
         </>
       )}
     </Modal>

@@ -45,6 +45,8 @@ The backend is a modular monolith. This is deliberate: there is one deployed ser
 
 The React sidebar has one data-driven route map in `web/src/components/SidebarNavigation.jsx`. Dashboard stands alone; Compute contains Virtual Machines, Images, and SSH Keys; Storage contains Volumes, Object Storage, and Backup; Network contains Networks & Routers, Floating IPs, Security Groups, and Load Balancers. Feature-gated Billing is a standalone top-level link to `/billing`. Platform / Services contains Kubernetes and Marketplace; Operations contains Power Schedule, Resource Optimization, Activity Log, and the admin-only Cloud Administration link. Routers, Snapshots, Flavors, and Monitoring do not have standalone routes and therefore have no duplicate menu entries. Grouping does not change URLs or backend authorization.
 
+VM creation (`POST /servers`) accepts `interfaces: [{ network_id, subnet_id, ip_address? }]` instead of the former `networks`/`security_groups` request fields. `server/instanceInterfaces.js` validates all interfaces against the selected project, resolves that project's `default` Security Group, creates one Neutron Port per interface, and passes only Port UUIDs to Nova. The existing `POST /servers/:id/interfaces` attachment route uses the same helper. Definitive create/attach failures roll back only request-created Ports; uncertain provider timeouts and failed cleanup return a partial-failure code for operator review. Detached Ports are not deleted. A quantity greater than one creates a separate Port set for each VM and requires automatic IP allocation.
+
 ## API conventions
 
 Existing success response shapes remain feature-specific for compatibility. Errors use:

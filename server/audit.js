@@ -44,6 +44,10 @@ export function auditMiddleware(req, res, next) {
     const resizeAction = resizeId ? req.body.action : null;
     const resizeResult = resizeAction === 'resize' ? 'accepted'
       : resizeAction === 'revert-resize' ? 'reverted' : 'success';
+    const interfaceAction = res.locals.interfaceAudit
+      ? path === '/api/servers' ? 'instance.create_with_ports'
+        : req.method === 'POST' ? 'instance.attach_port' : 'instance.detach_port'
+      : null;
     record({
       request_id: req.id,
       user: os?.user?.name || null,
@@ -55,13 +59,14 @@ export function auditMiddleware(req, res, next) {
       path: (req.originalUrl || req.url).replace(/^\/api/, '').split('?')[0],
       action: passwordChangeId ? 'instance.change_password' : resizeAction
         ? `instance.${resizeAction.replace('-', '_')}`
-        : `${req.method.toLowerCase()}.${(req.originalUrl || req.url).replace(/^\/api\/?/, '').split(/[/?]/)[0] || 'api'}`,
+        : interfaceAction || `${req.method.toLowerCase()}.${(req.originalUrl || req.url).replace(/^\/api\/?/, '').split(/[/?]/)[0] || 'api'}`,
       ...(passwordChangeId ? { instance_id: passwordChangeId, instance_name: res.locals.passwordChangeInstanceName || null } : {}),
       ...(resizeId ? {
         instance_id: resizeId,
         old_flavor: res.locals.resizeAudit?.old_flavor || null,
         ...(resizeAction === 'resize' ? { requested_flavor: res.locals.resizeAudit?.requested_flavor || null } : {}),
       } : {}),
+      ...(res.locals.interfaceAudit ? { interfaces: res.locals.interfaceAudit } : {}),
       status: res.statusCode,
       result: res.statusCode < 400 ? (resizeAction ? resizeResult : 'success') : 'failure',
       source_ip: clientIp(req),

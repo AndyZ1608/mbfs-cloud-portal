@@ -58,7 +58,7 @@ function seedServer(name, flavor, imageIdx, ip, status) {
     'OS-EXT-STS:task_state': null, 'OS-EXT-AZ:availability_zone': 'nova',
   };
   servers.push(s);
-  ports.push({ id: uid(), project_id: 'p-demo', network_id: netInternal.id, device_id: s.id, device_owner: 'compute:nova', fixed_ips: [{ ip_address: ip, subnet_id: subnets[0].id }], status: 'ACTIVE' });
+  ports.push({ id: uid(), project_id: 'p-demo', network_id: netInternal.id, device_id: s.id, device_owner: 'compute:nova', fixed_ips: [{ ip_address: ip, subnet_id: subnets[0].id }], security_groups: [sgDefault.id], status: 'ACTIVE' });
   return s;
 }
 const sv1 = seedServer('portal-web-01', 'f-medium', 0, '10.10.10.11', 'ACTIVE');
@@ -140,11 +140,17 @@ function mockCompute(m, path, body, projectId) {
   if (m === 'POST' && path === '/servers') {
     const b = body.server;
     const count = Math.min(Number(b.max_count || 1), 10);
+    const requestedPorts = (b.networks || []).filter((entry) => entry.port).map((entry) => {
+      const port = ports.find((item) => item.id === entry.port);
+      if (!port || port.project_id !== projectId || port.device_id) throw notFound();
+      return port;
+    });
+    if (requestedPorts.length && (requestedPorts.length !== b.networks.length || count !== 1)) throw conflict('Port attachment không hợp lệ');
     const created = [];
     for (let i = 0; i < count; i++) {
       const name = count > 1 ? `${b.name}-${i + 1}` : b.name;
       const fl = flavors.find((f) => f.id === b.flavorRef) || flavors[0];
-      const netId = (b.networks && b.networks[0] && b.networks[0].uuid) || netInternal.id;
+      const netId = requestedPorts[0]?.network_id || (b.networks && b.networks[0] && b.networks[0].uuid) || netInternal.id;
       const net = networks.find((n) => n.id === netId) || netInternal;
       const ip = '10.10.10.' + (20 + servers.length + i);
       const s = {
@@ -159,11 +165,27 @@ function mockCompute(m, path, body, projectId) {
       };
       servers.push(s);
       created.push(s);
+      for (const port of requestedPorts) {
+        port.device_id = s.id;
+        port.device_owner = 'compute:nova';
+        port.status = 'ACTIVE';
+      }
       setTimeout(() => {
         s.status = 'ACTIVE';
         s['OS-EXT-STS:task_state'] = null;
-        s.addresses[net.name] = [{ addr: ip, 'OS-EXT-IPS:type': 'fixed' }];
-        ports.push({ id: uid(), project_id: projectId, network_id: net.id, device_id: s.id, device_owner: 'compute:nova', fixed_ips: [{ ip_address: ip, subnet_id: (net.subnets[0] || '') }], status: 'ACTIVE' });
+        if (requestedPorts.length) {
+          for (const port of requestedPorts) {
+            const portNet = networks.find((item) => item.id === port.network_id);
+            for (const fixed of port.fixed_ips) {
+              (s.addresses[portNet?.name || 'net'] = s.addresses[portNet?.name || 'net'] || [])
+                .push({ addr: fixed.ip_address, 'OS-EXT-IPS:type': 'fixed' });
+            }
+          }
+        } else {
+          s.addresses[net.name] = [{ addr: ip, 'OS-EXT-IPS:type': 'fixed' }];
+          const defaultGroup = secgroups.find((group) => group.project_id === projectId && group.name === 'default');
+          ports.push({ id: uid(), project_id: projectId, network_id: net.id, device_id: s.id, device_owner: 'compute:nova', fixed_ips: [{ ip_address: ip, subnet_id: (net.subnets[0] || '') }], security_groups: defaultGroup ? [defaultGroup.id] : [], status: 'ACTIVE' });
+        }
       }, 6000);
     }
     return { server: created[0] };
@@ -177,6 +199,39 @@ function mockCompute(m, path, body, projectId) {
       floatingips.forEach((f) => { const p = ports.find((pp) => pp.id === f.port_id); if (p && p.device_id === s.id) { f.port_id = null; f.status = 'DOWN'; f.fixed_ip_address = null; } });
       for (let i = ports.length - 1; i >= 0; i--) if (ports[i].device_id === s.id) ports.splice(i, 1);
       volumes.forEach((v) => { v.attachments = v.attachments.filter((a) => a.server_id !== s.id); if (!v.attachments.length && v.status === 'in-use') v.status = 'available'; });
+      return null;
+    }
+  }
+  if ((mt = path.match(/^\/servers\/([^/]+)\/os-interface(?:\/([^/]+))?$/))) {
+    const server = servers.find((item) => item.id === mt[1]);
+    if (!server) throw notFound();
+    if (m === 'GET') return { interfaceAttachments: ports.filter((port) => port.device_id === server.id)
+      .map((port) => ({ port_id: port.id, net_id: port.network_id, fixed_ips: port.fixed_ips, port_state: port.status })) };
+    if (m === 'POST') {
+      const port = ports.find((item) => item.id === body?.interfaceAttachment?.port_id);
+      if (!port || port.project_id !== projectId || port.device_id) throw notFound();
+      port.device_id = server.id;
+      port.device_owner = 'compute:nova';
+      port.status = 'ACTIVE';
+      const net = networks.find((item) => item.id === port.network_id);
+      for (const fixed of port.fixed_ips) {
+        (server.addresses[net?.name || 'net'] = server.addresses[net?.name || 'net'] || [])
+          .push({ addr: fixed.ip_address, 'OS-EXT-IPS:type': 'fixed' });
+      }
+      return { interfaceAttachment: { port_id: port.id, net_id: port.network_id, fixed_ips: port.fixed_ips } };
+    }
+    if (m === 'DELETE') {
+      const port = ports.find((item) => item.id === mt[2] && item.device_id === server.id);
+      if (!port) throw notFound();
+      port.device_id = '';
+      port.device_owner = '';
+      port.status = 'DOWN';
+      for (const list of Object.values(server.addresses)) {
+        for (const fixed of port.fixed_ips) {
+          const index = list.findIndex((address) => address.addr === fixed.ip_address);
+          if (index >= 0) list.splice(index, 1);
+        }
+      }
       return null;
     }
   }
@@ -362,10 +417,49 @@ function mockNetwork(m, path, q, body, projectId) {
     if (ids.length) list = list.filter((p) => ids.includes(p.id));
     return { ports: list };
   }
+  if (path === '/v2.0/ports' && m === 'POST') {
+    const spec = body?.port || {};
+    const network = networks.find((item) => item.id === spec.network_id);
+    const fixed = spec.fixed_ips?.[0];
+    const subnet = subnets.find((item) => item.id === fixed?.subnet_id);
+    if (!network || !subnet || subnet.network_id !== network.id || spec.project_id !== projectId
+      || !Array.isArray(spec.security_groups) || !spec.security_groups.length
+      || spec.security_groups.some((id) => !secgroups.some((group) => group.id === id && group.project_id === projectId))) throw notFound();
+    let address = fixed.ip_address;
+    if (!address) {
+      const octets = subnet.cidr.split('/')[0].split('.').map(Number);
+      const base = octets.reduce((acc, part) => acc * 256 + part, 0);
+      for (let host = 20; host < 250; host++) {
+        const number = base + host;
+        const candidate = [24, 16, 8, 0].map((shift) => Math.floor(number / 2 ** shift) % 256).join('.');
+        if (candidate !== subnet.gateway_ip && !ports.some((port) => port.fixed_ips?.some((ip) => ip.subnet_id === subnet.id && ip.ip_address === candidate))) {
+          address = candidate;
+          break;
+        }
+      }
+    }
+    if (!address || ports.some((port) => port.fixed_ips?.some((ip) => ip.subnet_id === subnet.id && ip.ip_address === address))) throw conflict('IP address already allocated');
+    const id = uid();
+    const port = {
+      id, project_id: projectId, name: spec.name || '', network_id: network.id,
+      fixed_ips: [{ subnet_id: subnet.id, ip_address: address }], security_groups: [...spec.security_groups],
+      mac_address: `fa:16:3e:${id.slice(0, 2)}:${id.slice(2, 4)}:${id.slice(4, 6)}`,
+      device_id: '', device_owner: '', status: 'DOWN',
+    };
+    ports.push(port);
+    return { port };
+  }
   if ((mt = path.match(/^\/v2\.0\/ports\/([^/]+)$/)) && m === 'GET') {
     const port = ports.find((p) => p.id === mt[1]);
     if (!port) throw notFound();
     return { port };
+  }
+  if ((mt = path.match(/^\/v2\.0\/ports\/([^/]+)$/)) && m === 'DELETE') {
+    const index = ports.findIndex((port) => port.id === mt[1]);
+    if (index < 0) throw notFound();
+    if (ports[index].device_id) throw conflict('Port is attached');
+    ports.splice(index, 1);
+    return null;
   }
   if (path === '/v2.0/floatingips' && m === 'GET') return { floatingips };
   if (path === '/v2.0/floatingips' && m === 'POST') {
@@ -413,7 +507,12 @@ function mockNetwork(m, path, q, body, projectId) {
     }
     if (m === 'DELETE') { floatingips.splice(floatingips.indexOf(f), 1); return null; }
   }
-  if (path === '/v2.0/security-groups' && m === 'GET') return { security_groups: secgroups };
+  if (path === '/v2.0/security-groups' && m === 'GET') {
+    if (!secgroups.some((group) => group.project_id === projectId && group.name === 'default')) {
+      secgroups.push({ id: uid(), project_id: projectId, name: 'default', description: 'Default security group', security_group_rules: [] });
+    }
+    return { security_groups: secgroups };
+  }
   if (path === '/v2.0/security-groups' && m === 'POST') {
     const g = { id: uid(), project_id: projectId, name: body.security_group.name, description: body.security_group.description || '', security_group_rules: [] };
     addRule(g, 'egress', null, null, null, null);
