@@ -6,6 +6,7 @@ import { loadJson, saveJson } from './store.js';
 import { nowParts, SCHED_TZ } from './scheduler.js';
 import { record } from './audit.js';
 import { pushNotice } from './notify.js';
+import { fetchOwned } from './projectScope.js';
 
 let rules = loadJson('power-rules.json', []);
 const save = () => saveJson('power-rules.json', rules);
@@ -37,6 +38,7 @@ export function offHoursPerWeek(rule) {
 
 async function fire(rule) {
   const sess = await getServiceSession(rule.project_id);
+  await fetchOwned(sess, 'compute', `/servers/${encodeURIComponent(rule.server_id)}`, 'server');
   const body = rule.action === 'stop' ? { 'os-stop': null } : { 'os-start': null };
   await osFetch(sess, 'compute', `/servers/${rule.server_id}/action`, { method: 'POST', body });
   rule.last_run = { ts: new Date().toISOString(), status: 'ok', message: rule.action === 'stop' ? 'Đã tắt máy' : 'Đã bật máy' };

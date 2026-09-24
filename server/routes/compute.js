@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { osFetch, OSError } from '../openstack.js';
 import { traceNovaConsole } from '../consoleDiagnostics.js';
 import { changeInstancePassword } from '../passwordChange.js';
+import { assertOwned, fetchOwned, fetchUsableImage, fetchUsableNetwork, owned } from '../projectScope.js';
 
 const router = Router();
 
@@ -10,7 +11,7 @@ const router = Router();
 router.get('/servers', async (req, res, next) => {
   try {
     const data = await osFetch(req.session.os, 'compute', '/servers/detail');
-    res.json({ servers: data.servers || [] });
+    res.json({ servers: owned(data.servers, req.session.os) });
   } catch (e) { next(e); }
 });
 
@@ -19,6 +20,14 @@ router.post('/servers', async (req, res, next) => {
     const { name, flavorRef, imageRef, networks, key_name, security_groups, count, boot_volume_gb, user_data } = req.body || {};
     if (!name || !flavorRef || !imageRef || !networks?.length) {
       throw new OSError(400, 'Thiếu thông tin: tên, flavor, image và ít nhất một network là bắt buộc');
+    }
+    for (const id of networks) await fetchUsableNetwork(req.session.os, id);
+    await fetchUsableImage(req.session.os, imageRef);
+    if (security_groups?.length) {
+      const groups = owned((await osFetch(req.session.os, 'network', '/v2.0/security-groups')).security_groups, req.session.os);
+      if (security_groups.some((group) => !groups.some((ownedGroup) => ownedGroup.name === group))) {
+        throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
+      }
     }
     const server = {
       name,
@@ -54,8 +63,8 @@ router.post('/servers', async (req, res, next) => {
 
 router.get('/servers/:id', async (req, res, next) => {
   try {
-    const data = await osFetch(req.session.os, 'compute', `/servers/${req.params.id}`);
-    res.json(data);
+    const server = await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
+    res.json({ server });
   } catch (e) { next(e); }
 });
 
@@ -103,6 +112,7 @@ export function resizeError(error) {
 // Đổi tên máy ảo
 router.put('/servers/:id', async (req, res, next) => {
   try {
+    await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
     const name = (req.body?.name || '').trim();
     if (!name) throw new OSError(400, 'Tên mới không được trống');
     const data = await osFetch(req.session.os, 'compute', `/servers/${req.params.id}`, {
@@ -116,8 +126,10 @@ router.put('/servers/:id', async (req, res, next) => {
 // Cài lại hệ điều hành (rebuild) — giữ nguyên IP, ID máy, volume gắn kèm
 router.post('/servers/:id/rebuild', async (req, res, next) => {
   try {
+    await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
     const { imageRef, name, user_data } = req.body || {};
     if (!imageRef) throw new OSError(400, 'Chọn image để cài lại');
+    await fetchUsableImage(req.session.os, imageRef);
     const rebuild = { imageRef };
     if (name) rebuild.name = name;
     if (user_data && String(user_data).trim()) rebuild.user_data = Buffer.from(String(user_data)).toString('base64');
@@ -130,8 +142,9 @@ router.post('/servers/:id/rebuild', async (req, res, next) => {
 // Card mạng (NIC) của máy ảo
 router.get('/servers/:id/interfaces', async (req, res, next) => {
   try {
+    await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
     const d = await osFetch(req.session.os, 'compute', `/servers/${req.params.id}/os-interface`);
-    res.json({ interfaces: d.interfaceAttachments || [] });
+    res.json({ interfaces: (d.interfaceAttachments || []).filter((entry) => !entry.project_id && !entry.tenant_id || owned([entry], req.session.os).length) });
   } catch (e) { next(e); }
 });
 
@@ -139,6 +152,8 @@ router.post('/servers/:id/interfaces', async (req, res, next) => {
   try {
     const { net_id } = req.body || {};
     if (!net_id) throw new OSError(400, 'Chọn network để gắn');
+    await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
+    await fetchUsableNetwork(req.session.os, net_id);
     const d = await osFetch(req.session.os, 'compute', `/servers/${req.params.id}/os-interface`, {
       method: 'POST', body: { interfaceAttachment: { net_id } },
     });
@@ -149,6 +164,9 @@ router.post('/servers/:id/interfaces', async (req, res, next) => {
 
 router.delete('/servers/:id/interfaces/:portId', async (req, res, next) => {
   try {
+    await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
+    const port = await fetchOwned(req.session.os, 'network', `/v2.0/ports/${req.params.portId}`, 'port');
+    if (port.device_id !== req.params.id) throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
     await osFetch(req.session.os, 'compute', `/servers/${req.params.id}/os-interface/${req.params.portId}`, { method: 'DELETE' });
     console.log(`[compute] DETACH nic server=${req.params.id} port=${req.params.portId} by=${req.session.os.user.name}`);
     res.json({ ok: true });
@@ -159,6 +177,11 @@ router.delete('/servers/:id/interfaces/:portId', async (req, res, next) => {
 router.post('/servers/:id/security-groups', async (req, res, next) => {
   try {
     const { add = [], remove = [] } = req.body || {};
+    await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
+    const groups = owned((await osFetch(req.session.os, 'network', '/v2.0/security-groups')).security_groups, req.session.os);
+    if ([...add, ...remove].some((name) => !groups.some((group) => group.name === name))) {
+      throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
+    }
     for (const name of remove) {
       await osFetch(req.session.os, 'compute', `/servers/${req.params.id}/action`, { method: 'POST', body: { removeSecurityGroup: { name } } });
     }
@@ -194,10 +217,8 @@ router.post('/servers/:id/action', async (req, res, next) => {
       try {
         server = (await osFetch(req.session.os, 'compute', `/servers/${encodeURIComponent(req.params.id)}`))?.server;
       } catch (error) { throw resizeError(error); }
-      const projectId = server?.tenant_id || server?.project_id;
-      if (server?.id !== req.params.id || !projectId || projectId !== req.session.os.project?.id) {
-        throw new OSError(404, 'Không tìm thấy VM trong project hiện tại.', 'server_not_found');
-      }
+      if (server?.id !== req.params.id) throw new OSError(404, 'Không tìm thấy VM trong project hiện tại.', 'server_not_found');
+      assertOwned(server, req.session.os);
       res.locals.resizeAudit = {
         action, instance_id: server.id, old_flavor: server.flavor?.id || null,
         ...(action === 'resize' ? {
@@ -207,6 +228,8 @@ router.post('/servers/:id/action', async (req, res, next) => {
       if (action === 'resize' && flavorRef === server.flavor?.id) {
         throw new OSError(400, 'Chọn flavor khác cấu hình hiện tại.', 'same_flavor');
       }
+    } else {
+      await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
     }
 
     let data;
@@ -226,6 +249,7 @@ router.post('/servers/:id/action', async (req, res, next) => {
 
 router.delete('/servers/:id', async (req, res, next) => {
   try {
+    await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
     await osFetch(req.session.os, 'compute', `/servers/${req.params.id}`, { method: 'DELETE' });
     console.log(`[compute] DELETE server=${req.params.id} by=${req.session.os.user.name}`);
     res.json({ ok: true });
@@ -234,6 +258,7 @@ router.delete('/servers/:id', async (req, res, next) => {
 
 router.post('/servers/:id/console', async (req, res, next) => {
   try {
+    await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
     const data = await osFetch(req.session.os, 'compute', `/servers/${req.params.id}/remote-consoles`, {
       method: 'POST',
       body: { remote_console: { protocol: 'vnc', type: 'novnc' } },
@@ -247,6 +272,7 @@ router.post('/servers/:id/console', async (req, res, next) => {
 // Log console của máy ảo (boot log / cloud-init) — hữu ích khi VM không SSH được
 router.get('/servers/:id/console-log', async (req, res, next) => {
   try {
+    await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
     const length = Math.min(Number(req.query.lines) || 300, 2000);
     const data = await osFetch(req.session.os, 'compute', `/servers/${req.params.id}/action`, {
       method: 'POST',
@@ -283,6 +309,7 @@ router.get('/usage', async (req, res, next) => {
 // Volume attachments (Nova side)
 router.get('/servers/:id/volumes', async (req, res, next) => {
   try {
+    await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
     const data = await osFetch(req.session.os, 'compute', `/servers/${req.params.id}/os-volume_attachments`);
     res.json(data);
   } catch (e) { next(e); }

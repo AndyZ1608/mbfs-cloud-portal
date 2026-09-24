@@ -105,7 +105,7 @@ function CreateLbModal({ onClose, onDone }) {
   });
 
   useEffect(() => {
-    Promise.all([api('/networks'), api('/servers')]).then(([n, s]) => {
+    Promise.all([api('/available-networks'), api('/servers')]).then(([n, s]) => {
       const subs = n.networks.filter((x) => !x['router:external'])
         .flatMap((x) => (x.subnet_details || []).map((sb) => ({ ...sb, netName: x.name })));
       setOpts({ subnets: subs, servers: s.servers });

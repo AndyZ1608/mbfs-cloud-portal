@@ -1,14 +1,23 @@
 import { Router } from 'express';
 import { osFetch, OSError, MOCK } from '../openstack.js';
+import { fetchOwned, isUsableImage, owned } from '../projectScope.js';
 
 const router = Router();
+
+async function ownedImage(session, id) {
+  const image = await osFetch(session, 'image', `/v2/images/${id}`);
+  if (image?.owner !== session.project.id) {
+    throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
+  }
+  return image;
+}
 
 // ---------- Volumes (Cinder) ----------
 
 router.get('/volumes', async (req, res, next) => {
   try {
     const data = await osFetch(req.session.os, 'volume', '/volumes/detail');
-    res.json({ volumes: data.volumes || [] });
+    res.json({ volumes: owned(data.volumes, req.session.os) });
   } catch (e) { next(e); }
 });
 
@@ -27,6 +36,7 @@ router.post('/volumes', async (req, res, next) => {
 
 router.delete('/volumes/:id', async (req, res, next) => {
   try {
+    await fetchOwned(req.session.os, 'volume', `/volumes/${req.params.id}`, 'volume');
     await osFetch(req.session.os, 'volume', `/volumes/${req.params.id}`, { method: 'DELETE' });
     console.log(`[volume] DELETE volume=${req.params.id} by=${req.session.os.user.name}`);
     res.json({ ok: true });
@@ -35,6 +45,7 @@ router.delete('/volumes/:id', async (req, res, next) => {
 
 router.post('/volumes/:id/extend', async (req, res, next) => {
   try {
+    await fetchOwned(req.session.os, 'volume', `/volumes/${req.params.id}`, 'volume');
     const { new_size } = req.body || {};
     if (!new_size) throw new OSError(400, 'Thiếu dung lượng mới');
     await osFetch(req.session.os, 'volume', `/volumes/${req.params.id}/action`, { method: 'POST', body: { 'os-extend': { new_size: Number(new_size) } } });
@@ -47,6 +58,8 @@ router.post('/volumes/:id/attach', async (req, res, next) => {
   try {
     const { server_id } = req.body || {};
     if (!server_id) throw new OSError(400, 'Chưa chọn máy ảo');
+    await fetchOwned(req.session.os, 'volume', `/volumes/${req.params.id}`, 'volume');
+    await fetchOwned(req.session.os, 'compute', `/servers/${server_id}`, 'server');
     const data = await osFetch(req.session.os, 'compute', `/servers/${server_id}/os-volume_attachments`, {
       method: 'POST',
       body: { volumeAttachment: { volumeId: req.params.id } },
@@ -60,6 +73,11 @@ router.post('/volumes/:id/detach', async (req, res, next) => {
   try {
     const { server_id } = req.body || {};
     if (!server_id) throw new OSError(400, 'Thiếu server_id');
+    const volume = await fetchOwned(req.session.os, 'volume', `/volumes/${req.params.id}`, 'volume');
+    await fetchOwned(req.session.os, 'compute', `/servers/${server_id}`, 'server');
+    if (!volume.attachments?.some((attachment) => attachment.server_id === server_id)) {
+      throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
+    }
     await osFetch(req.session.os, 'compute', `/servers/${server_id}/os-volume_attachments/${req.params.id}`, { method: 'DELETE' });
     console.log(`[volume] DETACH volume=${req.params.id} <- server=${server_id} by=${req.session.os.user.name}`);
     res.json({ ok: true });
@@ -78,7 +96,7 @@ router.get('/volume-types', async (req, res, next) => {
 router.get('/snapshots', async (req, res, next) => {
   try {
     const data = await osFetch(req.session.os, 'volume', '/snapshots/detail');
-    res.json({ snapshots: data.snapshots || [] });
+    res.json({ snapshots: owned(data.snapshots, req.session.os) });
   } catch (e) { next(e); }
 });
 
@@ -86,6 +104,7 @@ router.post('/snapshots', async (req, res, next) => {
   try {
     const { volume_id, name } = req.body || {};
     if (!volume_id || !name) throw new OSError(400, 'Thiếu volume hoặc tên snapshot');
+    await fetchOwned(req.session.os, 'volume', `/volumes/${volume_id}`, 'volume');
     const data = await osFetch(req.session.os, 'volume', '/snapshots', { method: 'POST', body: { snapshot: { volume_id, name, force: true } } });
     console.log(`[volume] SNAPSHOT volume=${volume_id} name=${name} by=${req.session.os.user.name}`);
     res.json(data);
@@ -94,6 +113,7 @@ router.post('/snapshots', async (req, res, next) => {
 
 router.delete('/snapshots/:id', async (req, res, next) => {
   try {
+    await fetchOwned(req.session.os, 'volume', `/snapshots/${req.params.id}`, 'snapshot');
     await osFetch(req.session.os, 'volume', `/snapshots/${req.params.id}`, { method: 'DELETE' });
     res.json({ ok: true });
   } catch (e) { next(e); }
@@ -103,8 +123,13 @@ router.delete('/snapshots/:id', async (req, res, next) => {
 
 router.get('/images', async (req, res, next) => {
   try {
-    const data = await osFetch(req.session.os, 'image', '/v2/images?limit=200&sort=created_at:desc');
-    res.json({ images: data.images || [] });
+    const sess = req.session.os;
+    const data = await osFetch(sess, 'image', '/v2/images?limit=200&sort=created_at:desc');
+    const visible = [];
+    for (const image of data.images || []) {
+      if (await isUsableImage(sess, image)) visible.push(image);
+    }
+    res.json({ images: visible });
   } catch (e) { next(e); }
 });
 
@@ -126,6 +151,7 @@ router.post('/images', async (req, res, next) => {
 router.put('/images/:id/file', async (req, res, next) => {
   try {
     const sess = req.session.os;
+    await ownedImage(sess, req.params.id);
     if (MOCK) {
       let size = 0;
       for await (const chunk of req) size += chunk.length;
@@ -140,6 +166,7 @@ router.put('/images/:id/file', async (req, res, next) => {
 
 router.delete('/images/:id', async (req, res, next) => {
   try {
+    await ownedImage(req.session.os, req.params.id);
     await osFetch(req.session.os, 'image', `/v2/images/${req.params.id}`, { method: 'DELETE' });
     console.log(`[image] DELETE image=${req.params.id} by=${req.session.os.user.name}`);
     res.json({ ok: true });

@@ -6,6 +6,7 @@ import { getServiceSession, svcConfigured } from './svcauth.js';
 import { loadJson, saveJson } from './store.js';
 import { record } from './audit.js';
 import { pushNotice } from './notify.js';
+import { fetchOwned, isOwned, projectQuery } from './projectScope.js';
 
 let policies = loadJson('policies.json', []);
 const save = () => saveJson('policies.json', policies);
@@ -78,27 +79,29 @@ export async function runPolicy(pol) {
   let created; let pruned = 0;
 
   if (pol.type === 'volume') {
+    await fetchOwned(sess, 'volume', `/volumes/${encodeURIComponent(pol.target_id)}`, 'volume');
     const d = await osFetch(sess, 'volume', '/snapshots', {
       method: 'POST',
-      body: { snapshot: { volume_id: pol.target_id, name, force: true, description: `mbfs-portal policy ${pol.id}` } },
+      body: { snapshot: { project_id: pol.project_id, volume_id: pol.target_id, name, force: true, description: `mbfs-portal policy ${pol.id}` } },
     });
     created = d.snapshot?.id;
     // prune theo retention
-    const all = (await osFetch(sess, 'volume', '/snapshots/detail?limit=1000')).snapshots || [];
+    const all = (await osFetch(sess, 'volume', projectQuery(sess, '/snapshots/detail', { limit: 1000 }))).snapshots || [];
     const mine = all
-      .filter((s) => s.volume_id === pol.target_id && (s.name || '').startsWith(prefix) && !/deleting/.test(s.status || ''))
+      .filter((s) => isOwned(s, sess) && s.volume_id === pol.target_id && (s.name || '').startsWith(prefix) && !/deleting/.test(s.status || ''))
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     for (const old of mine.slice(pol.retention)) {
       try { await osFetch(sess, 'volume', `/snapshots/${old.id}`, { method: 'DELETE' }); pruned++; } catch { /* bản đang bận, kỳ sau xoá */ }
     }
   } else { // 'server' → tạo image
+    await fetchOwned(sess, 'compute', `/servers/${encodeURIComponent(pol.target_id)}`, 'server');
     await osFetch(sess, 'compute', `/servers/${pol.target_id}/action`, {
       method: 'POST',
       body: { createImage: { name, metadata: { mbfs_policy: pol.id } } },
     });
     created = name;
     const all = (await osFetch(sess, 'image', '/v2/images?limit=200&sort=created_at:desc')).images || [];
-    const mine = all.filter((i) => (i.name || '').startsWith(prefix) && ['active', 'error'].includes(i.status));
+    const mine = all.filter((i) => i.owner === pol.project_id && (i.name || '').startsWith(prefix) && ['active', 'error'].includes(i.status));
     for (const old of mine.slice(pol.retention)) {
       try { await osFetch(sess, 'image', `/v2/images/${old.id}`, { method: 'DELETE' }); pruned++; } catch { /* kỳ sau */ }
     }

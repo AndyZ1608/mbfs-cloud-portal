@@ -8,6 +8,7 @@ import { getServiceSession, getServiceProjects, svcConfigured } from './svcauth.
 import { loadJson, saveJson } from './store.js';
 import { notify, telegramEnabled } from './alerts.js';
 import { pushNotice } from './notify.js';
+import { owned } from './projectScope.js';
 
 const INTERVAL = Math.max(30, Number(process.env.MONITOR_INTERVAL_SEC) || 120) * 1000;
 const RETENTION = Math.max(1, Number(process.env.MONITOR_RETENTION_H) || 24) * 3600000;
@@ -111,12 +112,11 @@ async function sweep() {
   for (const p of projects) {
     try {
       const sess = await getServiceSession(p.id);
-      const servers = (await osFetch(sess, 'compute', '/servers/detail?limit=1000')).servers || [];
+      const servers = owned((await osFetch(sess, 'compute', '/servers/detail?limit=1000')).servers, sess);
       for (const s of servers) {
         seen.add(s.id);
         if (s.status !== 'ACTIVE' || sampled.has(s.id)) continue;
         sampled.add(s.id);
-        s.project_id = p.id;
         await sampleServer(sess, s);
       }
     } catch (e) { console.warn(`[monitor] project ${p.name}: ${e.message}`); }

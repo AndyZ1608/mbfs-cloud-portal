@@ -5,6 +5,7 @@ import { svcConfigured } from '../svcauth.js';
 import { persistent } from '../store.js';
 import { listPolicies, addPolicy, patchPolicy, removePolicy, runPolicy, SCHED_TZ } from '../scheduler.js';
 import { listAudit } from '../audit.js';
+import { fetchOwned } from '../projectScope.js';
 
 const router = Router();
 const uid = () => crypto.randomUUID();
@@ -17,12 +18,16 @@ router.get('/backup/policies', (req, res) => {
   res.json({ policies: listPolicies(req.session.os.project.id) });
 });
 
-router.post('/backup/policies', (req, res, next) => {
+router.post('/backup/policies', async (req, res, next) => {
   try {
     const sess = req.session.os;
-    const { type, target_id, target_name, schedule, retention } = req.body || {};
+    const { type, target_id, schedule, retention } = req.body || {};
     if (!['volume', 'server'].includes(type)) throw new OSError(400, 'Loại backup không hợp lệ');
-    if (!target_id || !target_name) throw new OSError(400, 'Thiếu tài nguyên cần backup');
+    if (!target_id) throw new OSError(400, 'Thiếu tài nguyên cần backup');
+    const target = type === 'volume'
+      ? await fetchOwned(sess, 'volume', `/volumes/${target_id}`, 'volume')
+      : await fetchOwned(sess, 'compute', `/servers/${target_id}`, 'server');
+    const target_name = target.name || target.id;
     const s = schedule || {};
     if (!['daily', 'weekly'].includes(s.freq)) throw new OSError(400, 'Tần suất phải là daily/weekly');
     const hour = Number(s.hour), minute = Number(s.minute);

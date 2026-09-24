@@ -1,12 +1,12 @@
 import { osFetch, OSError } from './openstack.js';
+import { isOwned } from './projectScope.js';
 
 export function hasPasswordChangeRole(session) {
   return session?.roles?.some((role) => role === 'member' || role === 'admin') === true;
 }
 
 export function isProjectServer(server, session) {
-  const projectId = server?.tenant_id || server?.project_id;
-  return typeof projectId === 'string' && projectId.length > 0 && projectId === session?.project?.id;
+  return !!server && isOwned(server, session);
 }
 
 // Provider messages are not returned verbatim: they can contain the submitted password.

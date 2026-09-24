@@ -19,6 +19,12 @@ VM password changes use the current Keystone project token, a portal-side `membe
 
 Billing requests forward the current project-scoped Keystone token in `X-Auth-Token`. The token is never sent to the browser as Billing configuration, placed in a URL, or written to logs. CMP does not send `project_id`; the Billing service validates the token with Keystone and derives project scope itself.
 
+## Current-project resource boundary
+
+Tenant resource routes use the Keystone project in the authenticated CMP session, never a browser-supplied project ID. Provider list filters are paired with CMP-side ownership checks because admin-scoped OpenStack responses can contain other projects' resources. Detail and mutation routes check fresh provider ownership before returning data or acting; missing or conflicting ownership metadata fails closed with 404. Background backup, power, and monitoring jobs also check ownership when using service credentials. Project switching hides the previous project's page until the new scoped session loads.
+
+`GET /api/networks` and router management show only project-owned resources. `GET /api/available-networks` is a deliberate VM/VIP selector containing owned and Neutron-shared non-external networks; `GET /api/external-networks` is limited to explicit external gateway networks. Public/community Glance images remain globally usable; shared images require accepted project membership, while private images belong to the current project. Nova keypairs are user-scoped rather than project-owned. Swift operations use the project account endpoint from the scoped Keystone catalog. System administration endpoints under `/api/admin` are intentionally distinct and retain their administrator-wide behavior.
+
 ## Provider safety
 
 OpenStack endpoints are selected from the authenticated Keystone service catalog with explicit interface and region selection. Normal requests and streaming uploads have separate bounded timeouts. Provider failures are translated into stable error categories; unexpected internal errors are not returned to clients.
@@ -28,4 +34,4 @@ OpenStack endpoints are selected from the authenticated Keystone service catalog
 - Long-running RKE2 creation/deletion is not a durable saga and may require manual cleanup after partial failure.
 - The built-in Redis client does not support TLS (`rediss://`) or Redis Cluster/Sentinel; use a private trusted network or replace it with a maintained client before exposed/high-availability deployments.
 - File-backed state is not encrypted wholesale. Kubernetes join tokens are encrypted, but audit and policy metadata remain readable to the container volume owner.
-- OpenStack remains the final authorization authority for ordinary resource operations. A future portal permission model should be enforced centrally before adding roles that are broader or narrower than Keystone roles.
+- OpenStack remains the final authorization authority for ordinary resource operations in addition to CMP's current-project boundary. A future portal permission model should be enforced centrally before adding roles that are broader or narrower than Keystone roles.

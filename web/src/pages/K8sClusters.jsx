@@ -79,7 +79,7 @@ function CreateCluster({ onClose, onDone }) {
   const [f, setF] = useState({ name: '', workers: 2, flavorRef: '', imageRef: '', network_id: '', key_name: '', admin_cidr: '0.0.0.0/0', assign_fip: true });
 
   useEffect(() => {
-    Promise.all([api('/flavors'), api('/images'), api('/networks'), api('/keypairs')]).then(([fl, im, ne, kp]) => {
+    Promise.all([api('/flavors'), api('/images'), api('/available-networks'), api('/keypairs')]).then(([fl, im, ne, kp]) => {
       const fits = fl.flavors.filter((x) => x.vcpus >= 2 && x.ram >= 4096);
       const flavors = fits.length ? fits : fl.flavors;
       const images = im.images.filter((i) => i.status === 'active');

@@ -32,6 +32,7 @@ export default function Layout() {
   const { t } = useI18n();
   const sess = useCmpSession();
   const [cfg, setCfg] = useState({ cloudName: 'MBFS Cloud' });
+  const [switchingProject, setSwitchingProject] = useState(false);
   const nav = useNavigate();
 
   useEffect(() => {
@@ -39,11 +40,14 @@ export default function Layout() {
   }, []);
 
   async function switchProject(projectId) {
+    if (switchingProject || projectId === sess?.project?.id) return;
+    setSwitchingProject(true);
     try {
       const path = sess?.auth_mode === 'sso' ? '/auth/sso/switch-project' : '/auth/switch-project';
       await api(path, { method: 'POST', body: { projectId } });
       window.location.reload();
     } catch (e) {
+      setSwitchingProject(false);
       toast(e.message, 'error');
     }
   }
@@ -92,7 +96,7 @@ export default function Layout() {
         <header className="topbar">
           <div className="topbar-left">
             <span className="tb-label">{t('common.project')}</span>
-            <select className="project-select" value={sess.project.id} onChange={(e) => switchProject(e.target.value)}>
+            <select className="project-select" value={sess.project.id} disabled={switchingProject} onChange={(e) => switchProject(e.target.value)}>
               {sess.projects.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
@@ -107,7 +111,7 @@ export default function Layout() {
           </div>
         </header>
         <main className="content">
-          <Outlet context={{ sess }} />
+          {switchingProject ? <div className="boot">{t('common.loading')}</div> : <Outlet context={{ sess }} />}
         </main>
       </div>
       <Toasts />

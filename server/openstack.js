@@ -157,7 +157,7 @@ export function endpointFor(catalog, svc) {
 // ---------- Generic fetch ----------
 
 export async function osFetch(sess, svc, path, { method = 'GET', body, rawBody, contentType, headers = {}, responseType } = {}) {
-  if (MOCK) return mockFetch(svc, method, path, body);
+  if (MOCK) return mockFetch(svc, method, path, body, sess?.project?.id);
   const base = endpointFor(sess.catalog, svc);
   const h = { 'X-Auth-Token': sess.token, Accept: 'application/json', ...headers };
   if (svc === 'compute') {

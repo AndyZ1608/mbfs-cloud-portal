@@ -4,6 +4,7 @@
 import { Router } from 'express';
 import { osFetch, OSError } from '../openstack.js';
 import { publicTemplates, findTemplate, collectParams } from '../templates.js';
+import { fetchUsableImage, fetchUsableNetwork, owned } from '../projectScope.js';
 
 const router = Router();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -25,6 +26,8 @@ router.post('/marketplace/deploy', async (req, res, next) => {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,50}$/.test(name || '')) throw new OSError(400, 'Tên máy không hợp lệ');
     if (!flavorRef || !imageRef || !network_id) throw new OSError(400, 'Thiếu flavor / image / network');
     if (create_sg && !/^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(sg_cidr)) throw new OSError(400, 'CIDR không hợp lệ');
+    await fetchUsableNetwork(sess, network_id);
+    await fetchUsableImage(sess, imageRef);
 
     const values = collectParams(tpl, params);
     const userData = tpl.userData(values);
@@ -38,13 +41,13 @@ router.post('/marketplace/deploy', async (req, res, next) => {
       const sgName = `${name}-app`;
       const g = await osFetch(sess, 'network', '/v2.0/security-groups', {
         method: 'POST',
-        body: { security_group: { name: sgName, description: `MBFS marketplace: ${tpl.name}` } },
+        body: { security_group: { name: sgName, project_id: sess.project.id, description: `MBFS marketplace: ${tpl.name}` } },
       });
       for (const port of tpl.ports) {
         await osFetch(sess, 'network', '/v2.0/security-group-rules', {
           method: 'POST',
           body: { security_group_rule: {
-            security_group_id: g.security_group.id, direction: 'ingress', ethertype: 'IPv4',
+            security_group_id: g.security_group.id, project_id: sess.project.id, direction: 'ingress', ethertype: 'IPv4',
             protocol: 'tcp', port_range_min: port, port_range_max: port, remote_ip_prefix: sg_cidr,
           } },
         });
@@ -79,13 +82,13 @@ router.post('/marketplace/deploy', async (req, res, next) => {
       for (let i = 0; i < 10 && !port; i++) {
         await sleep(3000);
         const pr = await osFetch(sess, 'network', `/v2.0/ports?device_id=${serverId}`).catch(() => null);
-        port = pr?.ports?.[0] || null;
+        port = owned(pr?.ports, sess)[0] || null;
       }
       if (!port) {
         warnings.push('Máy chưa có port mạng sau 30s — gắn Floating IP thủ công ở trang Máy ảo sau.');
         warningCodes.push('portUnavailable');
       } else {
-        const ext = (await osFetch(sess, 'network', '/v2.0/networks?router:external=true')).networks?.[0];
+        const ext = (await osFetch(sess, 'network', '/v2.0/networks?router:external=true')).networks?.find((network) => network['router:external'] === true);
         if (!ext) {
           warnings.push('Không có mạng external nào để cấp Floating IP.');
           warningCodes.push('externalNetworkUnavailable');

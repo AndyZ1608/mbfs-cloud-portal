@@ -76,7 +76,7 @@ function DeployModal({ tpl, onClose, onDone }) {
   });
 
   useEffect(() => {
-    Promise.all([api('/flavors'), api('/images'), api('/networks'), api('/keypairs')]).then(([fl, im, ne, kp]) => {
+    Promise.all([api('/flavors'), api('/images'), api('/available-networks'), api('/keypairs')]).then(([fl, im, ne, kp]) => {
       const fits = fl.flavors.filter((x) => x.vcpus >= tpl.min.vcpus && x.ram >= tpl.min.ram && (x.disk === 0 || x.disk >= tpl.min.disk));
       const flavors = fits.length ? fits : fl.flavors;
       const images = im.images.filter((i) => i.status === 'active');

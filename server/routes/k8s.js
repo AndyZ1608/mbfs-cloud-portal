@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { osFetch, OSError } from '../openstack.js';
 import { loadJson, saveJson } from '../store.js';
 import { seal, unseal, encryptionConfigured } from '../secrets.js';
+import { fetchOwned, fetchUsableImage, fetchUsableNetwork, owned } from '../projectScope.js';
 
 const router = Router();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -73,7 +74,7 @@ router.get('/k8s/clusters', async (req, res, next) => {
     // enrich trạng thái node từ Nova
     let servers = [];
     try { servers = (await osFetch(sess, 'compute', '/servers/detail?limit=1000')).servers || []; } catch { /* tạm thời */ }
-    const byId = Object.fromEntries(servers.map((s) => [s.id, s]));
+    const byId = Object.fromEntries(owned(servers, sess).map((s) => [s.id, s]));
     const out = mine.map((c) => {
       const nodes = [c.server_id, ...c.worker_ids].map((id, i) => {
         const s = byId[id];
@@ -108,6 +109,8 @@ router.post('/k8s/deploy', async (req, res, next) => {
     if (!flavorRef || !imageRef || !network_id) throw new OSError(400, 'Thiếu flavor / image / network');
     if (!key_name) throw new OSError(400, 'Bắt buộc chọn SSH key (để lấy kubeconfig từ server node)');
     if (!/^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(admin_cidr)) throw new OSError(400, 'CIDR quản trị không hợp lệ');
+    await fetchUsableNetwork(sess, network_id);
+    await fetchUsableImage(sess, imageRef);
 
     const token = 'mbfs-' + crypto.randomBytes(24).toString('hex');
     const warnings = [];
@@ -116,11 +119,11 @@ router.post('/k8s/deploy', async (req, res, next) => {
     const sgName = `${name}-k8s`;
     const g = await osFetch(sess, 'network', '/v2.0/security-groups', {
       method: 'POST',
-      body: { security_group: { name: sgName, description: `MBFS K8s cluster ${name}` } },
+      body: { security_group: { name: sgName, project_id: sess.project.id, description: `MBFS K8s cluster ${name}` } },
     });
     const sgId = g.security_group.id;
     const mkRule = (rule) => osFetch(sess, 'network', '/v2.0/security-group-rules', {
-      method: 'POST', body: { security_group_rule: { security_group_id: sgId, direction: 'ingress', ethertype: 'IPv4', ...rule } },
+      method: 'POST', body: { security_group_rule: { security_group_id: sgId, project_id: sess.project.id, direction: 'ingress', ethertype: 'IPv4', ...rule } },
     });
     await mkRule({ remote_group_id: sgId }); // mọi giao thức giữa các node trong cụm
     for (const port of [6443, 9345, 22]) {
@@ -137,7 +140,7 @@ router.post('/k8s/deploy', async (req, res, next) => {
     for (let i = 0; i < 15 && !serverIp; i++) {
       await sleep(3000);
       const pr = await osFetch(sess, 'network', `/v2.0/ports?device_id=${serverId}`).catch(() => null);
-      const port = pr?.ports?.[0];
+      const port = owned(pr?.ports, sess)[0];
       if (port?.fixed_ips?.[0]?.ip_address) { serverIp = port.fixed_ips[0].ip_address; portId = port.id; }
     }
     if (!serverIp) throw new OSError(502, 'Server node chưa có IP sau 45s — kiểm tra Nova/Neutron rồi thử lại (đã tạo VM ' + `${name}-server, cần xoá tay)`);
@@ -153,7 +156,7 @@ router.post('/k8s/deploy', async (req, res, next) => {
     // 5) FIP cho server node
     let fip = null;
     if (assign_fip) {
-      const ext = (await osFetch(sess, 'network', '/v2.0/networks?router:external=true')).networks?.[0];
+      const ext = (await osFetch(sess, 'network', '/v2.0/networks?router:external=true')).networks?.find((network) => network['router:external'] === true);
       if (!ext) warnings.push('Không có mạng external — bỏ qua Floating IP.');
       else {
         const fr = await osFetch(sess, 'network', '/v2.0/floatingips', {
@@ -189,6 +192,13 @@ router.delete('/k8s/clusters/:id', async (req, res, next) => {
     const idx = clusters.findIndex((c) => c.id === req.params.id && c.project_id === sess.project.id);
     if (idx < 0) throw new OSError(404, 'Không tìm thấy cluster');
     const c = clusters[idx];
+    // Preflight every recorded resource before any destructive operation.
+    for (const id of [...c.worker_ids, c.server_id]) {
+      try { await fetchOwned(sess, 'compute', `/servers/${id}`, 'server'); }
+      catch (error) { if (error.status !== 404 || error.code === 'resource_not_found') throw error; }
+    }
+    try { await fetchOwned(sess, 'network', `/v2.0/security-groups/${c.sg_id}`, 'security_group'); }
+    catch (error) { if (error.status !== 404 || error.code === 'resource_not_found') throw error; }
     const warnings = [];
     for (const id of [...c.worker_ids, c.server_id]) {
       try { await osFetch(sess, 'compute', `/servers/${id}`, { method: 'DELETE' }); }

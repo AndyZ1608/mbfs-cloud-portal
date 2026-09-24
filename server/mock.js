@@ -16,26 +16,26 @@ const images = [
   { id: uid(), name: 'Ubuntu 22.04 LTS', status: 'active', visibility: 'public', size: 652804096, disk_format: 'qcow2', created_at: '2026-01-10T03:00:00Z' },
   { id: uid(), name: 'Ubuntu 24.04 LTS', status: 'active', visibility: 'public', size: 701235200, disk_format: 'qcow2', created_at: '2026-03-02T03:00:00Z' },
   { id: uid(), name: 'Rocky Linux 9', status: 'active', visibility: 'public', size: 1258291200, disk_format: 'qcow2', created_at: '2026-02-15T03:00:00Z' },
-  { id: uid(), name: 'Windows Server 2022', status: 'active', visibility: 'private', size: 12884901888, disk_format: 'qcow2', created_at: '2026-04-20T03:00:00Z' },
+  { id: uid(), owner: 'p-demo', name: 'Windows Server 2022', status: 'active', visibility: 'private', size: 12884901888, disk_format: 'qcow2', created_at: '2026-04-20T03:00:00Z' },
 ];
 
-const netInternal = { id: uid(), name: 'net-internal', status: 'ACTIVE', 'router:external': false, shared: false, subnets: [] };
-const netDmz = { id: uid(), name: 'net-dmz', status: 'ACTIVE', 'router:external': false, shared: false, subnets: [] };
-const netPublic = { id: uid(), name: 'public', status: 'ACTIVE', 'router:external': true, shared: true, subnets: [] };
+const netInternal = { id: uid(), name: 'net-internal', project_id: 'p-demo', status: 'ACTIVE', 'router:external': false, shared: false, subnets: [] };
+const netDmz = { id: uid(), name: 'net-dmz', project_id: 'p-demo', status: 'ACTIVE', 'router:external': false, shared: false, subnets: [] };
+const netPublic = { id: uid(), name: 'public', project_id: 'p-infrastructure', status: 'ACTIVE', 'router:external': true, shared: true, subnets: [] };
 const networks = [netInternal, netDmz, netPublic];
 
 const subnets = [
-  { id: uid(), name: 'subnet-internal', network_id: netInternal.id, cidr: '10.10.10.0/24', gateway_ip: '10.10.10.1', ip_version: 4, enable_dhcp: true, dns_nameservers: ['8.8.8.8'] },
-  { id: uid(), name: 'subnet-dmz', network_id: netDmz.id, cidr: '10.20.0.0/24', gateway_ip: '10.20.0.1', ip_version: 4, enable_dhcp: true, dns_nameservers: [] },
-  { id: uid(), name: 'subnet-public', network_id: netPublic.id, cidr: '203.0.113.0/24', gateway_ip: '203.0.113.1', ip_version: 4, enable_dhcp: false, dns_nameservers: [] },
+  { id: uid(), name: 'subnet-internal', project_id: 'p-demo', network_id: netInternal.id, cidr: '10.10.10.0/24', gateway_ip: '10.10.10.1', ip_version: 4, enable_dhcp: true, dns_nameservers: ['8.8.8.8'] },
+  { id: uid(), name: 'subnet-dmz', project_id: 'p-demo', network_id: netDmz.id, cidr: '10.20.0.0/24', gateway_ip: '10.20.0.1', ip_version: 4, enable_dhcp: true, dns_nameservers: [] },
+  { id: uid(), name: 'subnet-public', project_id: 'p-infrastructure', network_id: netPublic.id, cidr: '203.0.113.0/24', gateway_ip: '203.0.113.1', ip_version: 4, enable_dhcp: false, dns_nameservers: [] },
 ];
 subnets.forEach((s) => networks.find((n) => n.id === s.network_id).subnets.push(s.id));
 
-const sgDefault = { id: uid(), name: 'default', description: 'Default security group', security_group_rules: [] };
-const sgWeb = { id: uid(), name: 'web-server', description: 'HTTP/HTTPS/SSH', security_group_rules: [] };
+const sgDefault = { id: uid(), project_id: 'p-demo', name: 'default', description: 'Default security group', security_group_rules: [] };
+const sgWeb = { id: uid(), project_id: 'p-demo', name: 'web-server', description: 'HTTP/HTTPS/SSH', security_group_rules: [] };
 const secgroups = [sgDefault, sgWeb];
 function addRule(sg, dir, proto, min, max, cidr) {
-  sg.security_group_rules.push({ id: uid(), security_group_id: sg.id, direction: dir, ethertype: 'IPv4', protocol: proto, port_range_min: min, port_range_max: max, remote_ip_prefix: cidr });
+  sg.security_group_rules.push({ id: uid(), project_id: sg.project_id, security_group_id: sg.id, direction: dir, ethertype: 'IPv4', protocol: proto, port_range_min: min, port_range_max: max, remote_ip_prefix: cidr });
 }
 addRule(sgDefault, 'egress', null, null, null, null);
 addRule(sgWeb, 'egress', null, null, null, null);
@@ -58,7 +58,7 @@ function seedServer(name, flavor, imageIdx, ip, status) {
     'OS-EXT-STS:task_state': null, 'OS-EXT-AZ:availability_zone': 'nova',
   };
   servers.push(s);
-  ports.push({ id: uid(), network_id: netInternal.id, device_id: s.id, device_owner: 'compute:nova', fixed_ips: [{ ip_address: ip, subnet_id: subnets[0].id }], status: 'ACTIVE' });
+  ports.push({ id: uid(), project_id: 'p-demo', network_id: netInternal.id, device_id: s.id, device_owner: 'compute:nova', fixed_ips: [{ ip_address: ip, subnet_id: subnets[0].id }], status: 'ACTIVE' });
   return s;
 }
 const sv1 = seedServer('portal-web-01', 'f-medium', 0, '10.10.10.11', 'ACTIVE');
@@ -66,21 +66,21 @@ const sv2 = seedServer('db-postgres-01', 'f-large', 1, '10.10.10.12', 'ACTIVE');
 seedServer('runner-ci-01', 'f-small', 0, '10.10.10.13', 'SHUTOFF');
 sv1.security_groups = [{ name: 'default' }, { name: 'web-server' }];
 
-const routers = [{ id: uid(), name: 'rt-main', status: 'ACTIVE', external_gateway_info: { network_id: netPublic.id } }];
-ports.push({ id: uid(), network_id: netInternal.id, device_id: routers[0].id, device_owner: 'network:router_interface', fixed_ips: [{ ip_address: '10.10.10.1', subnet_id: subnets[0].id }], status: 'ACTIVE' });
+const routers = [{ id: uid(), project_id: 'p-demo', name: 'rt-main', status: 'ACTIVE', external_gateway_info: { network_id: netPublic.id } }];
+ports.push({ id: uid(), project_id: 'p-demo', network_id: netInternal.id, device_id: routers[0].id, device_owner: 'network:router_interface', fixed_ips: [{ ip_address: '10.10.10.1', subnet_id: subnets[0].id }], status: 'ACTIVE' });
 
-const fip1 = { id: uid(), floating_ip_address: '203.0.113.15', floating_network_id: netPublic.id, port_id: ports[0].id, fixed_ip_address: '10.10.10.11', status: 'ACTIVE' };
-const fip2 = { id: uid(), floating_ip_address: '203.0.113.16', floating_network_id: netPublic.id, port_id: null, fixed_ip_address: null, status: 'DOWN' };
+const fip1 = { id: uid(), project_id: 'p-demo', floating_ip_address: '203.0.113.15', floating_network_id: netPublic.id, port_id: ports[0].id, fixed_ip_address: '10.10.10.11', status: 'ACTIVE' };
+const fip2 = { id: uid(), project_id: 'p-demo', floating_ip_address: '203.0.113.16', floating_network_id: netPublic.id, port_id: null, fixed_ip_address: null, status: 'DOWN' };
 const floatingips = [fip1, fip2];
 sv1.addresses['net-internal'].push({ addr: fip1.floating_ip_address, 'OS-EXT-IPS:type': 'floating' });
 
 const volumes = [
-  { id: uid(), name: 'data-postgres', size: 100, status: 'in-use', volume_type: 'ssd', bootable: 'false', created_at: '2026-05-11T09:00:00Z', attachments: [{ server_id: sv2.id, device: '/dev/vdb' }] },
-  { id: uid(), name: 'backup-vol', size: 50, status: 'available', volume_type: 'hdd', bootable: 'false', created_at: '2026-06-01T09:00:00Z', attachments: [] },
+  { id: uid(), project_id: 'p-demo', name: 'data-postgres', size: 100, status: 'in-use', volume_type: 'ssd', bootable: 'false', created_at: '2026-05-11T09:00:00Z', attachments: [{ server_id: sv2.id, device: '/dev/vdb' }] },
+  { id: uid(), project_id: 'p-demo', name: 'backup-vol', size: 50, status: 'available', volume_type: 'hdd', bootable: 'false', created_at: '2026-06-01T09:00:00Z', attachments: [] },
 ];
 sv2['os-extended-volumes:volumes_attached'] = [{ id: volumes[0].id }];
 
-const snapshots = [{ id: uid(), name: 'snap-data-postgres-0601', volume_id: volumes[0].id, size: 100, status: 'available', created_at: '2026-06-01T02:00:00Z' }];
+const snapshots = [{ id: uid(), project_id: 'p-demo', name: 'snap-data-postgres-0601', volume_id: volumes[0].id, size: 100, status: 'available', created_at: '2026-06-01T02:00:00Z' }];
 
 // ---------- auth mock ----------
 export function mockAuth(username) {
@@ -106,15 +106,15 @@ function parse(path) {
 const notFound = () => { const e = new Error('Không tìm thấy tài nguyên (mock)'); e.status = 404; return e; };
 const conflict = (message) => { const e = new Error(message); e.status = 409; return e; };
 
-export function mockFetch(svc, method, rawPath, body) {
+export function mockFetch(svc, method, rawPath, body, projectId = 'p-demo') {
   const { path, q } = parse(rawPath);
   const m = method.toUpperCase();
 
-  if (svc === 'compute') return mockCompute(m, path, body);
-  if (svc === 'network') return mockNetwork(m, path, q, body);
-  if (svc === 'volume') return mockVolume(m, path, body);
-  if (svc === 'image') return mockImage(m, path, body);
-  if (svc === 'lb') return mockLb(m, path, q, body);
+  if (svc === 'compute') return mockCompute(m, path, body, projectId);
+  if (svc === 'network') return mockNetwork(m, path, q, body, projectId);
+  if (svc === 'volume') return mockVolume(m, path, body, projectId);
+  if (svc === 'image') return mockImage(m, path, body, projectId);
+  if (svc === 'lb') return mockLb(m, path, q, body, projectId);
   if (svc === 'identity') return mockIdentity(m, path, q, body);
   throw notFound();
 }
@@ -123,7 +123,7 @@ function serverIps(s) {
   return s.addresses;
 }
 
-function mockCompute(m, path, body) {
+function mockCompute(m, path, body, projectId) {
   let dmt;
   if ((dmt = path.match(/^\/servers\/([^/]+)\/diagnostics$/)) && m === 'GET') return mockDiagnostics(dmt[1]);
   if (m === 'GET' && path === '/os-hypervisors/statistics') {
@@ -148,7 +148,7 @@ function mockCompute(m, path, body) {
       const net = networks.find((n) => n.id === netId) || netInternal;
       const ip = '10.10.10.' + (20 + servers.length + i);
       const s = {
-        id: uid(), name, status: 'BUILD', tenant_id: 'p-demo', created: now(), updated: now(),
+        id: uid(), name, status: 'BUILD', tenant_id: projectId, created: now(), updated: now(),
         flavor: { ...fl, original_name: fl.name },
         image: { id: b.imageRef || (b.block_device_mapping_v2 ? b.block_device_mapping_v2[0].uuid : images[0].id) },
         key_name: b.key_name || null,
@@ -163,7 +163,7 @@ function mockCompute(m, path, body) {
         s.status = 'ACTIVE';
         s['OS-EXT-STS:task_state'] = null;
         s.addresses[net.name] = [{ addr: ip, 'OS-EXT-IPS:type': 'fixed' }];
-        ports.push({ id: uid(), network_id: net.id, device_id: s.id, device_owner: 'compute:nova', fixed_ips: [{ ip_address: ip, subnet_id: (net.subnets[0] || '') }], status: 'ACTIVE' });
+        ports.push({ id: uid(), project_id: projectId, network_id: net.id, device_id: s.id, device_owner: 'compute:nova', fixed_ips: [{ ip_address: ip, subnet_id: (net.subnets[0] || '') }], status: 'ACTIVE' });
       }, 6000);
     }
     return { server: created[0] };
@@ -224,7 +224,7 @@ function mockCompute(m, path, body) {
       return { output: lines.join('\n') };
     }
     else if ('createImage' in body) {
-      const img = { id: uid(), name: body.createImage.name, status: 'active', visibility: 'private', size: 2147483648, disk_format: 'qcow2', created_at: now() };
+      const img = { id: uid(), owner: projectId, name: body.createImage.name, status: 'active', visibility: 'private', size: 2147483648, disk_format: 'qcow2', created_at: now() };
       images.unshift(img);
       return { image_id: img.id };
     }
@@ -297,7 +297,7 @@ function mockCompute(m, path, body) {
   throw notFound();
 }
 
-function mockNetwork(m, path, q, body) {
+function mockNetwork(m, path, q, body, projectId) {
   let qmt;
   if ((qmt = path.match(/^\/v2\.0\/quotas\/([^/]+)$/)) && !path.endsWith('.json')) {
     mockQuotas[qmt[1]] = mockQuotas[qmt[1]] || { instances: 100, cores: 171, ram: 122880, volumes: 100, gigabytes: 135, snapshots: 10, floatingip: 50, network: 100, security_group: 10 };
@@ -308,12 +308,18 @@ function mockNetwork(m, path, q, body) {
   if (path === '/v2.0/networks' && m === 'GET') {
     let list = networks;
     if (q.get('router:external') === 'true') list = networks.filter((n) => n['router:external']);
+    if (q.get('shared') === 'true') list = list.filter((n) => n.shared);
     return { networks: list };
   }
   if (path === '/v2.0/networks' && m === 'POST') {
-    const n = { id: uid(), name: body.network.name, status: 'ACTIVE', 'router:external': false, shared: false, subnets: [] };
+    const n = { id: uid(), project_id: projectId, name: body.network.name, status: 'ACTIVE', 'router:external': false, shared: false, subnets: [] };
     networks.push(n);
     return { network: n };
+  }
+  if ((mt = path.match(/^\/v2\.0\/networks\/([^/]+)$/)) && m === 'GET') {
+    const network = networks.find((n) => n.id === mt[1]);
+    if (!network) throw notFound();
+    return { network };
   }
   if ((mt = path.match(/^\/v2\.0\/networks\/([^/]+)$/)) && m === 'DELETE') {
     const i = networks.findIndex((n) => n.id === mt[1]);
@@ -325,12 +331,17 @@ function mockNetwork(m, path, q, body) {
   }
   if (path === '/v2.0/subnets' && m === 'GET') return { subnets };
   if (path === '/v2.0/subnets' && m === 'POST') {
-    const s = { id: uid(), ip_version: 4, enable_dhcp: true, dns_nameservers: [], ...body.subnet };
+    const s = { id: uid(), project_id: projectId, ip_version: 4, enable_dhcp: true, dns_nameservers: [], ...body.subnet };
     if (!s.gateway_ip) s.gateway_ip = s.cidr.replace(/\.\d+\/\d+$/, '.1');
     subnets.push(s);
     const n = networks.find((x) => x.id === s.network_id);
     if (n) n.subnets.push(s.id);
     return { subnet: s };
+  }
+  if ((mt = path.match(/^\/v2\.0\/subnets\/([^/]+)$/)) && m === 'GET') {
+    const subnet = subnets.find((s) => s.id === mt[1]);
+    if (!subnet) throw notFound();
+    return { subnet };
   }
   if (path === '/v2.0/ports' && m === 'GET') {
     let list = ports;
@@ -340,9 +351,14 @@ function mockNetwork(m, path, q, body) {
     if (ids.length) list = list.filter((p) => ids.includes(p.id));
     return { ports: list };
   }
+  if ((mt = path.match(/^\/v2\.0\/ports\/([^/]+)$/)) && m === 'GET') {
+    const port = ports.find((p) => p.id === mt[1]);
+    if (!port) throw notFound();
+    return { port };
+  }
   if (path === '/v2.0/floatingips' && m === 'GET') return { floatingips };
   if (path === '/v2.0/floatingips' && m === 'POST') {
-    const f = { id: uid(), floating_ip_address: '203.0.113.' + (20 + floatingips.length), floating_network_id: body.floatingip.floating_network_id, port_id: null, fixed_ip_address: null, status: 'DOWN' };
+    const f = { id: uid(), project_id: projectId, floating_ip_address: '203.0.113.' + (20 + floatingips.length), floating_network_id: body.floatingip.floating_network_id, port_id: null, fixed_ip_address: null, status: 'DOWN' };
     const pid = body.floatingip.port_id;
     if (pid) {
       const port = ports.find((p) => p.id === pid);
@@ -362,6 +378,7 @@ function mockNetwork(m, path, q, body) {
   if ((mt = path.match(/^\/v2\.0\/floatingips\/([^/]+)$/))) {
     const f = floatingips.find((x) => x.id === mt[1]);
     if (!f) throw notFound();
+    if (m === 'GET') return { floatingip: f };
     if (m === 'PUT') {
       const pid = body.floatingip.port_id;
       // gỡ IP nổi khỏi addresses của server cũ
@@ -387,10 +404,15 @@ function mockNetwork(m, path, q, body) {
   }
   if (path === '/v2.0/security-groups' && m === 'GET') return { security_groups: secgroups };
   if (path === '/v2.0/security-groups' && m === 'POST') {
-    const g = { id: uid(), name: body.security_group.name, description: body.security_group.description || '', security_group_rules: [] };
+    const g = { id: uid(), project_id: projectId, name: body.security_group.name, description: body.security_group.description || '', security_group_rules: [] };
     addRule(g, 'egress', null, null, null, null);
     secgroups.push(g);
     return { security_group: g };
+  }
+  if ((mt = path.match(/^\/v2\.0\/security-groups\/([^/]+)$/)) && m === 'GET') {
+    const security_group = secgroups.find((g) => g.id === mt[1]);
+    if (!security_group) throw notFound();
+    return { security_group };
   }
   if ((mt = path.match(/^\/v2\.0\/security-groups\/([^/]+)$/)) && m === 'DELETE') {
     const i = secgroups.findIndex((g) => g.id === mt[1]);
@@ -399,11 +421,16 @@ function mockNetwork(m, path, q, body) {
     return null;
   }
   if (path === '/v2.0/security-group-rules' && m === 'POST') {
-    const r = { id: uid(), ethertype: 'IPv4', ...body.security_group_rule };
+    const r = { id: uid(), project_id: projectId, ethertype: 'IPv4', ...body.security_group_rule };
     const g = secgroups.find((x) => x.id === r.security_group_id);
     if (!g) throw notFound();
     g.security_group_rules.push(r);
     return { security_group_rule: r };
+  }
+  if ((mt = path.match(/^\/v2\.0\/security-group-rules\/([^/]+)$/)) && m === 'GET') {
+    const security_group_rule = secgroups.flatMap((g) => g.security_group_rules).find((r) => r.id === mt[1]);
+    if (!security_group_rule) throw notFound();
+    return { security_group_rule };
   }
   if ((mt = path.match(/^\/v2\.0\/security-group-rules\/([^/]+)$/)) && m === 'DELETE') {
     for (const g of secgroups) {
@@ -414,15 +441,20 @@ function mockNetwork(m, path, q, body) {
   }
   if (path === '/v2.0/routers' && m === 'GET') return { routers };
   if (path === '/v2.0/routers' && m === 'POST') {
-    const r = { id: uid(), name: body.router.name, status: 'ACTIVE', external_gateway_info: body.router.external_gateway_info || null };
+    const r = { id: uid(), project_id: projectId, name: body.router.name, status: 'ACTIVE', external_gateway_info: body.router.external_gateway_info || null };
     routers.push(r);
     return { router: r };
+  }
+  if ((mt = path.match(/^\/v2\.0\/routers\/([^/]+)$/)) && m === 'GET') {
+    const router = routers.find((r) => r.id === mt[1]);
+    if (!router) throw notFound();
+    return { router };
   }
   if ((mt = path.match(/^\/v2\.0\/routers\/([^/]+)\/add_router_interface$/)) && m === 'PUT') {
     const r = routers.find((x) => x.id === mt[1]);
     const s = subnets.find((x) => x.id === body.subnet_id);
     if (!r || !s) throw notFound();
-    ports.push({ id: uid(), network_id: s.network_id, device_id: r.id, device_owner: 'network:router_interface', fixed_ips: [{ ip_address: s.gateway_ip, subnet_id: s.id }], status: 'ACTIVE' });
+    ports.push({ id: uid(), project_id: projectId, network_id: s.network_id, device_id: r.id, device_owner: 'network:router_interface', fixed_ips: [{ ip_address: s.gateway_ip, subnet_id: s.id }], status: 'ACTIVE' });
     return { subnet_id: s.id, port_id: ports[ports.length - 1].id };
   }
   if ((mt = path.match(/^\/v2\.0\/routers\/([^/]+)\/remove_router_interface$/)) && m === 'PUT') {
@@ -444,7 +476,7 @@ function mockNetwork(m, path, q, body) {
   throw notFound();
 }
 
-function mockVolume(m, path, body) {
+function mockVolume(m, path, body, projectId) {
   let qmt;
   if ((qmt = path.match(/^\/os-quota-sets\/([^/]+)$/))) {
     mockQuotas[qmt[1]] = mockQuotas[qmt[1]] || { instances: 100, cores: 171, ram: 122880, volumes: 100, gigabytes: 135, snapshots: 10, floatingip: 50, network: 100, security_group: 10 };
@@ -454,10 +486,15 @@ function mockVolume(m, path, body) {
   let mt;
   if (m === 'GET' && path === '/volumes/detail') return { volumes };
   if (m === 'POST' && path === '/volumes') {
-    const v = { id: uid(), name: body.volume.name || '', size: Number(body.volume.size), status: 'creating', volume_type: body.volume.volume_type || 'ssd', bootable: 'false', created_at: now(), attachments: [] };
+    const v = { id: uid(), project_id: projectId, name: body.volume.name || '', size: Number(body.volume.size), status: 'creating', volume_type: body.volume.volume_type || 'ssd', bootable: 'false', created_at: now(), attachments: [] };
     volumes.push(v);
     setTimeout(() => (v.status = 'available'), 2500);
     return { volume: v };
+  }
+  if ((mt = path.match(/^\/volumes\/([^/]+)$/)) && m === 'GET') {
+    const volume = volumes.find((v) => v.id === mt[1]);
+    if (!volume) throw notFound();
+    return { volume };
   }
   if ((mt = path.match(/^\/volumes\/([^/]+)$/)) && m === 'DELETE') {
     const v = volumes.find((x) => x.id === mt[1]);
@@ -478,10 +515,15 @@ function mockVolume(m, path, body) {
   if (m === 'GET' && path === '/snapshots/detail') return { snapshots };
   if (m === 'POST' && path === '/snapshots') {
     const src = volumes.find((v) => v.id === body.snapshot.volume_id);
-    const s = { id: uid(), name: body.snapshot.name, volume_id: body.snapshot.volume_id, size: src ? src.size : 0, status: 'creating', created_at: now() };
+    const s = { id: uid(), project_id: projectId, name: body.snapshot.name, volume_id: body.snapshot.volume_id, size: src ? src.size : 0, status: 'creating', created_at: now() };
     snapshots.push(s);
     setTimeout(() => (s.status = 'available'), 2500);
     return { snapshot: s };
+  }
+  if ((mt = path.match(/^\/snapshots\/([^/]+)$/)) && m === 'GET') {
+    const snapshot = snapshots.find((s) => s.id === mt[1]);
+    if (!snapshot) throw notFound();
+    return { snapshot };
   }
   if ((mt = path.match(/^\/snapshots\/([^/]+)$/)) && m === 'DELETE') {
     const i = snapshots.findIndex((s) => s.id === mt[1]);
@@ -497,7 +539,7 @@ function mockVolume(m, path, body) {
   throw notFound();
 }
 
-function mockImage(m, path, body) {
+function mockImage(m, path, body, projectId) {
   let mt;
   if (m === 'GET' && path === '/v2/images') return { images };
   if ((mt = path.match(/^\/v2\/images\/([^/]+)$/)) && m === 'GET') {
@@ -507,7 +549,7 @@ function mockImage(m, path, body) {
   }
   if (m === 'POST' && path === '/v2/images') {
     const img = {
-      id: uid(), name: body.name, status: 'queued', visibility: body.visibility || 'private',
+      id: uid(), owner: projectId, name: body.name, status: 'queued', visibility: body.visibility || 'private',
       disk_format: body.disk_format, container_format: body.container_format || 'bare',
       size: null, min_disk: body.min_disk || 0, min_ram: body.min_ram || 0, created_at: now(),
     };
@@ -539,25 +581,25 @@ const lbListeners = [];
 const lbPools = [];
 
 function seedLb() {
-  const vipPort = { id: uid(), network_id: netInternal.id, device_id: 'lb-seed', device_owner: 'octavia', fixed_ips: [{ ip_address: '10.10.10.200', subnet_id: subnets[0].id }], status: 'ACTIVE' };
+  const vipPort = { id: uid(), project_id: 'p-demo', network_id: netInternal.id, device_id: 'lb-seed', device_owner: 'octavia', fixed_ips: [{ ip_address: '10.10.10.200', subnet_id: subnets[0].id }], status: 'ACTIVE' };
   ports.push(vipPort);
   const pool = {
-    id: uid(), name: 'lb-web-pool', protocol: 'HTTP', lb_algorithm: 'ROUND_ROBIN',
+    id: uid(), project_id: 'p-demo', name: 'lb-web-pool', protocol: 'HTTP', lb_algorithm: 'ROUND_ROBIN',
     provisioning_status: 'ACTIVE', operating_status: 'ONLINE',
     members: [
-      { id: uid(), name: 'portal-web-01', address: '10.10.10.11', protocol_port: 80, operating_status: 'ONLINE', provisioning_status: 'ACTIVE', subnet_id: subnets[0].id },
+      { id: uid(), project_id: 'p-demo', name: 'portal-web-01', address: '10.10.10.11', protocol_port: 80, operating_status: 'ONLINE', provisioning_status: 'ACTIVE', subnet_id: subnets[0].id },
     ],
     healthmonitor: { id: uid(), type: 'HTTP', delay: 5, timeout: 5, max_retries: 3, url_path: '/', operating_status: 'ONLINE' },
   };
   pool.healthmonitor_id = pool.healthmonitor.id;
   lbPools.push(pool);
   const lb = {
-    id: uid(), name: 'lb-web', description: '', provider: 'amphora',
+    id: uid(), project_id: 'p-demo', name: 'lb-web', description: '', provider: 'amphora',
     vip_address: '10.10.10.200', vip_subnet_id: subnets[0].id, vip_port_id: vipPort.id,
     provisioning_status: 'ACTIVE', operating_status: 'ONLINE', created_at: '2026-06-20T04:00:00Z',
     listeners: [],
   };
-  const lis = { id: uid(), name: 'lb-web-listener', protocol: 'HTTP', protocol_port: 80, default_pool_id: pool.id, loadbalancer_id: lb.id, provisioning_status: 'ACTIVE', operating_status: 'ONLINE' };
+  const lis = { id: uid(), project_id: 'p-demo', name: 'lb-web-listener', protocol: 'HTTP', protocol_port: 80, default_pool_id: pool.id, loadbalancer_id: lb.id, provisioning_status: 'ACTIVE', operating_status: 'ONLINE' };
   lbListeners.push(lis);
   lb.listeners = [{ id: lis.id }];
   pool.loadbalancers = [{ id: lb.id }];
@@ -567,7 +609,7 @@ seedLb();
 
 let lbVipCounter = 201;
 
-function mockLb(m, path, q, body) {
+function mockLb(m, path, q, body, projectId) {
   let mt;
   if (m === 'GET' && path === '/v2/lbaas/loadbalancers') return { loadbalancers };
   if ((mt = path.match(/^\/v2\/lbaas\/loadbalancers\/([^/]+)$/)) && m === 'GET') {
@@ -578,19 +620,19 @@ function mockLb(m, path, q, body) {
   if (m === 'POST' && path === '/v2/lbaas/loadbalancers') {
     const spec = body.loadbalancer;
     const vip = `10.10.10.${lbVipCounter++}`;
-    const vipPort = { id: uid(), network_id: netInternal.id, device_id: 'lb-' + vip, device_owner: 'octavia', fixed_ips: [{ ip_address: vip, subnet_id: spec.vip_subnet_id }], status: 'ACTIVE' };
+    const vipPort = { id: uid(), project_id: projectId, network_id: netInternal.id, device_id: 'lb-' + vip, device_owner: 'octavia', fixed_ips: [{ ip_address: vip, subnet_id: spec.vip_subnet_id }], status: 'ACTIVE' };
     ports.push(vipPort);
     const lb = {
-      id: uid(), name: spec.name, description: spec.description || '', provider: 'amphora',
+      id: uid(), project_id: projectId, name: spec.name, description: spec.description || '', provider: 'amphora',
       vip_address: vip, vip_subnet_id: spec.vip_subnet_id, vip_port_id: vipPort.id,
       provisioning_status: 'PENDING_CREATE', operating_status: 'OFFLINE', created_at: now(), listeners: [],
     };
     for (const ls of spec.listeners || []) {
       const poolSpec = ls.default_pool || { protocol: ls.protocol, lb_algorithm: 'ROUND_ROBIN', members: [] };
       const pool = {
-        id: uid(), name: poolSpec.name || `${spec.name}-pool`, protocol: poolSpec.protocol,
+        id: uid(), project_id: projectId, name: poolSpec.name || `${spec.name}-pool`, protocol: poolSpec.protocol,
         lb_algorithm: poolSpec.lb_algorithm, provisioning_status: 'PENDING_CREATE', operating_status: 'OFFLINE',
-        members: (poolSpec.members || []).map((mb) => ({ id: uid(), name: mb.name, address: mb.address, protocol_port: mb.protocol_port, subnet_id: mb.subnet_id, operating_status: 'NO_MONITOR', provisioning_status: 'ACTIVE' })),
+        members: (poolSpec.members || []).map((mb) => ({ id: uid(), project_id: projectId, name: mb.name, address: mb.address, protocol_port: mb.protocol_port, subnet_id: mb.subnet_id, operating_status: 'NO_MONITOR', provisioning_status: 'ACTIVE' })),
         healthmonitor: null, loadbalancers: [{ id: lb.id }],
       };
       if (poolSpec.healthmonitor) {
@@ -599,7 +641,7 @@ function mockLb(m, path, q, body) {
         pool.members.forEach((x) => (x.operating_status = 'ONLINE'));
       }
       lbPools.push(pool);
-      const lis = { id: uid(), name: ls.name || `${spec.name}-listener`, protocol: ls.protocol, protocol_port: ls.protocol_port, default_pool_id: pool.id, loadbalancer_id: lb.id, provisioning_status: 'PENDING_CREATE', operating_status: 'OFFLINE' };
+      const lis = { id: uid(), project_id: projectId, name: ls.name || `${spec.name}-listener`, protocol: ls.protocol, protocol_port: ls.protocol_port, default_pool_id: pool.id, loadbalancer_id: lb.id, provisioning_status: 'PENDING_CREATE', operating_status: 'OFFLINE' };
       lbListeners.push(lis);
       lb.listeners.push({ id: lis.id });
     }
@@ -634,6 +676,11 @@ function mockLb(m, path, q, body) {
     const lbid = q.get('loadbalancer_id');
     return { pools: lbPools.filter((x) => !lbid || (x.loadbalancers || []).some((r) => r.id === lbid)).map(({ members, healthmonitor, ...p }) => p) };
   }
+  if ((mt = path.match(/^\/v2\/lbaas\/pools\/([^/]+)$/)) && m === 'GET') {
+    const pool = lbPools.find((p) => p.id === mt[1]);
+    if (!pool) throw notFound();
+    return { pool };
+  }
   if ((mt = path.match(/^\/v2\/lbaas\/pools\/([^/]+)\/members$/)) && m === 'GET') {
     const p = lbPools.find((x) => x.id === mt[1]);
     if (!p) throw notFound();
@@ -642,9 +689,15 @@ function mockLb(m, path, q, body) {
   if ((mt = path.match(/^\/v2\/lbaas\/pools\/([^/]+)\/members$/)) && m === 'POST') {
     const p = lbPools.find((x) => x.id === mt[1]);
     if (!p) throw notFound();
-    const mb = { id: uid(), operating_status: p.healthmonitor ? 'ONLINE' : 'NO_MONITOR', provisioning_status: 'ACTIVE', ...body.member };
+    const mb = { id: uid(), project_id: projectId, operating_status: p.healthmonitor ? 'ONLINE' : 'NO_MONITOR', provisioning_status: 'ACTIVE', ...body.member };
     p.members.push(mb);
     return { member: mb };
+  }
+  if ((mt = path.match(/^\/v2\/lbaas\/pools\/([^/]+)\/members\/([^/]+)$/)) && m === 'GET') {
+    const pool = lbPools.find((p) => p.id === mt[1]);
+    const member = pool?.members.find((m) => m.id === mt[2]);
+    if (!member) throw notFound();
+    return { member };
   }
   if ((mt = path.match(/^\/v2\/lbaas\/pools\/([^/]+)\/members\/([^/]+)$/)) && m === 'DELETE') {
     const p = lbPools.find((x) => x.id === mt[1]);

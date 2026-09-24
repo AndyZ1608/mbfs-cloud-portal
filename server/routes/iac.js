@@ -1,6 +1,7 @@
 // iac.js — Xuất hạ tầng hiện có thành file Terraform (provider openstack)
 import { Router } from 'express';
 import { osFetch } from '../openstack.js';
+import { owned, projectQuery, isOwned } from '../projectScope.js';
 
 const router = Router();
 const tfName = (s, fb) => (String(s || fb).toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/^(\d)/, '_$1') || fb);
@@ -10,24 +11,25 @@ router.get('/export/terraform', async (req, res, next) => {
   try {
     const sess = req.session.os;
     const [srvR, netR, subR, rtrR, sgR, kpR, volR, fipR] = await Promise.allSettled([
-      osFetch(sess, 'compute', '/servers/detail?limit=1000'),
-      osFetch(sess, 'network', '/v2.0/networks'),
-      osFetch(sess, 'network', '/v2.0/subnets'),
-      osFetch(sess, 'network', '/v2.0/routers'),
-      osFetch(sess, 'network', '/v2.0/security-groups'),
+      osFetch(sess, 'compute', projectQuery(sess, '/servers/detail', { limit: 1000 })),
+      osFetch(sess, 'network', projectQuery(sess, '/v2.0/networks')),
+      osFetch(sess, 'network', projectQuery(sess, '/v2.0/subnets')),
+      osFetch(sess, 'network', projectQuery(sess, '/v2.0/routers')),
+      osFetch(sess, 'network', projectQuery(sess, '/v2.0/security-groups')),
       osFetch(sess, 'compute', '/os-keypairs'),
-      osFetch(sess, 'volume', '/volumes/detail?limit=1000'),
-      osFetch(sess, 'network', '/v2.0/floatingips'),
+      osFetch(sess, 'volume', projectQuery(sess, '/volumes/detail', { limit: 1000 })),
+      osFetch(sess, 'network', projectQuery(sess, '/v2.0/floatingips')),
     ]);
     const val = (r, k) => (r.status === 'fulfilled' ? r.value?.[k] || [] : []);
-    const servers = val(srvR, 'servers');
-    const nets = val(netR, 'networks').filter((n) => !n['router:external']);
-    const subs = val(subR, 'subnets');
-    const routers = val(rtrR, 'routers');
-    const sgs = val(sgR, 'security_groups');
-    const keys = val(kpR, 'keypairs').map((k) => k.keypair || k);
-    const vols = val(volR, 'volumes');
-    const fips = val(fipR, 'floatingips');
+    const servers = owned(val(srvR, 'servers'), sess);
+    const nets = owned(val(netR, 'networks'), sess).filter((n) => !n['router:external']);
+    const subs = owned(val(subR, 'subnets'), sess);
+    const routers = owned(val(rtrR, 'routers'), sess);
+    const sgs = owned(val(sgR, 'security_groups'), sess);
+    // Nova keypairs are user-scoped; this request intentionally has no admin user_id override.
+    const keys = val(kpR, 'keypairs').map((k) => k.keypair || k).filter((k) => !k.user_id || k.user_id === sess.user.id);
+    const vols = owned(val(volR, 'volumes'), sess);
+    const fips = owned(val(fipR, 'floatingips'), sess);
 
     const L = [];
     L.push(`# Terraform xuất từ MBFS Cloud Portal`);
@@ -59,7 +61,7 @@ router.get('/export/terraform', async (req, res, next) => {
       const id = tfName(g.name, 'sg');
       L.push(`resource "openstack_networking_secgroup_v2" ${q(id)} {\n  name        = ${q(g.name)}\n  description = ${q(g.description || '')}\n}`);
       let i = 0;
-      for (const r of (g.security_group_rules || []).filter((x) => x.direction === 'ingress' && x.remote_ip_prefix)) {
+      for (const r of (g.security_group_rules || []).filter((x) => isOwned(x, sess) && x.direction === 'ingress' && x.remote_ip_prefix)) {
         L.push(`\nresource "openstack_networking_secgroup_rule_v2" ${q(`${id}_rule_${++i}`)} {\n  direction         = "ingress"\n  ethertype         = "IPv4"${r.protocol ? `\n  protocol          = ${q(r.protocol)}` : ''}${r.port_range_min != null ? `\n  port_range_min    = ${r.port_range_min}\n  port_range_max    = ${r.port_range_max}` : ''}\n  remote_ip_prefix  = ${q(r.remote_ip_prefix)}\n  security_group_id = openstack_networking_secgroup_v2.${id}.id\n}`);
       }
       L.push('');

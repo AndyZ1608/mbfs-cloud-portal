@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { OSError } from '../openstack.js';
 import { listRules, addRule, patchRule, removeRule, powerConfigured } from '../power.js';
 import { SCHED_TZ } from '../scheduler.js';
+import { fetchOwned } from '../projectScope.js';
 
 const router = Router();
 
@@ -9,11 +10,13 @@ router.get('/power/rules', (req, res) => {
   res.json({ rules: listRules(req.session.os.project.id), configured: powerConfigured(), tz: SCHED_TZ });
 });
 
-router.post('/power/rules', (req, res, next) => {
+router.post('/power/rules', async (req, res, next) => {
   try {
     const sess = req.session.os;
-    const { server_id, server_name, action, days, hour, minute } = req.body || {};
-    if (!server_id || !server_name) throw new OSError(400, 'Thiếu máy ảo');
+    const { server_id, action, days, hour, minute } = req.body || {};
+    if (!server_id) throw new OSError(400, 'Thiếu máy ảo');
+    const server = await fetchOwned(sess, 'compute', `/servers/${server_id}`, 'server');
+    const server_name = server.name || server.id;
     if (!['stop', 'start'].includes(action)) throw new OSError(400, 'Hành động phải là stop/start');
     const d = (days || []).map(Number).filter((x) => x >= 0 && x <= 6);
     if (!d.length) throw new OSError(400, 'Chọn ít nhất một ngày trong tuần');

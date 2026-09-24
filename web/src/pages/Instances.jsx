@@ -242,7 +242,7 @@ function CreateModal({ onClose, onDone }) {
   });
 
   useEffect(() => {
-    Promise.all([api('/flavors'), api('/images'), api('/networks'), api('/keypairs'), api('/security-groups')])
+    Promise.all([api('/flavors'), api('/images'), api('/available-networks'), api('/keypairs'), api('/security-groups')])
       .then(([fl, im, ne, kp, sg]) => {
         const nets = ne.networks.filter((n) => !n['router:external']);
         setOpts({
@@ -642,7 +642,7 @@ function NicModal({ server, onClose, onDone }) {
   const [busy, setBusy] = useState(false);
 
   async function load() {
-    const [i, n] = await Promise.all([api(`/servers/${server.id}/interfaces`), api('/networks')]);
+    const [i, n] = await Promise.all([api(`/servers/${server.id}/interfaces`), api('/available-networks')]);
     setIfaces(i.interfaces);
     const inner = n.networks.filter((x) => !x['router:external']);
     setNets(inner);

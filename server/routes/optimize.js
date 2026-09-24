@@ -3,6 +3,7 @@
 import { Router } from 'express';
 import { osFetch } from '../openstack.js';
 import { cpuStats, monitorStatus } from '../monitor.js';
+import { owned, projectQuery } from '../projectScope.js';
 
 const router = Router();
 const days = (iso) => {
@@ -18,12 +19,12 @@ router.get('/optimize', async (req, res, next) => {
       osFetch(sess, 'compute', '/servers/detail?limit=1000'),
       osFetch(sess, 'volume', '/volumes/detail?limit=1000'),
       osFetch(sess, 'volume', '/snapshots/detail?limit=1000'),
-      osFetch(sess, 'network', '/v2.0/floatingips'),
+      osFetch(sess, 'network', projectQuery(sess, '/v2.0/floatingips')),
     ]);
-    const servers = srvR.status === 'fulfilled' ? srvR.value.servers || [] : [];
-    const volumes = volR.status === 'fulfilled' ? volR.value.volumes || [] : [];
-    const snapshots = snapR.status === 'fulfilled' ? snapR.value.snapshots || [] : [];
-    const fips = fipR.status === 'fulfilled' ? fipR.value.floatingips || [] : [];
+    const servers = owned(srvR.status === 'fulfilled' ? srvR.value.servers : [], sess);
+    const volumes = owned(volR.status === 'fulfilled' ? volR.value.volumes : [], sess);
+    const snapshots = owned(snapR.status === 'fulfilled' ? snapR.value.snapshots : [], sess);
+    const fips = owned(fipR.status === 'fulfilled' ? fipR.value.floatingips : [], sess);
 
     const findings = [];
     const push = (f) => findings.push(f);
