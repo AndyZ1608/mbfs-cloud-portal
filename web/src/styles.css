@@ -94,6 +94,12 @@ a { color: var(--accent); }
 .language-switcher select { border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px; background: var(--card); color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; }
 .login-language { display: flex; justify-content: flex-end; margin-bottom: 10px; }
 .user-chip { font-size: 13px; color: var(--dim); }
+.account-menu-trigger { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 7px; background: var(--card); padding: 5px 9px; cursor: pointer; color: var(--dim); }
+.account-menu-trigger:hover { background: var(--muted-bg); }
+.account-menu { min-width: 195px; }
+.account-menu-head { color: var(--dim); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 8px 10px 5px; }
+.account-menu-hint { color: var(--dim); font-size: 11px; line-height: 1.35; padding: 2px 10px 7px; }
+.account-menu .menu-item svg { vertical-align: -2px; margin-right: 4px; }
 
 .content { padding: 22px; max-width: 1280px; width: 100%; margin: 0 auto; }
 
@@ -222,6 +228,10 @@ a { color: var(--accent); }
 .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 13px; }
 .field-label { font-size: 12.5px; font-weight: 600; color: var(--text); }
 .field-hint { font-size: 12px; color: var(--dim); }
+.account-password-identity { display: flex; gap: 8px; align-items: baseline; margin: 0 0 16px; color: var(--dim); font-size: 13px; }
+.account-password-identity strong { color: var(--text); }
+.account-password-error { color: var(--err); background: var(--err-bg); border-radius: 6px; padding: 9px 11px; font-size: 13px; }
+.account-password-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .network-mode-field { border: 0; padding: 0; margin: 0 0 13px; min-width: 0; }
 .network-mode-field legend { margin-bottom: 7px; }
 .network-mode-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
@@ -420,6 +430,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 .login-brand p { margin: 2px 0 0; font-size: 12.5px; color: var(--dim); }
 .login-note { background: var(--warn-bg); color: var(--warn); font-size: 12.5px; padding: 8px 11px; border-radius: 6px; margin-bottom: 13px; font-weight: 600; }
 .login-err { background: var(--err-bg); color: var(--err); font-size: 13px; padding: 9px 11px; border-radius: 6px; margin-bottom: 13px; }
+.login-success { background: var(--ok-bg); color: var(--ok); font-size: 13px; padding: 9px 11px; border-radius: 6px; margin-bottom: 13px; }
 .login-foot { font-size: 12px; color: var(--dim); text-align: center; margin: 14px 0 0; }
 .login-copy { text-align: center; color: rgba(190,210,240,0.5); font-size: 11.5px; margin: 16px 0 0; }
 

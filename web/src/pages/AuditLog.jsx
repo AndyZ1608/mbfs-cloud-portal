@@ -52,6 +52,7 @@ const RULES = [
   [/^DELETE \/lb\//, 'deleteLoadBalancer'],
 ];
 function actionLabel(e, t) {
+  if (e.action === 'account.password.change') return t('account.auditAction');
   const formatted = formatActivity(e, t);
   if (formatted.semantic) return formatted.action;
   const key = `${e.method} ${e.path}`;

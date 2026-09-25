@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import authRoutes from './routes/auth.js';
+import accountRoutes from './routes/account.js';
 import computeRoutes from './routes/compute.js';
 import networkRoutes from './routes/network.js';
 import storageRoutes from './routes/storage.js';
@@ -32,7 +33,7 @@ import { MOCK } from './openstack.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const protectedRoutes = [
-  computeRoutes, networkRoutes, storageRoutes, billingRoutes, lbRoutes,
+  accountRoutes, computeRoutes, networkRoutes, storageRoutes, billingRoutes, lbRoutes,
   backupRoutes, marketplaceRoutes, powerRoutes, optimizeRoutes, monitorRoutes,
   objectRoutes, iacRoutes, notifyRoutes, k8sRoutes, adminRoutes,
 ];
@@ -57,7 +58,9 @@ export function createApp({ sessionStore, sessionSecret } = {}) {
     const started = Date.now();
     res.on('finish', () => {
       const user = req.session?.os?.user?.name || '-';
-      console.log(`${new Date().toISOString()} [api] request_id=${req.id} ${user} ${req.method} ${req.originalUrl} ${res.statusCode} ${Date.now() - started}ms`);
+      const requestPath = req.originalUrl.startsWith('/api/account/change-password')
+        ? '/api/account/change-password' : req.originalUrl;
+      console.log(`${new Date().toISOString()} [api] request_id=${req.id} ${user} ${req.method} ${requestPath} ${res.statusCode} ${Date.now() - started}ms`);
     });
     next();
   });
@@ -87,4 +90,3 @@ export function createApp({ sessionStore, sessionSecret } = {}) {
   app.use(errorHandler);
   return app;
 }
-

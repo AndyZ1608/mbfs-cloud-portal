@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
-import { Bell, Moon, Sun, LogOut } from 'lucide-react';
+import { Bell, ChevronDown, Moon, Sun, LogOut } from 'lucide-react';
 import { api, fmtDate } from '../api.js';
 import { Toasts, toast } from './ui.jsx';
 import useCmpSession from '../useCmpSession.js';
@@ -8,12 +8,16 @@ import { useI18n } from '../i18n/react.jsx';
 import LanguageSwitcher from './LanguageSwitcher.jsx';
 import { noticeDetail, noticeTitle } from '../i18n/notifications.js';
 import SidebarNavigation from './SidebarNavigation.jsx';
+import { canChangeAccountPassword } from '../accountPassword.js';
+
+const AccountPasswordModal = React.lazy(() => import('./AccountPasswordModal.jsx'));
 
 export default function Layout() {
   const { t } = useI18n();
   const sess = useCmpSession();
   const [cfg, setCfg] = useState({ cloudName: 'MBFS Cloud' });
   const [switchingProject, setSwitchingProject] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const nav = useNavigate();
 
   useEffect(() => {
@@ -74,8 +78,7 @@ export default function Layout() {
             <LanguageSwitcher />
             <ThemeToggle />
             <NotifBell />
-            <span className="user-chip">{sess.user.name}{(sess.auth_mode === 'sso' || sess.auth_mode === 'websso') && <em className="sso-tag">SSO</em>}</span>
-            <button className="btn ghost sm" onClick={logout}><LogOut size={15} /> {t('header.logout')}</button>
+            <AccountMenu sess={sess} onChangePassword={() => setPasswordOpen(true)} onLogout={logout} />
           </div>
         </header>
         <main className="content">
@@ -83,8 +86,40 @@ export default function Layout() {
         </main>
       </div>
       <Toasts />
+      {passwordOpen && <React.Suspense fallback={null}><AccountPasswordModal username={sess.user.name} onClose={() => setPasswordOpen(false)}
+        onSuccess={() => { setPasswordOpen(false); nav('/login', { replace: true, state: { notice: 'passwordChanged' } }); }} /></React.Suspense>}
     </div>
   );
+}
+
+function AccountMenu({ sess, onChangePassword, onLogout }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    const close = (event) => { if (ref.current && !ref.current.contains(event.target)) setOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, []);
+  const localAccount = canChangeAccountPassword(sess);
+  return <div className="menu-wrap" ref={ref}>
+    <button type="button" className="account-menu-trigger" aria-haspopup="menu" aria-expanded={open}
+      onClick={() => setOpen((value) => !value)}>
+      <span className="user-chip">{sess.user.name}{!localAccount && <em className="sso-tag">SSO</em>}</span>
+      <ChevronDown size={14} />
+    </button>
+    {open && <div className="menu account-menu" role="menu">
+      <div className="account-menu-head">{t('account.title')}</div>
+      <button type="button" role="menuitem" className="menu-item" disabled={!localAccount}
+        title={!localAccount ? t('account.passwordUnsupported') : undefined}
+        onClick={() => { setOpen(false); onChangePassword(); }}>{t('account.changePassword')}</button>
+      {!localAccount && <small className="account-menu-hint">{t('account.passwordUnsupported')}</small>}
+      <div className="menu-div" role="separator" />
+      <button type="button" role="menuitem" className="menu-item" onClick={() => { setOpen(false); onLogout(); }}>
+        <LogOut size={14} /> {t('header.logout')}
+      </button>
+    </div>}
+  </div>;
 }
 
 function NotifBell() {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Server, HardDrive, Network, Shield, Boxes, BarChart3 } from 'lucide-react';
 import { api } from '../api.js';
 import { useI18n } from '../i18n/react.jsx';
@@ -23,6 +23,7 @@ export default function Login() {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const nav = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     const q = new URLSearchParams(window.location.search).get('sso_error');
@@ -90,6 +91,9 @@ export default function Login() {
             </div>
 
             {cfg.mock && <div className="login-note">{t('auth.demoHint')}</div>}
+            {location.state?.notice === 'passwordChanged' && <div className="login-success" role="status">
+              {t('account.passwordChangeSuccess')} {t('account.signInAgain')}
+            </div>}
             {err && <div className="login-err">{err.code && resources.vi[`errors.${err.code}`]
               ? t(`errors.${err.code}`)
               : locale === 'en' && (err.fromQuery || /[À-ỹ]/u.test(err.message || '')) ? t('auth.signInFailed') : err.message}</div>}

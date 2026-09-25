@@ -25,7 +25,7 @@ export class OSError extends Error {
     super(message);
     this.status = status;
     this.code = code;
-    this.expose = status < 500 || ['provider_timeout', 'provider_unavailable', 'secret_unavailable'].includes(code);
+    this.expose = status < 500 || ['provider_timeout', 'provider_unavailable', 'secret_unavailable', 'account_keystone_unavailable'].includes(code);
   }
 }
 
@@ -59,7 +59,13 @@ async function readError(res) {
 // ---------- Keystone ----------
 
 export async function passwordAuth(username, password, domainName) {
-  if (MOCK) return mockAuth(username, password);
+  if (MOCK) {
+    try { return mockAuth(username, password); }
+    catch (error) {
+      if (error?.status === 401) throw new OSError(401, 'Sai tên đăng nhập hoặc mật khẩu', 'invalid_credentials');
+      throw error;
+    }
+  }
   const body = {
     auth: {
       identity: {
@@ -78,6 +84,34 @@ export async function passwordAuth(username, password, domainName) {
   const token = res.headers.get('x-subject-token');
   const data = await res.json();
   return { token, user: data.token.user };
+}
+
+function accountPasswordError(status) {
+  if (status === 401) return new OSError(401, 'Mật khẩu hiện tại không chính xác.', 'account_current_password_incorrect');
+  if (status === 400 || status === 409) return new OSError(status, 'Keystone từ chối mật khẩu mới.', 'account_password_rejected');
+  if (status === 403 || status === 404) return new OSError(status, 'Không thể đổi mật khẩu cho tài khoản này.', 'account_password_unsupported');
+  return new OSError(503, 'Không thể kết nối tới Keystone.', 'account_keystone_unavailable');
+}
+
+// Keystone's self-service endpoint verifies original_password and requires no admin token.
+// Never read or relay its error body: provider diagnostics may echo a submitted secret.
+export async function changeOwnKeystonePassword(session, originalPassword, newPassword) {
+  const path = `/users/${encodeURIComponent(session.user.id)}/password`;
+  const body = { user: { original_password: originalPassword, password: newPassword } };
+  if (MOCK) {
+    try { mockFetch('identity', 'POST', `/v3${path}`, body, session.project?.id); }
+    catch (error) { throw accountPasswordError(error?.status); }
+    return;
+  }
+  let response;
+  try {
+    response = await providerFetch(`${AUTH_URL}${path}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch { throw accountPasswordError(503); }
+  if (!response.ok) throw accountPasswordError(response.status);
+  // 204 has no body; other Keystone 2xx responses also indicate acceptance.
 }
 
 export async function listProjects(unscopedToken) {

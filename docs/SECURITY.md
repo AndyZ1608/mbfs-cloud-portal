@@ -4,6 +4,7 @@
 
 - Set `NODE_ENV=production` and a random `SESSION_SECRET` of at least 32 characters. Startup fails if this is missing or weak.
 - Set `SECURE_COOKIES=true` behind HTTPS. Set `TRUST_PROXY=true` only when traffic always arrives through a trusted reverse proxy.
+- Serve CMP over HTTPS in production before enabling self-service account password changes. The browser sends current/new passwords only to the CMP backend; CMP sends them to Keystone's self-service Identity API. Plain HTTP between browser and CMP would expose those credentials in transit. Use a trusted HTTPS Keystone endpoint or a protected internal connection as appropriate for the deployment.
 - Keep `OS_INSECURE=false` and `SSO_INSECURE=false`. Import the private CA into the container trust store instead of disabling TLS verification.
 - Use `DATA_ENCRYPTION_KEY` if infrastructure secrets need a key independent from session signing. Keep the key stable and in a secret manager; changing it makes previously encrypted Kubernetes join tokens unreadable.
 - Use Redis sessions for multiple replicas. Memory and file sessions are single-instance options.
@@ -16,6 +17,8 @@ Sessions are HTTP-only, `SameSite=Lax`, and optionally Secure. State-changing AP
 Every request receives an `X-Request-Id`. Mutation audit records include request ID, user, project, provider, cloud, region, action, result, source address, status, and duration. Passwords, cookies, bearer tokens, and request bodies are not written to the audit log.
 
 VM password changes use the current Keystone project token, a portal-side `member`/`admin` gate, and a fresh Nova server lookup to confirm the VM belongs to the current project. Nova decides whether the password-change operation is supported; CMP does not inspect image metadata or guest configuration. The audit entry records only actor, project, VM, action, result, and timing. The submitted password is neither returned nor persisted; provider errors from this operation are mapped to messages that cannot echo it.
+
+Account password changes are separate from VM password changes. A local Keystone login may call `POST /api/account/change-password`; CMP derives the user ID from its authenticated session and calls Keystone `POST /v3/users/{user_id}/password` with the original and new passwords. CMP never uses an administrative reset token for this operation, never records either password in audit or logs, rate-limits attempts, and destroys the CMP session after success. SSO/WebSSO sessions cannot use this local-password flow. The CMP session is ended, but this does not assert revocation of every Keystone token on other devices.
 
 Billing requests forward the current project-scoped Keystone token in `X-Auth-Token`. The token is never sent to the browser as Billing configuration, placed in a URL, or written to logs. CMP does not send `project_id`; the Billing service validates the token with Keystone and derives project scope itself.
 

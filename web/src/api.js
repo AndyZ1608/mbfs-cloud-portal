@@ -38,7 +38,7 @@ export async function api(path, { method = 'GET', body } = {}) {
   const res = await fetch('/api' + path, opts);
   let data = null;
   try { data = await res.json(); } catch { /* no body */ }
-  if (res.status === 401 && !path.startsWith('/auth/')) {
+  if (res.status === 401 && !path.startsWith('/auth/') && data?.code !== 'account_current_password_incorrect') {
     window.location.href = '/login';
     throw new ApiError(text('errors.authentication_required'), { status: 401, code: data?.code, requestId: data?.requestId });
   }

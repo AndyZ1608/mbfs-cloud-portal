@@ -91,12 +91,18 @@ router.get('/session', (req, res) => {
   res.json({ user: sess.user, project: sess.project, projects: sess.projects, roles: sess.roles || [], auth_mode: sess.auth_mode || 'keystone', expiresAt: sess.expiresAt });
 });
 
-router.post('/logout', (req, res) => {
-  const name = req.session.os?.user?.name;
-  req.session.destroy(() => {
+export async function destroyCmpSession(req, res) {
+  await new Promise((resolve, reject) => req.session.destroy((error) => error ? reject(error) : resolve()));
+  res.clearCookie('mbfs_cloud_sid', { path: '/', sameSite: 'lax', secure: config.secureCookies });
+}
+
+router.post('/logout', async (req, res, next) => {
+  try {
+    const name = req.session.os?.user?.name;
+    await destroyCmpSession(req, res);
     if (name) console.log(`[auth] LOGOUT user=${name}`);
     res.json({ ok: true, redirect: process.env.OS_WEBSSO_LOGOUT_URL || null });
-  });
+  } catch (error) { next(error); }
 });
 
 export default router;

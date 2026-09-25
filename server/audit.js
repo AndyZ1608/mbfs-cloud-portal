@@ -22,6 +22,10 @@ export function setInstanceAudit(res, event) {
   res.locals.instanceAudit = event;
 }
 
+export function setAccountAudit(res, event) {
+  res.locals.accountAudit = event;
+}
+
 export function addInstanceAudit(res, event) {
   (res.locals.instanceAudits ||= []).push(event);
 }
@@ -103,7 +107,7 @@ export function auditMiddleware(req, res, next) {
   const t0 = Date.now();
   res.on('finish', () => {
     try {
-      const os = req.session?.os;
+      const os = req.session?.os || res.locals.auditSession;
       const path = (req.originalUrl || req.url).split('?')[0];
       const base = {
         request_id: req.id, user: os?.user?.name || null,
@@ -115,7 +119,11 @@ export function auditMiddleware(req, res, next) {
         source_ip: clientIp(req), ms: Date.now() - t0,
       };
       const events = res.locals.instanceAudits?.length ? res.locals.instanceAudits :
-        [res.locals.instanceAudit || fallbackInstanceAudit(req, path)];
+        [res.locals.instanceAudit || res.locals.accountAudit ||
+          (path === '/api/account/change-password' ? {
+            action: 'account.password.change', resourceId: os?.user?.id,
+            resourceName: os?.user?.name,
+          } : fallbackInstanceAudit(req, path))];
       if (res.locals.instanceAudits?.length && res.statusCode >= 400) {
         events.push({ action: 'instance.create', result: 'failure' });
       }
@@ -128,6 +136,11 @@ export function auditMiddleware(req, res, next) {
             resource_type: 'instance', resource_id: event.resourceId || null,
             resource_name: event.resourceName || null,
             instance_id: event.resourceId || null, instance_name: event.resourceName || null,
+            details: event.details || {},
+          } : {}),
+          ...(event?.action === 'account.password.change' ? {
+            resource_type: 'account', resource_id: event.resourceId || null,
+            resource_name: event.resourceName || null, user_id: event.resourceId || null,
             details: event.details || {},
           } : {}),
           ...(event?.legacy || {}),

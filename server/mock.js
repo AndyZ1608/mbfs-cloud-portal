@@ -1,5 +1,5 @@
 // mock.js — giả lập OpenStack API (OS_MOCK=true) để demo UI không cần cluster thật
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 
 const uid = () => randomUUID();
 const now = () => new Date().toISOString();
@@ -83,7 +83,17 @@ sv2['os-extended-volumes:volumes_attached'] = [{ id: volumes[0].id }];
 const snapshots = [{ id: uid(), project_id: 'p-demo', name: 'snap-data-postgres-0601', volume_id: volumes[0].id, size: 100, status: 'available', created_at: '2026-06-01T02:00:00Z' }];
 
 // ---------- auth mock ----------
-export function mockAuth(username) {
+// Demo-only verifier; never retain the submitted password in mock state.
+const changedMockPasswordHashes = new Map();
+const lastMockLoginPasswordHashes = new Map();
+const mockPasswordHash = (value) => createHash('sha256').update(value).digest('hex');
+export function mockAuth(username, password) {
+  if (changedMockPasswordHashes.has('u-' + username) && changedMockPasswordHashes.get('u-' + username) !== mockPasswordHash(password)) {
+    const error = new Error('Invalid credentials');
+    error.status = 401;
+    throw error;
+  }
+  lastMockLoginPasswordHashes.set('u-' + username, mockPasswordHash(password));
   return { token: 'mock-unscoped-' + username + '::' + uid(), user: { id: 'u-' + username, name: username, domain: { name: 'Default' } } };
 }
 export function mockProjects() {
@@ -840,6 +850,16 @@ const mockProjectList = [
 
 function mockIdentity(m, path, q, body) {
   let mt;
+  if ((mt = path.match(/^\/v3\/users\/([^/]+)\/password$/)) && m === 'POST') {
+    const expected = changedMockPasswordHashes.get(mt[1]) || lastMockLoginPasswordHashes.get(mt[1]);
+    if (mockPasswordHash(body?.user?.original_password || '') !== expected) {
+      const error = new Error('Invalid original password');
+      error.status = 401;
+      throw error;
+    }
+    changedMockPasswordHashes.set(mt[1], mockPasswordHash(body.user.password));
+    return null;
+  }
   if (m === 'GET' && path === '/v3/projects') return { projects: mockProjectList };
   if (m === 'POST' && path === '/v3/projects') {
     const p = { id: 'p-' + uid().slice(0, 8), name: body.project.name, enabled: true, description: body.project.description || '' };

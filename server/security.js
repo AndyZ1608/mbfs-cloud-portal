@@ -64,6 +64,13 @@ export const loginLimiter = () => rateLimit({
   message: 'Đăng nhập sai quá nhiều lần',
 });
 
+export const accountPasswordLimiter = () => rateLimit({
+  windowSec: 300,
+  max: 10,
+  keyPrefix: 'account-password',
+  message: 'Đổi mật khẩu quá nhiều lần',
+});
+
 export const apiLimiter = () => rateLimit({
   windowSec: Number(process.env.RATE_API_WINDOW_SEC) || 60,
   max: Number(process.env.RATE_API_MAX ?? 600),
