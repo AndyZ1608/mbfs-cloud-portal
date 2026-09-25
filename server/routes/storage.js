@@ -64,6 +64,8 @@ router.post('/volumes/:id/attach', async (req, res, next) => {
       method: 'POST',
       body: { volumeAttachment: { volumeId: req.params.id } },
     });
+    res.locals.instanceAuditId = server_id;
+    res.locals.instanceAuditAction = 'instance.attach_volume';
     console.log(`[volume] ATTACH volume=${req.params.id} -> server=${server_id} by=${req.session.os.user.name}`);
     res.json(data);
   } catch (e) { next(e); }
@@ -79,6 +81,8 @@ router.post('/volumes/:id/detach', async (req, res, next) => {
       throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
     }
     await osFetch(req.session.os, 'compute', `/servers/${server_id}/os-volume_attachments/${req.params.id}`, { method: 'DELETE' });
+    res.locals.instanceAuditId = server_id;
+    res.locals.instanceAuditAction = 'instance.detach_volume';
     console.log(`[volume] DETACH volume=${req.params.id} <- server=${server_id} by=${req.session.os.user.name}`);
     res.json({ ok: true });
   } catch (e) { next(e); }

@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import { api, fmtDate, ramGB, serverIps } from '../api.js';
 import { Modal, Field, StatusBadge, ActionsMenu, toast, Empty, PageHead } from '../components/ui.jsx';
 import MonitorModal from '../components/MonitorModal.jsx';
 import TypeToConfirmDialog from '../components/TypeToConfirmDialog.jsx';
-import { openInstanceConsole } from '../console/navigation.js';
 import { validResizeFlavor, submitResizeOnce } from '../resize.js';
-import { vmActionItems } from '../vmActions.js';
+import useInstanceActions from '../useInstanceActions.js';
 import { useI18n } from '../i18n/react.jsx';
 import NetworkInterfaceFields, { addInterface, newInterface, removeInterface, validInterfaces } from '../components/NetworkInterfaceFields.jsx';
 
@@ -14,36 +14,18 @@ export default function Instances() {
   const { t } = useI18n();
   const [servers, setServers] = useState(null);
   const [creating, setCreating] = useState(false);
-  const [detail, setDetail] = useState(null);
-  const [fipTarget, setFipTarget] = useState(null);
-  const [resizeFor, setResizeFor] = useState(null);
-  const [logFor, setLogFor] = useState(null);
-  const [rebuildFor, setRebuildFor] = useState(null);
-  const [nicFor, setNicFor] = useState(null);
-  const [sgFor, setSgFor] = useState(null);
   const [q, setQ] = useState('');
   const [monFor, setMonFor] = useState(null);
   const [monStatus, setMonStatus] = useState(null);
   const [latest, setLatest] = useState({});
-  const [deleteFor, setDeleteFor] = useState(null);
-  const [passwordFor, setPasswordFor] = useState(null);
-  const [deleting, setDeleting] = useState(false);
-  const [pendingResize, setPendingResize] = useState(new Map());
-  const deleteRequest = useRef(false);
-  const actionRequests = useRef(new Set());
   const timer = useRef(null);
+  const actions = useInstanceActions({ onChanged: load });
 
   async function load() {
     try {
       const d = await api('/servers');
       setServers(d.servers);
-      setPendingResize((current) => {
-        const next = new Map(current);
-        for (const server of d.servers) {
-          if (next.has(server.id) && next.get(server.id) !== server.status) next.delete(server.id);
-        }
-        return next.size === current.size ? current : next;
-      });
+      actions.syncServers(d.servers);
       api('/monitor/latest').then((m) => setLatest(m.latest || {})).catch(() => {});
     } catch (e) { toast(e.message, 'error'); }
   }
@@ -55,83 +37,6 @@ export default function Instances() {
     return () => { clearInterval(timer.current); };
   }, []);
 
-  async function act(s, action, label) {
-    const finalizingResize = action === 'confirm-resize' || action === 'revert-resize';
-    if (finalizingResize && (actionRequests.current.has(s.id) || pendingResize.has(s.id))) return;
-    if (finalizingResize) {
-      actionRequests.current.add(s.id);
-      setPendingResize((current) => new Map(current).set(s.id, s.status));
-    }
-    try {
-      await api(`/servers/${s.id}/action`, { method: 'POST', body: { action } });
-      toast(t('instances.actionWithName', { action: label, name: s.name }), 'ok');
-      if (finalizingResize) load();
-      setTimeout(load, 800);
-    } catch (e) {
-      if (finalizingResize) setPendingResize((current) => { const next = new Map(current); next.delete(s.id); return next; });
-      toast(e.message, 'error');
-    } finally {
-      if (finalizingResize) actionRequests.current.delete(s.id);
-    }
-  }
-
-  function openDelete(s) {
-    deleteRequest.current = false;
-    setDeleting(false);
-    setDeleteFor(s);
-  }
-
-  function closeDelete() {
-    if (deleteRequest.current) return;
-    setDeleteFor(null);
-    setDeleting(false);
-  }
-
-  async function confirmDelete() {
-    const s = deleteFor;
-    if (!s || deleteRequest.current) return;
-    deleteRequest.current = true;
-    setDeleting(true);
-    try {
-      await api(`/servers/${s.id}`, { method: 'DELETE' });
-      toast(t('instances.deleteSent', { name: s.name }), 'ok');
-      setDeleteFor(null);
-      setTimeout(load, 800);
-    } catch (e) {
-      toast(e.message, 'error');
-      deleteRequest.current = false;
-      setDeleting(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!deleteFor || !servers) return;
-    const current = servers.find((server) => server.id === deleteFor.id);
-    if (!current) {
-      if (!deleteRequest.current) setDeleteFor(null);
-      return;
-    }
-    if (current.name !== deleteFor.name) setDeleteFor(current);
-  }, [servers, deleteFor]);
-
-  async function rename(s) {
-    const name = window.prompt(t('instances.renamePrompt'), s.name);
-    if (!name || name.trim() === s.name) return;
-    try {
-      await api(`/servers/${s.id}`, { method: 'PUT', body: { name: name.trim() } });
-      toast(t('instances.renamed', { name: name.trim() }), 'ok');
-      load();
-    } catch (e) { toast(e.message, 'error'); }
-  }
-
-  async function snapshot(s) {
-    const name = window.prompt(t('instances.snapshotPrompt'), `${s.name}-snap-${new Date().toISOString().slice(0, 10)}`);
-    if (!name) return;
-    try {
-      await api(`/servers/${s.id}/action`, { method: 'POST', body: { action: 'snapshot', name } });
-      toast(t('instances.snapshotStarted', { name }), 'ok');
-    } catch (e) { toast(e.message, 'error'); }
-  }
   const shown = !servers ? null : servers.filter((s) => {
     const t = q.trim().toLowerCase();
     if (!t) return true;
@@ -154,7 +59,7 @@ export default function Instances() {
             <tbody>
               {shown.map((s) => (
                 <tr key={s.id}>
-                  <td><button className="link-btn" onClick={() => setDetail(s)}>{s.name}</button></td>
+                  <td><Link className="link-btn" to={`/instances/${encodeURIComponent(s.id)}`}>{s.name}</Link></td>
                   <td><StatusBadge status={s.status} />{s['OS-EXT-STS:task_state'] && <span className="dim task"> {s['OS-EXT-STS:task_state']}…</span>}</td>
                   <td>{latest[s.id] ? (
                     <button className={`cpu-chip cpu-${latest[s.id].cpu >= 90 ? 'hot' : latest[s.id].cpu >= 70 ? 'warm' : 'ok'}`}
@@ -169,26 +74,7 @@ export default function Instances() {
                   <td className="dim">{s.key_name || '—'}</td>
                   <td className="dim">{fmtDate(s.created)}</td>
                   <td>
-                    <ActionsMenu items={vmActionItems(s, { t, pendingResize: pendingResize.has(s.id), handlers: {
-                      console: () => openInstanceConsole(s.id),
-                      changePassword: () => setPasswordFor(s),
-                      rename: () => rename(s),
-                      networkCards: () => setNicFor(s),
-                      securityGroups: () => setSgFor(s),
-                      floatingIp: () => setFipTarget(s),
-                      snapshot: () => snapshot(s),
-                      start: () => act(s, 'start', t('instances.started')),
-                      stop: () => act(s, 'stop', t('instances.stopSent')),
-                      softReboot: () => act(s, 'reboot-soft', t('instances.rebooting')),
-                      hardReboot: () => act(s, 'reboot-hard', t('instances.rebooting')),
-                      resize: () => setResizeFor(s),
-                      confirmResize: () => act(s, 'confirm-resize', t('instances.confirmResizeSent')),
-                      revertResize: () => act(s, 'revert-resize', t('instances.revertResizeSent')),
-                      shelve: () => act(s, 'shelve', t('instances.shelving')),
-                      unshelve: () => act(s, 'unshelve', t('instances.unshelving')),
-                      rebuild: () => setRebuildFor(s),
-                      delete: () => openDelete(s),
-                    } })} />
+                    <ActionsMenu items={actions.items(s)} />
                   </td>
                 </tr>
               ))}
@@ -198,34 +84,32 @@ export default function Instances() {
       )}
 
       {creating && <CreateModal onClose={() => setCreating(false)} onDone={() => { setCreating(false); load(); }} />}
-      {detail && <DetailModal server={detail} onClose={() => setDetail(null)}
-        onChangePassword={() => { setPasswordFor(detail); setDetail(null); }} />}
-      {passwordFor && <ChangePasswordModal key={passwordFor.id} server={passwordFor}
-        onClose={() => setPasswordFor(null)} onDone={() => setPasswordFor(null)} />}
-      {fipTarget && <FipModal server={fipTarget} onClose={() => setFipTarget(null)} onDone={() => { setFipTarget(null); load(); }} />}
-      {resizeFor && <ResizeModal server={resizeFor} onClose={() => setResizeFor(null)} onDone={() => {
-        setPendingResize((current) => new Map(current).set(resizeFor.id, resizeFor.status));
-        setResizeFor(null);
-        load();
-        setTimeout(load, 800);
-      }} />}
-      {logFor && <ConsoleLogModal server={logFor} onClose={() => setLogFor(null)} />}
+      <InstanceActionDialogs actions={actions} />
       {monFor && <MonitorModal server={monFor} status={monStatus} onClose={() => setMonFor(null)} />}
-      {rebuildFor && <RebuildModal server={rebuildFor} onClose={() => setRebuildFor(null)} onDone={() => { setRebuildFor(null); setTimeout(load, 800); }} />}
-      {nicFor && <NicModal server={nicFor} onClose={() => setNicFor(null)} onDone={load} />}
-      {sgFor && <SgModal server={sgFor} onClose={() => setSgFor(null)} onDone={() => { setSgFor(null); load(); }} />}
-      {deleteFor && <TypeToConfirmDialog
-        title={t('instances.delete')}
-        description={t('instances.deleteDescription')}
-        resourceName={deleteFor.name}
-        resourceId={deleteFor.id}
-        confirmLabel={t('instances.delete')}
-        loading={deleting}
-        onConfirm={confirmDelete}
-        onCancel={closeDelete}
-      />}
     </>
   );
+}
+
+export function InstanceActionDialogs({ actions }) {
+  const { t } = useI18n();
+  const { kind, server } = actions.target;
+  if (!server) return null;
+  return <>
+    {kind === 'password' && <ChangePasswordModal key={server.id} server={server}
+      onClose={actions.close} onDone={() => actions.dialogDone()} />}
+    {kind === 'fip' && <FipModal server={server} onClose={actions.close} onDone={() => actions.dialogDone()} />}
+    {kind === 'resize' && <ResizeModal server={server} onClose={actions.close} onDone={() => {
+      actions.setPendingResize((current) => new Map(current).set(server.id, server.status));
+      actions.dialogDone();
+    }} />}
+    {kind === 'rebuild' && <RebuildModal server={server} onClose={actions.close} onDone={() => actions.dialogDone()} />}
+    {kind === 'nic' && <NicModal server={server} onClose={actions.close} onDone={() => actions.dialogDone({ keepOpen: true })} />}
+    {kind === 'sg' && <SgModal server={server} onClose={actions.close} onDone={() => actions.dialogDone()} />}
+    {kind === 'delete' && <TypeToConfirmDialog title={t('instances.delete')}
+      description={t('instances.deleteDescription')} resourceName={server.name} resourceId={server.id}
+      confirmLabel={t('instances.delete')} loading={actions.deleting}
+      onConfirm={actions.confirmDelete} onCancel={actions.closeDelete} />}
+  </>;
 }
 
 // ---------- Tạo máy ảo ----------
@@ -352,41 +236,6 @@ function CreateModal({ onClose, onDone }) {
           </Field>
         </div>
       )}
-    </Modal>
-  );
-}
-
-// ---------- Chi tiết máy ảo ----------
-function DetailModal({ server, onClose, onChangePassword }) {
-  const { t } = useI18n();
-  const [s, setS] = useState(server);
-  const [vols, setVols] = useState(null);
-
-  useEffect(() => {
-    api(`/servers/${server.id}`).then((d) => setS(d.server)).catch(() => {});
-    api('/volumes').then((d) => setVols(d.volumes)).catch(() => setVols([]));
-  }, [server.id]);
-
-  const attached = (s['os-extended-volumes:volumes_attached'] || []).map((a) => {
-    const v = (vols || []).find((x) => x.id === a.id);
-    return v ? `${v.name || v.id.slice(0, 8)} (${v.size} GB)` : a.id;
-  });
-
-  return (
-    <Modal title={s.name} onClose={onClose}
-      footer={<button className="btn ghost" type="button" onClick={onChangePassword}>{t('instances.changePassword')}</button>}>
-      <div className="kv">
-        <div><span>ID</span><span className="mono">{s.id}</span></div>
-        <div><span>{t('common.status')}</span><span><StatusBadge status={s.status} /></span></div>
-        <div><span>{t('instances.flavor')}</span><span>{s.flavor?.original_name || s.flavor?.id} {s.flavor?.vcpus != null && `· ${s.flavor.vcpus} vCPU / ${ramGB(s.flavor.ram)} / ${s.flavor.disk} GB`}</span></div>
-        <div><span>{t('common.ipAddress')}</span><span>{serverIps(s).map((x) => <span key={x.ip} className="mono chip">{x.ip} <em className="dim">({x.type})</em></span>)}</span></div>
-        <div><span>Security group</span><span>{(s.security_groups || []).map((g) => g.name).join(', ') || '—'}</span></div>
-        <div><span>SSH key</span><span>{s.key_name || '—'}</span></div>
-        <div><span>{t('instances.attachedVolumes')}</span><span>{attached.length ? attached.join(', ') : '—'}</span></div>
-        <div><span>Availability zone</span><span>{s['OS-EXT-AZ:availability_zone'] || '—'}</span></div>
-        <div><span>{t('common.createdAt')}</span><span>{fmtDate(s.created)}</span></div>
-        {s.fault?.message && <div><span>{t('instances.fault')}</span><span className="err-text">{s.fault.message}</span></div>}
-      </div>
     </Modal>
   );
 }

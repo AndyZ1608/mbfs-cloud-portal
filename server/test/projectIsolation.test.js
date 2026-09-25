@@ -58,6 +58,16 @@ test('admin visibility cannot cross the selected CMP project boundary', async (t
   assert.equal(login.status, 200);
   let cookie = login.headers.get('set-cookie').split(';')[0];
   assert.ok((await login.json()).roles.includes('admin'));
+  const serverA = (await read('/servers', cookie)).servers[0];
+  assert.ok(serverA);
+  assert.equal((await read(`/servers/${serverA.id}`, cookie)).server.id, serverA.id);
+  assert.ok(Array.isArray((await read(`/servers/${serverA.id}/activity`, cookie)).entries));
+  assert.ok(Array.isArray((await read(`/servers/${serverA.id}/interfaces`, cookie)).interfaces));
+  assert.ok(Array.isArray((await read(`/servers/${serverA.id}/volumes`, cookie)).volumeAttachments));
+  const availableVolume = (await read('/volumes', cookie)).volumes.find((volume) => volume.status === 'available');
+  assert.ok(availableVolume);
+  assert.equal((await request(`/volumes/${availableVolume.id}/attach`, cookie, 'POST', { server_id: serverA.id })).status, 200);
+  assert.ok((await read(`/servers/${serverA.id}/activity`, cookie)).entries.some((event) => event.action === 'instance.attach_volume'));
 
   const networksA = (await read('/networks', cookie)).networks;
   assert.ok(networksA.length > 0);
@@ -82,6 +92,7 @@ test('admin visibility cannot cross the selected CMP project boundary', async (t
   }
   for (const path of [
     `/networks/${networkB.id}`, `/routers/${routerB.id}`, `/servers/${serverB.id}`,
+    `/servers/${serverB.id}/activity`, `/servers/${serverB.id}/interfaces`, `/servers/${serverB.id}/volumes`,
     `/lb/${lbB.id}/tree`,
   ]) assert.equal((await request(path, cookie)).status, 404, path);
   for (const path of [`/networks/${networkB.id}`, `/routers/${routerB.id}`, `/servers/${serverB.id}`, `/volumes/${volumeB.id}`, `/security-groups/${sgB.id}`]) {
@@ -113,6 +124,8 @@ test('admin visibility cannot cross the selected CMP project boundary', async (t
   assert.ok(networksAfter.every((network) => network.project_id === 'p-devops'));
   assert.ok((await read('/routers', cookie)).routers.some((router) => router.id === routerB.id));
   assert.ok(!(await read('/servers', cookie)).servers.some((server) => server.project_id === 'p-demo' || server.tenant_id === 'p-demo'));
+  assert.equal((await request(`/servers/${serverA.id}`, cookie)).status, 404);
+  assert.equal((await request(`/servers/${serverA.id}/activity`, cookie)).status, 404);
   assert.equal((await request(`/networks/${networksA[0].id}`, cookie)).status, 404);
 
   const member = await request('/auth/login', null, 'POST', { username: 'member', password: 'demo' });

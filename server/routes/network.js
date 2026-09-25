@@ -225,6 +225,10 @@ router.post('/floatingips/:id/associate', async (req, res, next) => {
     const port = await fetchOwned(sess, 'network', `/v2.0/ports/${portId}`, 'port');
     if (server_id && port.device_id !== server_id) throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
     const data = await osFetch(sess, 'network', `/v2.0/floatingips/${req.params.id}`, { method: 'PUT', body: { floatingip: { port_id: portId } } });
+    if (server_id) {
+      res.locals.instanceAuditId = server_id;
+      res.locals.instanceAuditAction = 'instance.associate_floating_ip';
+    }
     console.log(`[network] ASSOCIATE fip=${req.params.id} -> ${server_id ? 'server=' + server_id : 'port=' + portId} by=${sess.user.name}`);
     res.json(data);
   } catch (e) { next(e); }

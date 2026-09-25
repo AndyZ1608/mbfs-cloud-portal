@@ -24,7 +24,7 @@ test('navigation maps only existing routes, with Dashboard and feature-gated Bil
     assert.equal(new Set(all).size, all.length);
     const appSource = readFileSync(fileURLToPath(new URL('../src/App.jsx', import.meta.url)), 'utf8');
     const routedPages = [...appSource.matchAll(/<Route path="(\/[^\"]+)" element={<(?!Navigate)(\w+)/g)]
-      .map((match) => match[1]).filter((path) => path !== '/login');
+      .map((match) => match[1]).filter((path) => path !== '/login' && !path.includes('/:'));
     assert.deepEqual(all.slice().sort(), ['/', ...routedPages].sort());
     for (const nonRoute of ['/flavors', '/snapshots', '/routers', '/monitoring']) assert.ok(!all.includes(nonRoute));
     const member = visibleNavigation({ config: { billingEnabled: false }, roles: ['member'] });

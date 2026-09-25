@@ -127,3 +127,20 @@ test('audit: chỉ trả log của đúng project', async () => {
   assert.equal(mine.length, 1);
   assert.equal(mine[0].user, 'hieptd');
 });
+
+test('instance activity is exact-ID, current-project, newest-first, and metadata-only', async () => {
+  const { record, listInstanceAudit } = await import('../audit.js');
+  const projectId = `detail-${Math.random()}`;
+  const instanceId = `vm-${Math.random()}`;
+  record({ project: { id: projectId }, path: `/servers/${instanceId}/change-password`,
+    instance_id: instanceId, action: 'instance.change_password', user: 'admin', result: 'success', password: 'SECRET' });
+  record({ project: { id: projectId }, path: `/servers/${instanceId}-other/action`, action: 'post.servers' });
+  record({ project: { id: 'other' }, path: `/servers/${instanceId}/action`, action: 'post.servers' });
+  record({ project: { id: projectId }, path: `/servers/${instanceId}/action`, action: 'instance.resize', result: 'accepted' });
+  const entries = listInstanceAudit({ projectId, instanceId });
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].action, 'instance.resize');
+  assert.equal(entries[1].action, 'instance.change_password');
+  assert.ok(!JSON.stringify(entries).includes('SECRET'));
+  assert.equal(listInstanceAudit({ projectId: 'other', instanceId: 'missing' }).length, 0);
+});

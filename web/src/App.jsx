@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout.jsx';
 import Login from './pages/Login.jsx';
@@ -22,6 +22,14 @@ import K8sClusters from './pages/K8sClusters.jsx';
 import Admin from './pages/Admin.jsx';
 import ConsolePage from './pages/ConsolePage.jsx';
 import { CONSOLE_ROUTE } from './console/navigation.js';
+import { useI18n } from './i18n/react.jsx';
+
+const InstanceDetailRoute = lazy(() => import('./pages/InstanceDetail.jsx'));
+
+function DetailRouteFallback() {
+  const { t } = useI18n();
+  return <div className="boot">{t('common.loading')}</div>;
+}
 
 export default function App() {
   return (
@@ -32,6 +40,7 @@ export default function App() {
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />
           <Route path="/instances" element={<Instances />} />
+          <Route path="/instances/:instanceId" element={<Suspense fallback={<DetailRouteFallback />}><InstanceDetailRoute /></Suspense>} />
           <Route path="/marketplace" element={<Marketplace />} />
           <Route path="/kubernetes" element={<K8sClusters />} />
           <Route path="/admin" element={<Admin />} />

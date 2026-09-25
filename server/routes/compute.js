@@ -4,6 +4,7 @@ import { traceNovaConsole } from '../consoleDiagnostics.js';
 import { changeInstancePassword } from '../passwordChange.js';
 import { assertOwned, fetchOwned, fetchUsableImage, owned } from '../projectScope.js';
 import { attachInterface, createServerWithInterfaces, prepareInterfaces } from '../instanceInterfaces.js';
+import { listInstanceAudit } from '../audit.js';
 
 const router = Router();
 
@@ -85,6 +86,13 @@ router.get('/servers/:id', async (req, res, next) => {
     const server = await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
     res.json({ server });
   } catch (e) { next(e); }
+});
+
+router.get('/servers/:id/activity', async (req, res, next) => {
+  try {
+    await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
+    res.json({ entries: listInstanceAudit({ projectId: req.session.os.project.id, instanceId: req.params.id }) });
+  } catch (error) { next(error); }
 });
 
 router.post('/servers/:id/change-password', async (req, res, next) => {

@@ -27,6 +27,27 @@ export function listAudit({ projectId, user, limit = 300 }) {
   return out;
 }
 
+// Only explicit instance identifiers or exact server-resource paths qualify. Never return
+// request bodies or provider diagnostics (password changes are intentionally metadata-only).
+export function listInstanceAudit({ projectId, instanceId, limit = 100 }) {
+  const out = [];
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 100, 300));
+  for (let i = MEM.length - 1; i >= 0 && out.length < safeLimit; i--) {
+    const entry = MEM[i];
+    if (entry.project?.id !== projectId) continue;
+    const pathId = entry.path?.match(/^\/servers\/([^/]+)(?:\/|$)/)?.[1];
+    const interfaces = Array.isArray(entry.interfaces) ? entry.interfaces : [];
+    const related = entry.instance_id === instanceId || pathId === instanceId
+      || interfaces.some((item) => item.instance_id === instanceId);
+    if (!related) continue;
+    out.push({ ts: entry.ts, action: entry.action, user: entry.user,
+      result: entry.result, status: entry.status,
+      details: interfaces.filter((item) => item.instance_id === instanceId)
+        .map((item) => ({ port_id: item.port_id, fixed_ip: item.fixed_ip })) });
+  }
+  return out;
+}
+
 // Ghi tự động các thao tác ghi (trừ nhánh /auth — xử lý riêng để lấy username khi login)
 export function auditMiddleware(req, res, next) {
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
@@ -42,6 +63,9 @@ export function auditMiddleware(req, res, next) {
     const resizeId = req.method === 'POST' && ['resize', 'confirm-resize', 'revert-resize'].includes(req.body?.action)
       ? path.match(/^\/api\/servers\/([^/]+)\/action$/)?.[1] : null;
     const resizeAction = resizeId ? req.body.action : null;
+    const serverAction = req.method === 'POST' && path.match(/^\/api\/servers\/[^/]+\/action$/)
+      && ['start', 'stop', 'reboot-soft', 'reboot-hard', 'shelve', 'unshelve', 'snapshot'].includes(req.body?.action)
+      ? req.body.action : null;
     const resizeResult = resizeAction === 'resize' ? 'accepted'
       : resizeAction === 'revert-resize' ? 'reverted' : 'success';
     const interfaceAction = res.locals.interfaceAudit
@@ -59,8 +83,10 @@ export function auditMiddleware(req, res, next) {
       path: (req.originalUrl || req.url).replace(/^\/api/, '').split('?')[0],
       action: passwordChangeId ? 'instance.change_password' : resizeAction
         ? `instance.${resizeAction.replace('-', '_')}`
-        : interfaceAction || `${req.method.toLowerCase()}.${(req.originalUrl || req.url).replace(/^\/api\/?/, '').split(/[/?]/)[0] || 'api'}`,
+        : interfaceAction || (res.locals.instanceAuditAction || (serverAction ? `instance.${serverAction.replace('-', '_')}` : null))
+          || `${req.method.toLowerCase()}.${(req.originalUrl || req.url).replace(/^\/api\/?/, '').split(/[/?]/)[0] || 'api'}`,
       ...(passwordChangeId ? { instance_id: passwordChangeId, instance_name: res.locals.passwordChangeInstanceName || null } : {}),
+      ...(res.locals.instanceAuditId ? { instance_id: res.locals.instanceAuditId } : {}),
       ...(resizeId ? {
         instance_id: resizeId,
         old_flavor: res.locals.resizeAudit?.old_flavor || null,
