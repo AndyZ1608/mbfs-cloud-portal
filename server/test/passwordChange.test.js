@@ -164,6 +164,7 @@ test('Nova failures are mapped usefully without echoing provider secrets', async
 test('HTTP boundary enforces session, project scope, and audit confidentiality', async (t) => {
   const { createApp } = await import('../app.js');
   const { listAudit } = await import('../audit.js');
+  const { readJsonlTail } = await import('../store.js');
   const app = createApp({ sessionStore: null, sessionSecret: 'password-feature-test-session-secret' }).listen(0);
   await new Promise((resolve) => app.once('listening', resolve));
   t.after(() => new Promise((resolve) => app.close(resolve)));
@@ -188,13 +189,20 @@ test('HTTP boundary enforces session, project scope, and audit confidentiality',
   assert.deepEqual(await response2.json(), { success: true });
 
   const audit = listAudit({ projectId: 'p-demo', user: 'password-feature-test', limit: 20 })
-    .filter((entry) => entry.action === 'instance.change_password').slice(0, 2);
+    .filter((entry) => entry.action === 'instance.password.change').slice(0, 2);
   assert.equal(audit.length, 2);
-  assert.deepEqual(audit.map((entry) => entry.result), ['success', 'success']);
+  assert.deepEqual(audit.map((entry) => entry.result), ['accepted', 'accepted']);
   assert.equal(audit[0].instance_id, second.id);
   assert.equal(audit[1].instance_name, first.name);
   assert.equal(JSON.stringify(audit).includes(secret), false);
   assert.equal(audit.some((entry) => 'username' in entry), false);
+  const activity = await (await fetch(base + `/api/servers/${first.id}/activity`, { headers: { Cookie: cookie } })).json();
+  assert.ok(activity.entries.some((entry) => entry.action === 'instance.password.change'));
+  assert.equal(JSON.stringify(activity).includes(secret), false);
+  const persisted = readJsonlTail('audit.jsonl', 5000).filter((entry) =>
+    entry.user === 'password-feature-test' && entry.action === 'instance.password.change');
+  assert.ok(persisted.length >= 2);
+  assert.equal(JSON.stringify(persisted.slice(-2)).includes(secret), false);
 
   assert.equal((await post(`/api/servers/${first.id}/change-password`, cookie, { password: '' })).status, 400);
   assert.equal((await post('/api/servers/nonexistent/change-password', cookie, { password: secret })).status, 404);

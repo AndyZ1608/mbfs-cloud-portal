@@ -7,14 +7,10 @@ import { useI18n } from '../i18n/react.jsx';
 import useInstanceActions from '../useInstanceActions.js';
 import { InstanceActionDialogs } from './Instances.jsx';
 import { attachedSecurityGroups, attachedStorage, canDetachVolume, networkRows } from '../instanceDetailData.js';
+import { formatActivity } from '../activityFormatter.js';
 
 const TABS = ['overview', 'networking', 'storage', 'security', 'activity'];
 const value = (item) => item === undefined || item === null || item === '' ? '—' : item;
-const activityLabel = (t, prefix, raw) => {
-  const key = `instance.activity.${prefix}.${raw}`;
-  const translated = t(key);
-  return translated === key ? value(raw) : translated;
-};
 
 function DetailFields({ rows }) {
   return <div className="vm-detail-fields">{rows.map(([label, content]) =>
@@ -49,6 +45,7 @@ function InstanceDetail({ instanceId }) {
   const [attachVolumeOpen, setAttachVolumeOpen] = useState(false);
   const [selectedVolumeId, setSelectedVolumeId] = useState('');
   const [volumeBusy, setVolumeBusy] = useState(false);
+  const [activityMoreBusy, setActivityMoreBusy] = useState(false);
   const current = tabStates[tab] || {};
   const encodedId = encodeURIComponent(instanceId);
 
@@ -119,7 +116,7 @@ function InstanceDetail({ instanceId }) {
         const [ports, groups] = await Promise.all([api(`/servers/${encodedId}/interfaces`), api('/security-groups')]);
         return attachedSecurityGroups(ports.interfaces, groups.security_groups, server.security_groups);
       },
-      activity: async () => (await api(`/servers/${encodedId}/activity`)).entries || [],
+      activity: async () => api(`/servers/${encodedId}/activity?limit=50`),
     };
     loaders[tab]().then((data) => {
       if (live) setTabStates((states) => ({ ...states, [tab]: { loaded: true, loading: false, data } }));
@@ -171,6 +168,17 @@ function InstanceDetail({ instanceId }) {
       toast(t('volumes.snapshotCreating'), 'ok');
       refresh();
     } catch (error) { toast(error.message, 'error'); }
+  }
+  async function loadMoreActivity() {
+    if (activityMoreBusy || tabData?.next_offset == null) return;
+    setActivityMoreBusy(true);
+    try {
+      const next = await api(`/servers/${encodedId}/activity?limit=50&offset=${tabData.next_offset}`);
+      setTabStates((states) => ({ ...states, activity: { ...states.activity,
+        data: { entries: [...(states.activity?.data?.entries || []), ...(next.entries || [])],
+          next_offset: next.next_offset } } }));
+    } catch (error) { toast(error.message, 'error'); }
+    finally { setActivityMoreBusy(false); }
   }
   return <div className="vm-detail-page">
     <nav className="vm-detail-breadcrumb" aria-label={t('instance.detail.breadcrumb')}>
@@ -236,11 +244,16 @@ function InstanceDetail({ instanceId }) {
             {(tabData || []).map((group) => <tr key={group.id}><td>{group.name}</td><td>{value(group.description)}</td><td>{group.security_group_rules?.length ?? 0}</td></tr>)}
           </tbody></table></div>
         </TabState></>}
-      {tab === 'activity' && <><h3>{t('instance.detail.activity')}</h3><TabState state={current} t={t} empty={tabData?.length === 0 && 'instance.detail.noActivity'} errorKey="instance.detail.activityError">
+      {tab === 'activity' && <><h3>{t('instance.detail.activity')}</h3><TabState state={current} t={t} empty={tabData?.entries?.length === 0 && 'instance.detail.noActivity'} errorKey="instance.detail.activityError">
         <div className="vm-detail-table"><table className="tbl"><thead><tr>{['time', 'action', 'user', 'result', 'details'].map((key) => <th key={key}>{t(`instance.detail.${key}`)}</th>)}</tr></thead><tbody>
-          {(tabData || []).map((event, index) => <tr key={`${event.ts}-${index}`}><td>{fmtDate(event.ts)}</td><td>{activityLabel(t, 'action', event.action)}</td><td>{value(event.user)}</td><td>{activityLabel(t, 'result', event.result)}</td>
-            <td>{event.details?.map((item) => [item.port_id, item.fixed_ip].filter(Boolean).join(' / ')).join(', ') || '—'}</td></tr>)}
-        </tbody></table></div></TabState></>}
+          {(tabData?.entries || []).map((event, index) => {
+            const formatted = formatActivity(event, t);
+            return <tr key={`${event.ts}-${index}`}><td>{fmtDate(event.ts)}</td><td>{formatted.action || value(event.action)}</td><td>{value(event.user)}</td><td>{formatted.result}</td>
+              <td>{formatted.details || '—'}</td></tr>;
+          })}
+        </tbody></table></div>
+        {tabData?.next_offset != null && <button className="btn ghost sm" disabled={activityMoreBusy} onClick={loadMoreActivity}>{t('instance.detail.loadMore')}</button>}
+      </TabState></>}
     </section>
     <InstanceActionDialogs actions={actions} />
     {attachVolumeOpen && <Modal title={t('instance.detail.attachVolume')} onClose={() => !volumeBusy && setAttachVolumeOpen(false)}

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { osFetch, OSError, MOCK } from '../openstack.js';
 import { fetchOwned, isUsableImage, owned } from '../projectScope.js';
+import { setInstanceAudit } from '../audit.js';
 
 const router = Router();
 
@@ -58,14 +59,15 @@ router.post('/volumes/:id/attach', async (req, res, next) => {
   try {
     const { server_id } = req.body || {};
     if (!server_id) throw new OSError(400, 'Chưa chọn máy ảo');
-    await fetchOwned(req.session.os, 'volume', `/volumes/${req.params.id}`, 'volume');
-    await fetchOwned(req.session.os, 'compute', `/servers/${server_id}`, 'server');
+    const volume = await fetchOwned(req.session.os, 'volume', `/volumes/${req.params.id}`, 'volume');
+    const server = await fetchOwned(req.session.os, 'compute', `/servers/${server_id}`, 'server');
+    setInstanceAudit(res, { action: 'instance.volume.attach', resourceId: server.id,
+      resourceName: server.name, result: 'accepted',
+      details: { volume_id: volume.id, volume_name: volume.name || null } });
     const data = await osFetch(req.session.os, 'compute', `/servers/${server_id}/os-volume_attachments`, {
       method: 'POST',
       body: { volumeAttachment: { volumeId: req.params.id } },
     });
-    res.locals.instanceAuditId = server_id;
-    res.locals.instanceAuditAction = 'instance.attach_volume';
     console.log(`[volume] ATTACH volume=${req.params.id} -> server=${server_id} by=${req.session.os.user.name}`);
     res.json(data);
   } catch (e) { next(e); }
@@ -76,13 +78,15 @@ router.post('/volumes/:id/detach', async (req, res, next) => {
     const { server_id } = req.body || {};
     if (!server_id) throw new OSError(400, 'Thiếu server_id');
     const volume = await fetchOwned(req.session.os, 'volume', `/volumes/${req.params.id}`, 'volume');
-    await fetchOwned(req.session.os, 'compute', `/servers/${server_id}`, 'server');
+    const server = await fetchOwned(req.session.os, 'compute', `/servers/${server_id}`, 'server');
     if (!volume.attachments?.some((attachment) => attachment.server_id === server_id)) {
       throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
     }
+    setInstanceAudit(res, { action: 'instance.volume.detach', resourceId: server.id,
+      resourceName: server.name, result: 'accepted',
+      details: { volume_id: volume.id, volume_name: volume.name || null,
+        device: volume.attachments.find((item) => item.server_id === server_id)?.device || null } });
     await osFetch(req.session.os, 'compute', `/servers/${server_id}/os-volume_attachments/${req.params.id}`, { method: 'DELETE' });
-    res.locals.instanceAuditId = server_id;
-    res.locals.instanceAuditAction = 'instance.detach_volume';
     console.log(`[volume] DETACH volume=${req.params.id} <- server=${server_id} by=${req.session.os.user.name}`);
     res.json({ ok: true });
   } catch (e) { next(e); }
@@ -108,8 +112,15 @@ router.post('/snapshots', async (req, res, next) => {
   try {
     const { volume_id, name } = req.body || {};
     if (!volume_id || !name) throw new OSError(400, 'Thiếu volume hoặc tên snapshot');
-    await fetchOwned(req.session.os, 'volume', `/volumes/${volume_id}`, 'volume');
+    const volume = await fetchOwned(req.session.os, 'volume', `/volumes/${volume_id}`, 'volume');
+    const servers = [...new Set((volume.attachments || []).map((item) => item.server_id).filter(Boolean))];
+    const server = servers.length === 1
+      ? await fetchOwned(req.session.os, 'compute', `/servers/${servers[0]}`, 'server').catch(() => null) : null;
+    if (server) setInstanceAudit(res, { action: 'instance.snapshot.create',
+      resourceId: server.id, resourceName: server.name, result: 'accepted',
+      details: { snapshot_name: name, volume_id: volume.id } });
     const data = await osFetch(req.session.os, 'volume', '/snapshots', { method: 'POST', body: { snapshot: { volume_id, name, force: true } } });
+    if (server && data?.snapshot?.id) res.locals.instanceAudit.details.snapshot_id = data.snapshot.id;
     console.log(`[volume] SNAPSHOT volume=${volume_id} name=${name} by=${req.session.os.user.name}`);
     res.json(data);
   } catch (e) { next(e); }

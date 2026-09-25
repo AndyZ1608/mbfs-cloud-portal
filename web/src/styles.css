@@ -710,6 +710,8 @@ html[data-theme="dark"] .toast { background: #0b1220; }
 .vm-detail-table .mono { font-size: 12px; overflow-wrap: anywhere; }
 .vm-detail-error { border: 1px solid var(--err); background: var(--err-bg); color: var(--err); border-radius: 8px; padding: 18px; }
 .vm-detail-error span { display: block; margin-top: 6px; font-size: 12px; }
+.audit-details { min-width: 180px; max-width: 340px; overflow-wrap: anywhere; }
+.audit-details > span, .audit-details > small { display: block; margin-top: 3px; }
 @media (max-width: 900px) { .vm-detail-fields { grid-template-columns: 1fr; } }
 
 @media (max-width: 700px) {

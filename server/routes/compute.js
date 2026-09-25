@@ -4,7 +4,7 @@ import { traceNovaConsole } from '../consoleDiagnostics.js';
 import { changeInstancePassword } from '../passwordChange.js';
 import { assertOwned, fetchOwned, fetchUsableImage, owned } from '../projectScope.js';
 import { attachInterface, createServerWithInterfaces, prepareInterfaces } from '../instanceInterfaces.js';
-import { listInstanceAudit } from '../audit.js';
+import { addInstanceAudit, instanceActionCode, listInstanceAudit, setInstanceAudit } from '../audit.js';
 
 const router = Router();
 
@@ -24,7 +24,7 @@ router.post('/servers', async (req, res, next) => {
     if (!name || !flavorRef || !imageRef) {
       throw new OSError(400, 'Thiếu thông tin: tên, flavor và image là bắt buộc');
     }
-    await fetchUsableImage(sess, imageRef);
+    const image = await fetchUsableImage(sess, imageRef);
     if (req.body?.networks !== undefined || req.body?.security_groups !== undefined) {
       throw new OSError(400, 'Dùng danh sách interfaces; Security Group mặc định do CMP xác định.', 'interface_contract_invalid');
     }
@@ -56,7 +56,6 @@ router.post('/servers', async (req, res, next) => {
     }
 
     const created = [];
-    const interfaceAudit = [];
     for (let index = 0; index < n; index++) {
       try {
         // A Neutron Port belongs to one server only; a multi-create needs a fresh set per VM.
@@ -64,18 +63,17 @@ router.post('/servers', async (req, res, next) => {
           ...server, name: n > 1 ? `${name}-${index + 1}` : name,
         }, prepared);
         created.push(result.data);
-        result.ports.forEach((port, at) => interfaceAudit.push({
-          instance_id: result.data?.server?.id || null, port_id: port.id,
-          network_id: prepared.specs[at].network_id, subnet_id: prepared.specs[at].subnet_id,
-          fixed_ip: port.fixed_ips?.[0]?.ip_address || null,
-        }));
+        addInstanceAudit(res, { action: 'instance.create', resourceId: result.data.server.id,
+          resourceName: result.data.server.name || (n > 1 ? `${name}-${index + 1}` : name),
+          result: 'accepted', status: 202,
+          details: { image_id: imageRef, image_name: image.name || null,
+            flavor_id: flavorRef, interface_count: result.ports.length } });
       } catch (error) {
         if (!created.length) throw error;
         console.error(`[compute] Partial VM batch project=${sess.project.id} servers=${created.map((item) => item?.server?.id).join(',')}`);
         throw new OSError(502, 'Một số VM đã được tạo; kiểm tra danh sách trước khi thử lại.', 'interface_batch_partial_failure');
       }
     }
-    res.locals.interfaceAudit = interfaceAudit;
     console.log(`[compute] CREATE server name=${name} x${n} by=${sess.user.name}`);
     res.status(202).json(n === 1 ? created[0] : { server: created[0]?.server, servers: created.map((item) => item?.server) });
   } catch (e) { next(e); }
@@ -91,14 +89,21 @@ router.get('/servers/:id', async (req, res, next) => {
 router.get('/servers/:id/activity', async (req, res, next) => {
   try {
     await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
-    res.json({ entries: listInstanceAudit({ projectId: req.session.os.project.id, instanceId: req.params.id }) });
+    const limit = Number.isFinite(Number(req.query.limit))
+      ? Math.max(1, Math.min(Math.floor(Number(req.query.limit)) || 50, 100)) : 50;
+    const offset = Number.isFinite(Number(req.query.offset))
+      ? Math.max(0, Math.min(Math.floor(Number(req.query.offset)), 5000)) : 0;
+    const rows = listInstanceAudit({ projectId: req.session.os.project.id, instanceId: req.params.id,
+      limit: limit + 1, offset });
+    res.json({ entries: rows.slice(0, limit), next_offset: rows.length > limit ? offset + limit : null });
   } catch (error) { next(error); }
 });
 
 router.post('/servers/:id/change-password', async (req, res, next) => {
   try {
     const result = await changeInstancePassword(req.session.os, req.params.id, req.body?.password);
-    res.locals.passwordChangeInstanceName = result.instanceName;
+    setInstanceAudit(res, { action: 'instance.password.change', resourceId: req.params.id,
+      resourceName: result.instanceName, result: 'accepted' });
     res.setHeader('Cache-Control', 'no-store');
     res.status(202).json({ success: true });
   } catch (e) { next(e); }
@@ -139,9 +144,11 @@ export function resizeError(error) {
 // Đổi tên máy ảo
 router.put('/servers/:id', async (req, res, next) => {
   try {
-    await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
+    const previous = await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
     const name = (req.body?.name || '').trim();
     if (!name) throw new OSError(400, 'Tên mới không được trống');
+    setInstanceAudit(res, { action: 'instance.rename', resourceId: previous.id, resourceName: previous.name,
+      details: { old_name: previous.name, new_name: name } });
     const data = await osFetch(req.session.os, 'compute', `/servers/${req.params.id}`, {
       method: 'PUT', body: { server: { name } },
     });
@@ -153,10 +160,13 @@ router.put('/servers/:id', async (req, res, next) => {
 // Cài lại hệ điều hành (rebuild) — giữ nguyên IP, ID máy, volume gắn kèm
 router.post('/servers/:id/rebuild', async (req, res, next) => {
   try {
-    await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
+    const previous = await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
     const { imageRef, name, user_data } = req.body || {};
     if (!imageRef) throw new OSError(400, 'Chọn image để cài lại');
-    await fetchUsableImage(req.session.os, imageRef);
+    const image = await fetchUsableImage(req.session.os, imageRef);
+    setInstanceAudit(res, { action: 'instance.rebuild', resourceId: previous.id,
+      resourceName: previous.name, result: 'accepted',
+      details: { image_id: imageRef, image_name: image.name || null } });
     const rebuild = { imageRef };
     if (name) rebuild.name = name;
     if (user_data && String(user_data).trim()) rebuild.user_data = Buffer.from(String(user_data)).toString('base64');
@@ -178,11 +188,16 @@ router.get('/servers/:id/interfaces', async (req, res, next) => {
 router.post('/servers/:id/interfaces', async (req, res, next) => {
   try {
     const sess = req.session.os;
-    await fetchOwned(sess, 'compute', `/servers/${req.params.id}`, 'server');
+    const server = await fetchOwned(sess, 'compute', `/servers/${req.params.id}`, 'server');
+    setInstanceAudit(res, { action: 'instance.interface.attach', resourceId: server.id,
+      resourceName: server.name, result: 'accepted' });
     const { data, port } = await attachInterface(sess, req.params.id, req.body);
-    res.locals.interfaceAudit = [{ instance_id: req.params.id, port_id: port.id,
-      network_id: port.network_id, subnet_id: port.fixed_ips?.[0]?.subnet_id || null,
-      fixed_ip: port.fixed_ips?.[0]?.ip_address || null }];
+    setInstanceAudit(res, { action: 'instance.interface.attach', resourceId: server.id,
+      resourceName: server.name, result: 'accepted', details: {
+        port_id: port.id, network_id: port.network_id,
+        subnet_id: port.fixed_ips?.[0]?.subnet_id || null,
+        ip_address: port.fixed_ips?.[0]?.ip_address || null, mac_address: port.mac_address || null,
+      } });
     console.log(`[compute] ATTACH nic server=${req.params.id} port=${port.id} net=${port.network_id} by=${sess.user.name}`);
     res.json(data);
   } catch (e) { next(e); }
@@ -190,13 +205,16 @@ router.post('/servers/:id/interfaces', async (req, res, next) => {
 
 router.delete('/servers/:id/interfaces/:portId', async (req, res, next) => {
   try {
-    await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
+    const server = await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
     const port = await fetchOwned(req.session.os, 'network', `/v2.0/ports/${req.params.portId}`, 'port');
     if (port.device_id !== req.params.id) throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
+    setInstanceAudit(res, { action: 'instance.interface.detach', resourceId: server.id,
+      resourceName: server.name, result: 'accepted', details: {
+        port_id: port.id, network_id: port.network_id,
+        subnet_id: port.fixed_ips?.[0]?.subnet_id || null,
+        ip_address: port.fixed_ips?.[0]?.ip_address || null, mac_address: port.mac_address || null,
+      } });
     await osFetch(req.session.os, 'compute', `/servers/${req.params.id}/os-interface/${req.params.portId}`, { method: 'DELETE' });
-    res.locals.interfaceAudit = [{ instance_id: req.params.id, port_id: port.id,
-      network_id: port.network_id, subnet_id: port.fixed_ips?.[0]?.subnet_id || null,
-      fixed_ip: port.fixed_ips?.[0]?.ip_address || null }];
     console.log(`[compute] DETACH nic server=${req.params.id} port=${req.params.portId} by=${req.session.os.user.name}`);
     res.json({ ok: true });
   } catch (e) { next(e); }
@@ -206,11 +224,13 @@ router.delete('/servers/:id/interfaces/:portId', async (req, res, next) => {
 router.post('/servers/:id/security-groups', async (req, res, next) => {
   try {
     const { add = [], remove = [] } = req.body || {};
-    await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
+    const server = await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
     const groups = owned((await osFetch(req.session.os, 'network', '/v2.0/security-groups')).security_groups, req.session.os);
     if ([...add, ...remove].some((name) => !groups.some((group) => group.name === name))) {
       throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
     }
+    setInstanceAudit(res, { action: 'instance.security_groups.change', resourceId: server.id,
+      resourceName: server.name, details: { added: add, removed: remove } });
     for (const name of remove) {
       await osFetch(req.session.os, 'compute', `/servers/${req.params.id}/action`, { method: 'POST', body: { removeSecurityGroup: { name } } });
     }
@@ -227,6 +247,7 @@ router.post('/servers/:id/action', async (req, res, next) => {
     const { action, name, flavorRef } = req.body || {};
     const resizeLifecycle = RESIZE_ACTIONS.has(action);
     let body;
+    let server;
     if (action === 'snapshot') {
       if (!name) throw new OSError(400, 'Thiếu tên snapshot');
       body = { createImage: { name } };
@@ -242,23 +263,28 @@ router.post('/servers/:id/action', async (req, res, next) => {
       if (!req.session.os.roles?.some((role) => role === 'member' || role === 'admin')) {
         throw new OSError(403, 'Cần role member hoặc admin để thao tác resize VM.', 'permission_denied');
       }
-      let server;
       try {
         server = (await osFetch(req.session.os, 'compute', `/servers/${encodeURIComponent(req.params.id)}`))?.server;
       } catch (error) { throw resizeError(error); }
       if (server?.id !== req.params.id) throw new OSError(404, 'Không tìm thấy VM trong project hiện tại.', 'server_not_found');
       assertOwned(server, req.session.os);
-      res.locals.resizeAudit = {
-        action, instance_id: server.id, old_flavor: server.flavor?.id || null,
-        ...(action === 'resize' ? {
-          requested_flavor: /^[A-Za-z0-9_.-]{1,128}$/.test(flavorRef) ? flavorRef : null,
-        } : {}),
-      };
-      if (action === 'resize' && flavorRef === server.flavor?.id) {
-        throw new OSError(400, 'Chọn flavor khác cấu hình hiện tại.', 'same_flavor');
-      }
     } else {
-      await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
+      server = await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
+    }
+    const oldFlavor = server.flavor?.original_name || server.flavor?.name || server.flavor?.id || null;
+    const newFlavor = action === 'resize' && /^[A-Za-z0-9_.-]{1,128}$/.test(flavorRef)
+      ? flavorRef : null;
+    const auditEvent = { action: instanceActionCode(action), resourceId: server.id,
+      resourceName: server.name, result: 'accepted',
+      details: action === 'resize' ? { old_flavor: oldFlavor, new_flavor: newFlavor }
+        : resizeLifecycle ? { old_flavor: oldFlavor }
+          : action === 'snapshot' ? { snapshot_name: name } : {},
+      legacy: resizeLifecycle ? { old_flavor: server.flavor?.id || null,
+        ...(action === 'resize' ? { requested_flavor: newFlavor } : {}) } : {},
+    };
+    setInstanceAudit(res, auditEvent);
+    if (action === 'resize' && flavorRef === server.flavor?.id) {
+      throw new OSError(400, 'Chọn flavor khác cấu hình hiện tại.', 'same_flavor');
     }
 
     let data;
@@ -270,6 +296,9 @@ router.post('/servers/:id/action', async (req, res, next) => {
       if (resizeLifecycle) throw resizeError(error);
       throw error;
     }
+    if (action === 'snapshot' && typeof data?.image_id === 'string') {
+      auditEvent.details.image_id = data.image_id;
+    }
     console.log(`[compute] ACTION ${action} server=${req.params.id} by=${req.session.os.user.name}`);
     if (resizeLifecycle) return res.status(202).json({ success: true, accepted: true });
     res.json(data || { ok: true });
@@ -278,7 +307,9 @@ router.post('/servers/:id/action', async (req, res, next) => {
 
 router.delete('/servers/:id', async (req, res, next) => {
   try {
-    await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
+    const server = await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
+    setInstanceAudit(res, { action: 'instance.delete', resourceId: server.id,
+      resourceName: server.name, result: 'accepted' });
     await osFetch(req.session.os, 'compute', `/servers/${req.params.id}`, { method: 'DELETE' });
     console.log(`[compute] DELETE server=${req.params.id} by=${req.session.os.user.name}`);
     res.json({ ok: true });
@@ -287,7 +318,8 @@ router.delete('/servers/:id', async (req, res, next) => {
 
 router.post('/servers/:id/console', async (req, res, next) => {
   try {
-    await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
+    const server = await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
+    setInstanceAudit(res, { action: 'instance.console.open', resourceId: server.id, resourceName: server.name });
     const data = await osFetch(req.session.os, 'compute', `/servers/${req.params.id}/remote-consoles`, {
       method: 'POST',
       body: { remote_console: { protocol: 'vnc', type: 'novnc' } },

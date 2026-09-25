@@ -9,6 +9,7 @@ process.env.DATA_ENCRYPTION_KEY = 'test-only-encryption-material';
 test('HTTP VM create and existing-VM attach use scoped Neutron ports; foreign networks are rejected', async (t) => {
   const { createApp } = await import('../app.js');
   const { mockFetch } = await import('../mock.js');
+  const { listAudit } = await import('../audit.js');
   const app = createApp({ sessionStore: null, sessionSecret: 'instance-interface-http-test-secret' }).listen(0);
   await new Promise((resolve) => app.once('listening', resolve));
   t.after(() => new Promise((resolve) => app.close(resolve)));
@@ -38,6 +39,12 @@ test('HTTP VM create and existing-VM attach use scoped Neutron ports; foreign ne
   const created = await request('/servers', 'POST', payload);
   assert.equal(created.status, 202);
   const id = (await created.json()).server.id;
+  const createAudit = listAudit({ projectId: 'p-demo', user: 'admin', limit: 30 })
+    .find((entry) => entry.action === 'instance.create' && entry.resource_id === id);
+  assert.equal(createAudit.result, 'accepted');
+  assert.equal(createAudit.resource_name, payload.name);
+  assert.equal(createAudit.project_id, 'p-demo');
+  assert.equal(createAudit.details.interface_count, 2);
   t.after(() => mockFetch('compute', 'DELETE', `/servers/${id}`, null, 'p-demo'));
   const attached = (await (await request(`/servers/${id}/interfaces`)).json()).interfaces;
   assert.equal(attached.length, 2);
@@ -62,6 +69,9 @@ test('HTTP VM create and existing-VM attach use scoped Neutron ports; foreign ne
   const batchServers = (await batch.json()).servers;
   assert.equal(batchServers.length, 2);
   assert.notEqual(batchServers[0].id, batchServers[1].id);
+  const batchAudit = listAudit({ projectId: 'p-demo', user: 'admin', limit: 30 })
+    .filter((entry) => entry.action === 'instance.create' && batchServers.some((server) => server.id === entry.resource_id));
+  assert.equal(batchAudit.length, 2);
   for (const server of batchServers) {
     const serverPorts = mockFetch('network', 'GET', `/v2.0/ports?device_id=${server.id}`, null, 'p-demo').ports;
     assert.equal(serverPorts.length, 1);
@@ -73,10 +83,18 @@ test('HTTP VM create and existing-VM attach use scoped Neutron ports; foreign ne
   const add = await request(`/servers/${existing.id}/interfaces`, 'POST', { network_id: b.id, subnet_id: b.subnet_details[0].id, ip_address: null });
   assert.equal(add.status, 200);
   const portId = (await add.json()).interfaceAttachment.port_id;
+  const attachAudit = listAudit({ projectId: 'p-demo', user: 'admin', limit: 10 })
+    .find((entry) => entry.action === 'instance.interface.attach' && entry.resource_id === existing.id);
+  assert.equal(attachAudit.details.port_id, portId);
+  assert.equal(attachAudit.details.network_id, b.id);
   const port = mockFetch('network', 'GET', `/v2.0/ports/${portId}`, null, 'p-demo').port;
   assert.equal(port.device_id, existing.id);
   assert.deepEqual(port.security_groups, [defaultSg.id]);
-  assert.equal((await request(`/servers/${existing.id}/interfaces/${portId}`, 'DELETE')).status, 200);
+  const detach = await request(`/servers/${existing.id}/interfaces/${portId}`, 'DELETE');
+  assert.equal(detach.status, 200);
+  await detach.json();
+  assert.ok(listAudit({ projectId: 'p-demo', user: 'admin', limit: 10 })
+    .some((entry) => entry.action === 'instance.interface.detach' && entry.details?.port_id === portId));
   assert.equal(mockFetch('network', 'GET', `/v2.0/ports/${portId}`, null, 'p-demo').port.device_id, '');
   mockFetch('network', 'DELETE', `/v2.0/ports/${portId}`, null, 'p-demo');
 });

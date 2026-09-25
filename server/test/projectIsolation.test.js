@@ -67,7 +67,22 @@ test('admin visibility cannot cross the selected CMP project boundary', async (t
   const availableVolume = (await read('/volumes', cookie)).volumes.find((volume) => volume.status === 'available');
   assert.ok(availableVolume);
   assert.equal((await request(`/volumes/${availableVolume.id}/attach`, cookie, 'POST', { server_id: serverA.id })).status, 200);
-  assert.ok((await read(`/servers/${serverA.id}/activity`, cookie)).entries.some((event) => event.action === 'instance.attach_volume'));
+  assert.ok((await read(`/servers/${serverA.id}/activity`, cookie)).entries.some((event) => event.action === 'instance.volume.attach'));
+  // The mock completes Nova/Cinder volume attachment asynchronously.
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const current = (await read('/volumes', cookie)).volumes.find((volume) => volume.id === availableVolume.id);
+    if (current.attachments?.some((attachment) => attachment.server_id === serverA.id)) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  const snapshot = await request('/snapshots', cookie, 'POST', { volume_id: availableVolume.id, name: 'vm-audit-snapshot' });
+  assert.equal(snapshot.status, 200);
+  await snapshot.json();
+  assert.ok((await read(`/servers/${serverA.id}/activity`, cookie)).entries.some((event) => event.action === 'instance.snapshot.create'));
+  const detach = await request(`/volumes/${availableVolume.id}/detach`, cookie, 'POST', { server_id: serverA.id });
+  assert.equal(detach.status, 200);
+  await detach.json();
+  assert.ok((await read(`/servers/${serverA.id}/activity`, cookie)).entries.some((event) =>
+    event.action === 'instance.volume.detach' && event.details.volume_id === availableVolume.id));
 
   const networksA = (await read('/networks', cookie)).networks;
   assert.ok(networksA.length > 0);

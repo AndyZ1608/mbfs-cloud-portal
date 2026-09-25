@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { osFetch, OSError } from '../openstack.js';
 import { currentProjectId, fetchOwned, isOwned, isUsableNetwork, owned, projectQuery } from '../projectScope.js';
 import { createNetwork } from '../networkCreation.js';
+import { setInstanceAudit } from '../audit.js';
 
 const router = Router();
 
@@ -212,9 +213,9 @@ router.post('/floatingips/:id/associate', async (req, res, next) => {
   try {
     const sess = req.session.os;
     const { server_id, port_id } = req.body || {};
-    await fetchOwned(sess, 'network', `/v2.0/floatingips/${req.params.id}`, 'floatingip');
+    const fip = await fetchOwned(sess, 'network', `/v2.0/floatingips/${req.params.id}`, 'floatingip');
     let portId = port_id;
-    if (server_id) await fetchOwned(sess, 'compute', `/servers/${server_id}`, 'server');
+    let server = server_id ? await fetchOwned(sess, 'compute', `/servers/${server_id}`, 'server') : null;
     if (!portId) {
       if (!server_id) throw new OSError(400, 'Chưa chọn máy ảo hoặc port');
       const pr = await osFetch(sess, 'network', `/v2.0/ports?device_id=${encodeURIComponent(server_id)}`);
@@ -224,10 +225,17 @@ router.post('/floatingips/:id/associate', async (req, res, next) => {
     }
     const port = await fetchOwned(sess, 'network', `/v2.0/ports/${portId}`, 'port');
     if (server_id && port.device_id !== server_id) throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
+    if (!server && (port.device_owner || '').startsWith('compute') && port.device_id) {
+      server = await fetchOwned(sess, 'compute', `/servers/${port.device_id}`, 'server').catch(() => null);
+    }
+    const auditEvent = server ? { action: 'instance.floating_ip.associate',
+      resourceId: server.id, resourceName: server.name,
+      details: { floating_ip: fip.floating_ip_address, port_id: port.id,
+        fixed_ip: port.fixed_ips?.length === 1 ? port.fixed_ips[0].ip_address : null } } : null;
+    if (auditEvent) setInstanceAudit(res, auditEvent);
     const data = await osFetch(sess, 'network', `/v2.0/floatingips/${req.params.id}`, { method: 'PUT', body: { floatingip: { port_id: portId } } });
-    if (server_id) {
-      res.locals.instanceAuditId = server_id;
-      res.locals.instanceAuditAction = 'instance.associate_floating_ip';
+    if (auditEvent && data?.floatingip?.fixed_ip_address) {
+      auditEvent.details.fixed_ip = data.floatingip.fixed_ip_address;
     }
     console.log(`[network] ASSOCIATE fip=${req.params.id} -> ${server_id ? 'server=' + server_id : 'port=' + portId} by=${sess.user.name}`);
     res.json(data);
@@ -236,7 +244,15 @@ router.post('/floatingips/:id/associate', async (req, res, next) => {
 
 router.post('/floatingips/:id/disassociate', async (req, res, next) => {
   try {
-    await fetchOwned(req.session.os, 'network', `/v2.0/floatingips/${req.params.id}`, 'floatingip');
+    const sess = req.session.os;
+    const fip = await fetchOwned(sess, 'network', `/v2.0/floatingips/${req.params.id}`, 'floatingip');
+    const port = fip.port_id ? await fetchOwned(sess, 'network', `/v2.0/ports/${fip.port_id}`, 'port').catch(() => null) : null;
+    const server = port?.device_id && (port.device_owner || '').startsWith('compute')
+      ? await fetchOwned(sess, 'compute', `/servers/${port.device_id}`, 'server').catch(() => null) : null;
+    if (server) setInstanceAudit(res, { action: 'instance.floating_ip.disassociate',
+      resourceId: server.id, resourceName: server.name,
+      details: { floating_ip: fip.floating_ip_address, fixed_ip: fip.fixed_ip_address || null,
+        port_id: fip.port_id } });
     const data = await osFetch(req.session.os, 'network', `/v2.0/floatingips/${req.params.id}`, { method: 'PUT', body: { floatingip: { port_id: null } } });
     res.json(data);
   } catch (e) { next(e); }

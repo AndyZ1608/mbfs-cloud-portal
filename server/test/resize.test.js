@@ -115,8 +115,8 @@ test('CMP resize workflow returns accepted contract, enforces scope, and audits 
   const audit = listAudit({ projectId: 'p-demo', user: 'resize-feature-test', limit: 30 })
     .filter((entry) => entry.action?.startsWith('instance.') && entry.action.includes('resize')).slice(0, 5);
   assert.deepEqual(audit.map((entry) => [entry.action, entry.result]), [
-    ['instance.revert_resize', 'reverted'], ['instance.confirm_resize', 'success'],
-    ['instance.resize', 'failure'], ['instance.resize', 'accepted'], ['instance.resize', 'accepted'],
+    ['instance.resize.revert', 'accepted'], ['instance.resize.confirm', 'accepted'],
+    ['instance.resize.request', 'failure'], ['instance.resize.request', 'accepted'], ['instance.resize.request', 'accepted'],
   ]);
   assert.equal(audit[3].requested_flavor, targetSecond.id);
   assert.equal(audit[4].old_flavor, firstOriginalFlavor);
