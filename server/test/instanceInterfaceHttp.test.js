@@ -23,7 +23,9 @@ test('HTTP VM create and existing-VM attach use scoped Neutron ports; foreign ne
   assert.equal(login.status, 200);
   cookie = login.headers.get('set-cookie').split(';')[0];
   const networks = (await (await request('/available-networks')).json()).networks.filter((network) => network.project_id === 'p-demo');
-  const image = (await (await request('/images')).json()).images[0];
+  const catalog = (await (await request('/images')).json()).images;
+  const image = catalog.find((item) => item.os_distro === 'rocky');
+  assert.ok(image && catalog.some((item) => item.visibility === 'public'));
   const [a, b] = networks.filter((network) => network.subnet_details?.length).slice(0, 2);
   assert.ok(a && b);
   const fixed = '10.10.10.60';
@@ -39,6 +41,15 @@ test('HTTP VM create and existing-VM attach use scoped Neutron ports; foreign ne
   const created = await request('/servers', 'POST', payload);
   assert.equal(created.status, 202);
   const id = (await created.json()).server.id;
+  assert.equal(mockFetch('compute', 'GET', `/servers/${id}`, null, 'p-demo').server.image.id, image.id);
+  const volumeBoot = await request('/servers', 'POST', {
+    ...payload, name: 'rocky-volume-boot', boot_volume_gb: 40,
+    interfaces: [{ ...interfaces[0], ip_address: null }],
+  });
+  assert.equal(volumeBoot.status, 202);
+  const volumeBootId = (await volumeBoot.json()).server.id;
+  assert.equal(mockFetch('compute', 'GET', `/servers/${volumeBootId}`, null, 'p-demo').server.image.id, image.id);
+  t.after(() => mockFetch('compute', 'DELETE', `/servers/${volumeBootId}`, null, 'p-demo'));
   const createAudit = listAudit({ projectId: 'p-demo', user: 'admin', limit: 30 })
     .find((entry) => entry.action === 'instance.create' && entry.resource_id === id);
   assert.equal(createAudit.result, 'accepted');

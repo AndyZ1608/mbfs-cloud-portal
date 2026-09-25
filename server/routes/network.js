@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { osFetch, OSError } from '../openstack.js';
 import { currentProjectId, fetchOwned, isOwned, isUsableNetwork, owned, projectQuery } from '../projectScope.js';
 import { createNetwork } from '../networkCreation.js';
+import { editNetwork, loadNetworkEdit } from '../networkEdit.js';
 import { setInstanceAudit } from '../audit.js';
 
 const router = Router();
@@ -63,6 +64,23 @@ router.get('/external-networks', async (req, res, next) => {
 router.get('/networks/:id', async (req, res, next) => {
   try { res.json({ network: await fetchOwned(req.session.os, 'network', `/v2.0/networks/${req.params.id}`, 'network') }); }
   catch (error) { next(error); }
+});
+
+router.get('/networks/:id/edit', async (req, res, next) => {
+  try { res.json(await loadNetworkEdit(req.session.os, req.params.id)); }
+  catch (error) { next(error); }
+});
+
+router.patch('/networks/:id', async (req, res, next) => {
+  try {
+    const result = await editNetwork(req.session.os, req.params.id, req.body);
+    res.locals.networkAudits = result.events.map((event) => ({ ...event,
+      resourceId: result.network.id, resourceName: result.network.name }));
+    res.json({ network: result.network, subnets: result.subnets });
+  } catch (error) {
+    res.locals.networkAudits = [{ action: 'network.update', resourceId: req.params.id, details: {} }];
+    next(error);
+  }
 });
 
 // Tạo network + subnet, và gắn Router chỉ khi người dùng chọn Routed.

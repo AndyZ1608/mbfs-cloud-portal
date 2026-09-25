@@ -51,8 +51,30 @@ const RULES = [
   [/^POST \/lb$/, 'createLoadBalancer'],
   [/^DELETE \/lb\//, 'deleteLoadBalancer'],
 ];
-function actionLabel(e, t) {
+const NETWORK_ACTIONS = new Set([
+  'network.update', 'network.rename', 'subnet.update', 'subnet.gateway.update',
+  'subnet.dns.update', 'subnet.allocation_pool.update',
+  'network.routing.attach', 'network.routing.detach', 'network.routing.change',
+]);
+
+export function networkAuditDetails(event) {
+  if (event.resource_type !== 'network' || !NETWORK_ACTIONS.has(event.action)) return '';
+  const details = event.details && !Array.isArray(event.details) ? event.details : {};
+  if (event.action === 'network.rename' || event.action === 'subnet.update') {
+    return [details.subnet_id, details.old_name && details.new_name ? `${details.old_name} → ${details.new_name}` : ''].filter(Boolean).join(' · ');
+  }
+  if (event.action === 'subnet.gateway.update') {
+    return [details.subnet_id, `${details.old_gateway || '—'} → ${details.new_gateway || '—'}`].filter(Boolean).join(' · ');
+  }
+  if (event.action.startsWith('network.routing.')) {
+    return [details.subnet_id, `${details.old_router_id || '—'} → ${details.new_router_id || '—'}`].filter(Boolean).join(' · ');
+  }
+  return details.subnet_id || '';
+}
+
+export function actionLabel(e, t) {
   if (e.action === 'account.password.change') return t('account.auditAction');
+  if (e.resource_type === 'network' && NETWORK_ACTIONS.has(e.action)) return t(`network.audit.${e.action}`);
   const formatted = formatActivity(e, t);
   if (formatted.semantic) return formatted.action;
   const key = `${e.method} ${e.path}`;
@@ -80,7 +102,7 @@ export default function AuditLog() {
       if (resourceFilter === 'instance' && !formatted.semantic) return false;
       if (!s) return true;
       return [e.user, actionLabel(e, t), e.path, e.resource_name, e.resource_id,
-        e.project?.name, formatted.details].some((field) => (field || '').toLowerCase().includes(s));
+        e.project?.name, formatted.details, networkAuditDetails(e)].some((field) => (field || '').toLowerCase().includes(s));
     });
   }, [entries, q, t, resourceFilter]);
 
@@ -111,9 +133,9 @@ export default function AuditLog() {
                   <td className="audit-details">
                     {e.resource_name && <b>{e.resource_name}</b>}
                     {e.resource_id && <span className="mono dim">{e.resource_id}</span>}
-                    {formatted.details && <span>{formatted.details}</span>}
+                    {(formatted.details || networkAuditDetails(e)) && <span>{formatted.details || networkAuditDetails(e)}</span>}
                     {e.project?.name && <small>{t('common.project')}: {e.project.name}</small>}
-                    {!e.resource_name && !e.resource_id && !formatted.details && !e.project?.name && '—'}
+                    {!e.resource_name && !e.resource_id && !formatted.details && !networkAuditDetails(e) && !e.project?.name && '—'}
                   </td>
                   <td className="mono dim" style={{ wordBreak: 'break-all' }}>{e.path}</td>
                   <td>

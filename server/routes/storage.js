@@ -139,10 +139,20 @@ router.delete('/snapshots/:id', async (req, res, next) => {
 router.get('/images', async (req, res, next) => {
   try {
     const sess = req.session.os;
-    const data = await osFetch(sess, 'image', '/v2/images?limit=200&sort=created_at:desc');
+    let path = '/v2/images?limit=200&sort=created_at:desc';
+    const seen = new Set();
     const visible = [];
-    for (const image of data.images || []) {
-      if (await isUsableImage(sess, image)) visible.push(image);
+    while (path) {
+      if (seen.has(path)) throw new OSError(502, 'Glance image catalog pagination loop');
+      seen.add(path);
+      const data = await osFetch(sess, 'image', path);
+      for (const image of data.images || []) {
+        if (await isUsableImage(sess, image)) visible.push(image);
+      }
+      if (!data.next) break;
+      const next = new URL(data.next, 'http://glance.invalid');
+      if (!next.pathname.endsWith('/v2/images')) throw new OSError(502, 'Invalid Glance image catalog pagination path');
+      path = '/v2/images' + next.search;
     }
     res.json({ images: visible });
   } catch (e) { next(e); }

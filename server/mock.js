@@ -13,10 +13,10 @@ const flavors = [
 ];
 
 const images = [
-  { id: uid(), name: 'Ubuntu 22.04 LTS', status: 'active', visibility: 'public', size: 652804096, disk_format: 'qcow2', created_at: '2026-01-10T03:00:00Z' },
-  { id: uid(), name: 'Ubuntu 24.04 LTS', status: 'active', visibility: 'public', size: 701235200, disk_format: 'qcow2', created_at: '2026-03-02T03:00:00Z' },
-  { id: uid(), name: 'Rocky Linux 9', status: 'active', visibility: 'public', size: 1258291200, disk_format: 'qcow2', created_at: '2026-02-15T03:00:00Z' },
-  { id: uid(), owner: 'p-demo', name: 'Windows Server 2022', status: 'active', visibility: 'private', size: 12884901888, disk_format: 'qcow2', created_at: '2026-04-20T03:00:00Z' },
+  { id: uid(), name: 'Ubuntu 22.04 LTS', os_distro: 'ubuntu', os_version: '22.04', architecture: 'x86_64', status: 'active', visibility: 'public', size: 652804096, disk_format: 'qcow2', created_at: '2026-01-10T03:00:00Z' },
+  { id: uid(), name: 'Ubuntu 24.04 LTS', os_distro: 'ubuntu', os_version: '24.04', architecture: 'x86_64', status: 'active', visibility: 'public', size: 701235200, disk_format: 'qcow2', created_at: '2026-03-02T03:00:00Z' },
+  { id: uid(), name: 'Rocky Linux 9', os_distro: 'rocky', os_version: '9', architecture: 'x86_64', status: 'active', visibility: 'public', size: 1258291200, disk_format: 'qcow2', created_at: '2026-02-15T03:00:00Z' },
+  { id: uid(), owner: 'p-demo', name: 'Windows Server 2022', os_distro: 'windows', os_version: '2022', architecture: 'x86_64', status: 'active', visibility: 'private', size: 12884901888, disk_format: 'qcow2', created_at: '2026-04-20T03:00:00Z' },
 ];
 
 const netInternal = { id: uid(), name: 'net-internal', project_id: 'p-demo', status: 'ACTIVE', 'router:external': false, shared: false, subnets: [] };
@@ -123,7 +123,7 @@ export function mockFetch(svc, method, rawPath, body, projectId = 'p-demo') {
   if (svc === 'compute') return mockCompute(m, path, body, projectId);
   if (svc === 'network') return mockNetwork(m, path, q, body, projectId);
   if (svc === 'volume') return mockVolume(m, path, body, projectId);
-  if (svc === 'image') return mockImage(m, path, body, projectId);
+  if (svc === 'image') return mockImage(m, path, q, body, projectId);
   if (svc === 'lb') return mockLb(m, path, q, body, projectId);
   if (svc === 'identity') return mockIdentity(m, path, q, body);
   throw notFound();
@@ -377,13 +377,21 @@ function mockNetwork(m, path, q, body, projectId) {
     return { networks: list };
   }
   if (path === '/v2.0/networks' && m === 'POST') {
-    const n = { id: uid(), project_id: projectId, name: body.network.name, status: 'ACTIVE', 'router:external': false, shared: false, subnets: [] };
+    const n = { id: uid(), project_id: projectId, name: body.network.name, status: 'ACTIVE', 'router:external': false, shared: false, subnets: [], revision_number: 1 };
     networks.push(n);
     return { network: n };
   }
   if ((mt = path.match(/^\/v2\.0\/networks\/([^/]+)$/)) && m === 'GET') {
     const network = networks.find((n) => n.id === mt[1]);
     if (!network) throw notFound();
+    return { network };
+  }
+  if ((mt = path.match(/^\/v2\.0\/networks\/([^/]+)$/)) && m === 'PUT') {
+    const network = networks.find((n) => n.id === mt[1]);
+    if (!network) throw notFound();
+    if (Object.keys(body.network).some((key) => key !== 'name')) throw conflict('Unsupported network property');
+    Object.assign(network, body.network);
+    network.revision_number = (network.revision_number || 0) + 1;
     return { network };
   }
   if ((mt = path.match(/^\/v2\.0\/networks\/([^/]+)$/)) && m === 'DELETE') {
@@ -398,7 +406,7 @@ function mockNetwork(m, path, q, body, projectId) {
   }
   if (path === '/v2.0/subnets' && m === 'GET') return { subnets };
   if (path === '/v2.0/subnets' && m === 'POST') {
-    const s = { id: uid(), project_id: projectId, ip_version: 4, enable_dhcp: true, dns_nameservers: [], ...body.subnet };
+    const s = { id: uid(), project_id: projectId, ip_version: 4, enable_dhcp: true, dns_nameservers: [], allocation_pools: [], revision_number: 1, ...body.subnet };
     if (!s.gateway_ip) s.gateway_ip = s.cidr.replace(/\.\d+\/\d+$/, '.1');
     subnets.push(s);
     const n = networks.find((x) => x.id === s.network_id);
@@ -408,6 +416,14 @@ function mockNetwork(m, path, q, body, projectId) {
   if ((mt = path.match(/^\/v2\.0\/subnets\/([^/]+)$/)) && m === 'GET') {
     const subnet = subnets.find((s) => s.id === mt[1]);
     if (!subnet) throw notFound();
+    return { subnet };
+  }
+  if ((mt = path.match(/^\/v2\.0\/subnets\/([^/]+)$/)) && m === 'PUT') {
+    const subnet = subnets.find((s) => s.id === mt[1]);
+    if (!subnet) throw notFound();
+    if (Object.keys(body.subnet).some((key) => !['name', 'gateway_ip', 'dns_nameservers', 'allocation_pools'].includes(key))) throw conflict('Unsupported subnet property');
+    Object.assign(subnet, body.subnet);
+    subnet.revision_number = (subnet.revision_number || 0) + 1;
     return { subnet };
   }
   if ((mt = path.match(/^\/v2\.0\/subnets\/([^/]+)$/)) && m === 'DELETE') {
@@ -421,6 +437,7 @@ function mockNetwork(m, path, q, body, projectId) {
   }
   if (path === '/v2.0/ports' && m === 'GET') {
     let list = ports;
+    if (q.get('network_id')) list = list.filter((p) => p.network_id === q.get('network_id'));
     const dev = q.get('device_id');
     if (dev) list = list.filter((p) => p.device_id === dev);
     const ids = q.getAll('id');
@@ -573,7 +590,8 @@ function mockNetwork(m, path, q, body, projectId) {
   if ((mt = path.match(/^\/v2\.0\/routers\/([^/]+)\/add_router_interface$/)) && m === 'PUT') {
     const r = routers.find((x) => x.id === mt[1]);
     const s = subnets.find((x) => x.id === body.subnet_id);
-    if (!r || !s) throw notFound();
+    if (!r || !s || r.project_id !== projectId || s.project_id !== projectId) throw notFound();
+    if (ports.some((p) => p.device_owner === 'network:router_interface' && p.fixed_ips?.some((ip) => ip.subnet_id === s.id))) throw conflict('Subnet is already attached');
     ports.push({ id: uid(), project_id: projectId, network_id: s.network_id, device_id: r.id, device_owner: 'network:router_interface', fixed_ips: [{ ip_address: s.gateway_ip, subnet_id: s.id }], status: 'ACTIVE' });
     return { subnet_id: s.id, port_id: ports[ports.length - 1].id };
   }
@@ -659,9 +677,24 @@ function mockVolume(m, path, body, projectId) {
   throw notFound();
 }
 
-function mockImage(m, path, body, projectId) {
+function mockImage(m, path, q, body, projectId) {
   let mt;
-  if (m === 'GET' && path === '/v2/images') return { images };
+  if (m === 'GET' && path === '/v2/images') {
+    const sorted = [...images].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '') || a.id.localeCompare(b.id));
+    const marker = q.get('marker');
+    const markerIndex = marker ? sorted.findIndex((image) => image.id === marker) : -1;
+    if (marker && markerIndex < 0) throw notFound();
+    const start = markerIndex + 1;
+    const limit = Math.max(1, Math.min(Number(q.get('limit')) || 200, 500));
+    const page = sorted.slice(start, start + limit);
+    const result = { images: page };
+    if (start + limit < sorted.length) {
+      const nextQuery = new URLSearchParams(q);
+      nextQuery.set('marker', page.at(-1).id);
+      result.next = `/v2/images?${nextQuery}`;
+    }
+    return result;
+  }
   if ((mt = path.match(/^\/v2\/images\/([^/]+)$/)) && m === 'GET') {
     const image = images.find((item) => item.id === mt[1]);
     if (!image) throw notFound();

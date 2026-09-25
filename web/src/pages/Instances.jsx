@@ -9,6 +9,7 @@ import { validResizeFlavor, submitResizeOnce } from '../resize.js';
 import useInstanceActions from '../useInstanceActions.js';
 import { useI18n } from '../i18n/react.jsx';
 import NetworkInterfaceFields, { addInterface, newInterface, removeInterface, validInterfaces } from '../components/NetworkInterfaceFields.jsx';
+import OsCatalog from '../components/OsCatalog.jsx';
 
 export default function Instances() {
   const { t } = useI18n();
@@ -137,7 +138,7 @@ function CreateModal({ onClose, onDone }) {
         setF((x) => ({
           ...x,
           flavorRef: fl.flavors[0]?.id || '',
-          imageRef: im.images[0]?.id || '',
+          imageRef: '',
           interfaces: [newInterface(nets)],
           key_name: kp.keypairs[0]?.name || '',
         }));
@@ -156,6 +157,7 @@ function CreateModal({ onClose, onDone }) {
   async function submit() {
     if (submitting.current) return;
     if (!f.name.trim()) return toast(t('instances.nameRequired'), 'error');
+    if (!opts?.images.some((image) => image.id === f.imageRef)) return toast(t('instance.create.imageRequired'), 'error');
     if (!validInterfaces(f.interfaces, opts?.networks || [])) return toast(t('instance.networkInterfaces.required'), 'error');
     if (Number(f.count) > 1 && f.interfaces.some((item) => item.ip_address.trim())) return toast(t('errors.interface_batch_fixed_ip'), 'error');
     submitting.current = true;
@@ -180,7 +182,7 @@ function CreateModal({ onClose, onDone }) {
     <Modal title={t('instances.createTitle')} onClose={close} wide
       footer={<>
         <button className="btn ghost" onClick={close} disabled={busy}>{t('common.cancel')}</button>
-        <button className="btn primary" onClick={submit} disabled={busy || !opts}>{t(busy ? 'instances.creating' : 'instances.create')}</button>
+        <button className="btn primary" onClick={submit} disabled={busy || !opts || !f.imageRef}>{t(busy ? 'instances.creating' : 'instances.create')}</button>
       </>}>
       {!opts ? <p>{t('instances.loadingOptions')}</p> : (
         <div className="form-grid">
@@ -190,11 +192,8 @@ function CreateModal({ onClose, onDone }) {
           <Field label={t('instances.count')} hint={t('instances.countHint')}>
             <input type="number" min="1" max="10" value={f.count} onChange={(e) => setF({ ...f, count: e.target.value })} />
           </Field>
-          <Field label={t('instances.image')}>
-            <select value={f.imageRef} onChange={(e) => setF({ ...f, imageRef: e.target.value })}>
-              {opts.images.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
-            </select>
-          </Field>
+          <OsCatalog images={opts.images} selectedImageId={f.imageRef}
+            onSelect={(imageRef) => setF((current) => ({ ...current, imageRef }))} disabled={busy} />
           <Field label={t('instances.flavor')}>
             <select value={f.flavorRef} onChange={(e) => setF({ ...f, flavorRef: e.target.value })}>
               {opts.flavors.map((x) => <option key={x.id} value={x.id}>{x.name} — {x.vcpus} vCPU / {ramGB(x.ram)} / {x.disk} GB</option>)}

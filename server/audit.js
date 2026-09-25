@@ -118,7 +118,7 @@ export function auditMiddleware(req, res, next) {
         path: path.replace(/^\/api/, ''), status: res.statusCode,
         source_ip: clientIp(req), ms: Date.now() - t0,
       };
-      const events = res.locals.instanceAudits?.length ? res.locals.instanceAudits :
+      const events = res.locals.networkAudits?.length ? res.locals.networkAudits : res.locals.instanceAudits?.length ? res.locals.instanceAudits :
         [res.locals.instanceAudit || res.locals.accountAudit ||
           (path === '/api/account/change-password' ? {
             action: 'account.password.change', resourceId: os?.user?.id,
@@ -142,6 +142,10 @@ export function auditMiddleware(req, res, next) {
             resource_type: 'account', resource_id: event.resourceId || null,
             resource_name: event.resourceName || null, user_id: event.resourceId || null,
             details: event.details || {},
+          } : {}),
+          ...(event?.action?.startsWith('network.') || event?.action?.startsWith('subnet.') ? {
+            resource_type: 'network', resource_id: event.resourceId || null,
+            resource_name: event.resourceName || null, details: event.details || {},
           } : {}),
           ...(event?.legacy || {}),
           status: event?.status || base.status, result,

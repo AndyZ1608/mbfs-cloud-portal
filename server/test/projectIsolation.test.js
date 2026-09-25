@@ -96,7 +96,10 @@ test('admin visibility cannot cross the selected CMP project boundary', async (t
   assert.ok(available.some((network) => network.id === sharedB.id));
   assert.ok(!available.some((network) => [networkB.id, networkC.id].includes(network.id)));
   assert.ok(!(await read('/external-networks', cookie)).networks.some((network) => network.id === sharedB.id));
-  assert.ok(!(await read('/images', cookie)).images.some((image) => image.id === imageB.id));
+  const permittedImages = (await read('/images', cookie)).images;
+  assert.ok(!permittedImages.some((image) => image.id === imageB.id));
+  assert.ok(permittedImages.some((image) => image.visibility === 'public' && image.os_distro === 'ubuntu'));
+  assert.ok(permittedImages.some((image) => image.visibility === 'private' && image.owner === 'p-demo' && image.os_distro === 'windows'));
 
   for (const [path, id] of [
     ['/servers', serverB.id], ['/volumes', volumeB.id], ['/snapshots', snapshotB.id], ['/security-groups', sgB.id], ['/lb', lbB.id],

@@ -16,6 +16,7 @@ export function apiErrorMessage(data, status) {
     networkId: data?.resourceIds?.networkId || '—',
     subnetId: data?.resourceIds?.subnetId || '—',
   });
+  if (code === 'network_edit_partial_failure') return `${text('errors.network_edit_partial_failure')} (${data?.resourceIds?.networkId || '—'} / ${data?.resourceIds?.subnetId || '—'})`;
   if (code && resources.vi[`errors.${code}`]) return text(`errors.${code}`);
   if (status === 401) return text('errors.authentication_required');
   if (status === 403) return text('errors.permission_denied');

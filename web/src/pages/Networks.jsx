@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react';
 import { api } from '../api.js';
 import { Modal, Field, StatusBadge, ActionsMenu, toast, Empty, PageHead } from '../components/ui.jsx';
 import { useI18n } from '../i18n/react.jsx';
+import NetworkEditModal from '../components/NetworkEditModal.jsx';
 
 export default function Networks() {
   const { t } = useI18n();
@@ -11,6 +12,7 @@ export default function Networks() {
   const [creating, setCreating] = useState(false);
   const [creatingRouter, setCreatingRouter] = useState(false);
   const [ifaceFor, setIfaceFor] = useState(null);
+  const [editNetworkId, setEditNetworkId] = useState(null);
 
   async function load() {
     try {
@@ -56,7 +58,7 @@ export default function Networks() {
                   ))}</td>
                   <td className="dim">{t(n['router:external'] ? 'networks.external' : n.shared ? 'networks.shared' : 'networks.internal')}</td>
                   <td>{!n['router:external'] && (
-                    <ActionsMenu items={[{ label: t('networks.deleteNetwork'), danger: true, onClick: () => delNet(n) }]} />
+                    <ActionsMenu items={networkActionItems(n, () => setEditNetworkId(n.id), () => delNet(n), t)} />
                   )}</td>
                 </tr>
               ))}
@@ -91,10 +93,22 @@ export default function Networks() {
       </div>
 
       {creating && <CreateNetwork routers={routers} onClose={() => setCreating(false)} onDone={() => { setCreating(false); load(); }} />}
+      {editNetworkId && <NetworkEditModal networkId={editNetworkId} onClose={() => setEditNetworkId(null)}
+        onDone={() => { setEditNetworkId(null); load(); }} />}
       {creatingRouter && <CreateRouter nets={nets || []} onClose={() => setCreatingRouter(false)} onDone={() => { setCreatingRouter(false); load(); }} />}
       {ifaceFor && <IfaceModal router={ifaceFor} nets={nets || []} onClose={() => setIfaceFor(null)} />}
     </>
   );
+}
+
+export function networkActionItems(network, onEdit, onDelete, t) {
+  if (network['router:external']) return [];
+  if (network.shared) return [{ label: t('networks.deleteNetwork'), danger: true, onClick: onDelete }];
+  return [
+    { label: t('network.actions.edit'), onClick: onEdit },
+    'divider',
+    { label: t('networks.deleteNetwork'), danger: true, onClick: onDelete },
+  ];
 }
 
 export function createNetworkValidationKey(form) {
