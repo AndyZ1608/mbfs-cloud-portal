@@ -1,6 +1,7 @@
 // CMP action codes are stable data. Translate only at display time, and never
 // render arbitrary request payloads or unknown detail keys.
 const shown = (...values) => values.filter((value) => value !== null && value !== undefined && value !== '' && value !== false);
+import { instanceErrorTitle } from './instanceError.js';
 
 export function formatActivity(event, t) {
   const code = event.action || '';
@@ -11,7 +12,9 @@ export function formatActivity(event, t) {
   const action = semantic ? (translation === key ? code || '—' : translation) : null;
   const details = event.details && !Array.isArray(event.details) ? event.details : {};
   let summary = '';
-  if (code === 'instance.rename' && details.old_name && details.new_name) {
+  if (code === 'instance.error.detected') {
+    summary = instanceErrorTitle(t, details.error_code);
+  } else if (code === 'instance.rename' && details.old_name && details.new_name) {
     summary = `${details.old_name} → ${details.new_name}`;
   } else if (code.startsWith('instance.resize.')) {
     summary = shown(details.old_flavor, details.new_flavor).join(details.new_flavor ? ' → ' : '');

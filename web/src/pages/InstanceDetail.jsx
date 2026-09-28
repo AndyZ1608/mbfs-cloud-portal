@@ -10,6 +10,7 @@ import { attachedSecurityGroups, attachedStorage, canDetachVolume, networkRows }
 import { formatActivity } from '../activityFormatter.js';
 import ClassificationPicker, { ClassificationChip } from '../components/ClassificationPicker.jsx';
 import { emptySelection, selectionFromClassification } from '../classification.js';
+import { instanceErrorCategory, instanceErrorGuidance, instanceErrorTitle, safeInstanceErrorCode } from '../instanceError.js';
 
 const TABS = ['overview', 'networking', 'storage', 'security', 'activity'];
 const value = (item) => item === undefined || item === null || item === '' ? '—' : item;
@@ -41,6 +42,7 @@ function InstanceDetail({ instanceId }) {
   const tab = TABS.includes(params.get('tab')) ? params.get('tab') : 'overview';
   const [server, setServer] = useState(null);
   const [serverError, setServerError] = useState(null);
+  const [failure, setFailure] = useState({ loading: false, error: null, data: null });
   const [serverRevision, setServerRevision] = useState(0);
   const [tabRevision, setTabRevision] = useState(0);
   const [tabStates, setTabStates] = useState({});
@@ -86,6 +88,22 @@ function InstanceDetail({ instanceId }) {
     const timer = setInterval(() => setServerRevision((n) => n + 1), 10000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (server?.status !== 'ERROR') {
+      setFailure({ loading: false, error: null, data: null });
+      return;
+    }
+    let live = true;
+    setFailure((previous) => ({ loading: true, error: null,
+      data: previous.data?.code === server.instance_error?.code ? previous.data : null }));
+    api(`/servers/${encodedId}/error`).then(({ error }) => {
+      if (live) setFailure({ loading: false, error: null, data: error });
+    }).catch(() => {
+      if (live) setFailure({ loading: false, error: true, data: null });
+    });
+    return () => { live = false; };
+  }, [server?.id, server?.status, serverRevision, encodedId]);
 
   useEffect(() => {
     if (!server) return;
@@ -137,7 +155,7 @@ function InstanceDetail({ instanceId }) {
     return () => { live = false; };
   }, [server?.id, tab, tabRevision, encodedId, sess.project.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (serverError) return <div className="vm-detail-error" role="alert">{t('instance.detail.unavailable')} <span>{serverError.message}</span><div><Link to="/instances">{t('navigation.instances')}</Link></div></div>;
+  if (serverError) return <div className="vm-detail-error" role="alert">{t('instance.detail.unavailable')}<div><Link to="/instances">{t('navigation.instances')}</Link></div></div>;
   if (!server) return <Empty>{t('common.loading')}</Empty>;
 
   const specs = server.flavor?.vcpus != null ? server.flavor
@@ -237,13 +255,31 @@ function InstanceDetail({ instanceId }) {
         <span>{t('instance.detail.created')}: <b>{fmtDate(server.created)}</b></span>
         <span>{t('instance.detail.ipAddresses')}: <b>{ips.map((item) => item.ip).join(', ') || '—'}</b></span>
       </div>
+      {server.status === 'ERROR' && <div className="vm-error-banner" role="alert">
+        <div><strong>{t('instance.error.header')}</strong><span>{failure.error ? t('instance.error.loadFailed') : instanceErrorTitle(t, failure.data?.code || server.instance_error?.code)}</span></div>
+        <button className="btn ghost sm" onClick={() => setParams({})}>{t('instance.error.viewDetails')}</button>
+      </div>}
     </div>
     <nav className="vm-detail-tabs" aria-label={t('instance.detail.tabs')}>
       {TABS.map((key) => <button key={key} className={tab === key ? 'active' : ''} aria-current={tab === key ? 'page' : undefined}
         onClick={() => setParams(key === 'overview' ? {} : { tab: key })}>{t(`instance.detail.${key}`)}</button>)}
     </nav>
     <section className="card vm-detail-content">
-      {tab === 'overview' && <><DetailFields rows={[
+      {tab === 'overview' && <>{server.status === 'ERROR' && <div className="vm-error-card" role="region" aria-label={t('instance.error.details')}>
+        <h3>{t('instance.error.details')}</h3>
+        {failure.loading && !failure.data && <p>{t('common.loading')}</p>}
+        {failure.error && <p>{t('instance.error.loadFailed')}</p>}
+        {!failure.error && (failure.data || server.instance_error) && <>
+          <div className="vm-error-fields">
+            <div><span>{t('instance.error.type')}</span><strong>{t(`instance.error.category.${instanceErrorCategory(failure.data?.code || server.instance_error?.code)}`)}</strong></div>
+            <div><span>{t('instance.error.reason')}</span><strong>{instanceErrorTitle(t, failure.data?.code || server.instance_error?.code)}</strong></div>
+            <div><span>{t('instance.error.description')}</span><p>{t(`instance.error.description.${instanceErrorCategory(failure.data?.code || server.instance_error?.code)}`)}</p></div>
+            <div><span>{t('instance.error.suggestedActions')}</span><p>{instanceErrorGuidance(t, failure.data?.code || server.instance_error?.code)}</p></div>
+            <div><span>{t('instance.error.code')}</span><code>{safeInstanceErrorCode(failure.data?.code || server.instance_error?.code)}</code></div>
+          </div>
+          {failure.data?.occurred_at && <small>{t('instance.error.occurredAt')}: {fmtDate(failure.data.occurred_at)}</small>}
+        </>}
+      </div>}<DetailFields rows={[
         [t('instance.detail.instanceId'), <span className="mono">{server.id}</span>],
         [t('instance.detail.status'), <StatusBadge status={server.status} />],
         [t('instance.detail.flavor'), value(specs.original_name || specs.name || specs.id)],

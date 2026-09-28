@@ -1,4 +1,5 @@
 import { getLocale, intlLocale, resources, text } from './i18n/index.js';
+import { imageFlavorWarningText } from './instanceError.js';
 
 export class ApiError extends Error {
   constructor(message, { status, code, requestId } = {}) {
@@ -12,6 +13,14 @@ export class ApiError extends Error {
 
 export function apiErrorMessage(data, status) {
   const code = data?.code;
+  if (code === 'FLAVOR_DISK_TOO_SMALL' || code === 'FLAVOR_RAM_TOO_SMALL') {
+    const context = data?.context || {};
+    const fields = code === 'FLAVOR_DISK_TOO_SMALL' ? ['required_disk_gb', 'flavor_disk_gb'] : ['required_ram_mb', 'flavor_ram_mb'];
+    if (fields.every((field) => Number.isFinite(context[field]) && context[field] > 0)) {
+      return imageFlavorWarningText(text, { code, context });
+    }
+    return text(`instance.error.code.${code}`);
+  }
   if (code === 'network_partial_failure') return text('errors.network_partial_failure', {
     networkId: data?.resourceIds?.networkId || '—',
     subnetId: data?.resourceIds?.subnetId || '—',

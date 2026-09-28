@@ -46,6 +46,10 @@ export function errorHandler(err, req, res, _next) {
     error: expose ? (err.message || 'Lỗi máy chủ nội bộ') : 'Lỗi máy chủ nội bộ',
     code: err.code || (status >= 500 ? 'internal_error' : 'request_error'),
     requestId: req.id,
+    ...(err.code === 'FLAVOR_DISK_TOO_SMALL' && Number.isFinite(err.context?.required_disk_gb) && Number.isFinite(err.context?.flavor_disk_gb)
+      ? { context: { required_disk_gb: err.context.required_disk_gb, flavor_disk_gb: err.context.flavor_disk_gb } } : {}),
+    ...(err.code === 'FLAVOR_RAM_TOO_SMALL' && Number.isFinite(err.context?.required_ram_mb) && Number.isFinite(err.context?.flavor_ram_mb)
+      ? { context: { required_ram_mb: err.context.required_ram_mb, flavor_ram_mb: err.context.flavor_ram_mb } } : {}),
     ...(['network_partial_failure', 'network_edit_partial_failure'].includes(err.code) && err.resourceIds ? { resourceIds: err.resourceIds } : {}),
   });
 }

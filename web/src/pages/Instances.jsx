@@ -12,6 +12,7 @@ import NetworkInterfaceFields, { addInterface, newInterface, removeInterface, va
 import OsCatalog from '../components/OsCatalog.jsx';
 import ClassificationPicker, { ClassificationChip } from '../components/ClassificationPicker.jsx';
 import { classificationChips, emptySelection, matchesClassificationFilters, matchesClassificationSearch } from '../classification.js';
+import { imageFlavorWarning, imageFlavorWarningText, instanceErrorTitle } from '../instanceError.js';
 
 function InstanceClassificationChips({ server }) {
   const { visible, remaining } = classificationChips(server.classification);
@@ -125,7 +126,9 @@ function Instances({ sess }) {
                 <tr key={s.id}>
                   <td><Link className="link-btn" to={`/instances/${encodeURIComponent(s.id)}`}>{s.name}</Link>
                     <InstanceClassificationChips server={s} /></td>
-                  <td><StatusBadge status={s.status} />{s['OS-EXT-STS:task_state'] && <span className="dim task"> {s['OS-EXT-STS:task_state']}…</span>}</td>
+                  <td><StatusBadge status={s.status} />{s['OS-EXT-STS:task_state'] && <span className="dim task"> {s['OS-EXT-STS:task_state']}…</span>}
+                    {s.status === 'ERROR' && <Link className="vm-error-list-link" to={`/instances/${encodeURIComponent(s.id)}`}>
+                      {instanceErrorTitle(t, s.instance_error?.code)} · {t('instance.error.viewDetails')}</Link>}</td>
                   <td>{latest[s.id] ? (
                     <button className={`cpu-chip cpu-${latest[s.id].cpu >= 90 ? 'hot' : latest[s.id].cpu >= 70 ? 'warm' : 'ok'}`}
                       onClick={() => setMonFor(s)} title={t('instances.monitor')}>{latest[s.id].cpu}%</button>
@@ -189,6 +192,8 @@ function CreateModal({ onClose, onDone }) {
     show_ud: false, user_data: '',
   });
   const [classification, setClassification] = useState(emptySelection);
+  const preflight = imageFlavorWarning(opts?.images.find((image) => image.id === f.imageRef),
+    opts?.flavors.find((flavor) => flavor.id === f.flavorRef), f.bfv);
 
   useEffect(() => {
     Promise.all([api('/flavors'), api('/images'), api('/available-networks'), api('/keypairs'), api('/classifications/catalog')])
@@ -224,6 +229,7 @@ function CreateModal({ onClose, onDone }) {
     if (submitting.current) return;
     if (!f.name.trim()) return toast(t('instances.nameRequired'), 'error');
     if (!opts?.images.some((image) => image.id === f.imageRef)) return toast(t('instance.create.imageRequired'), 'error');
+    if (preflight) return toast(imageFlavorWarningText(t, preflight), 'error');
     if (!validInterfaces(f.interfaces, opts?.networks || [])) return toast(t('instance.networkInterfaces.required'), 'error');
     if (Number(f.count) > 1 && f.interfaces.some((item) => item.ip_address.trim())) return toast(t('errors.interface_batch_fixed_ip'), 'error');
     submitting.current = true;
@@ -250,7 +256,7 @@ function CreateModal({ onClose, onDone }) {
     <Modal title={t('instances.createTitle')} onClose={close} wide
       footer={<>
         <button className="btn ghost" onClick={close} disabled={busy}>{t('common.cancel')}</button>
-        <button className="btn primary" onClick={submit} disabled={busy || !opts || !f.imageRef}>{t(busy ? 'instances.creating' : 'instances.create')}</button>
+        <button className="btn primary" onClick={submit} disabled={busy || !opts || !f.imageRef || !!preflight}>{t(busy ? 'instances.creating' : 'instances.create')}</button>
       </>}>
       {!opts ? <p>{t('instances.loadingOptions')}</p> : (
         <div className="form-grid">
@@ -267,6 +273,7 @@ function CreateModal({ onClose, onDone }) {
               {opts.flavors.map((x) => <option key={x.id} value={x.id}>{x.name} — {x.vcpus} vCPU / {ramGB(x.ram)} / {x.disk} GB</option>)}
             </select>
           </Field>
+          {preflight && <div className="vm-create-warning" role="alert">{imageFlavorWarningText(t, preflight)}</div>}
           <Field label="SSH key">
             <select value={f.key_name} onChange={(e) => setF({ ...f, key_name: e.target.value })}>
               <option value="">— {t('instances.none')} —</option>

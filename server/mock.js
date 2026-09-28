@@ -346,6 +346,11 @@ function mockCompute(m, path, q, body, projectId) {
     return null;
   }
   if (m === 'GET' && path === '/flavors/detail') return { flavors };
+  if ((mt = path.match(/^\/flavors\/([^/]+)$/)) && m === 'GET') {
+    const flavor = flavors.find((item) => item.id === decodeURIComponent(mt[1]));
+    if (!flavor) throw notFound();
+    return { flavor };
+  }
   if (m === 'GET' && path === '/os-keypairs') return { keypairs: keypairs.map((k) => ({ keypair: k })) };
   if (m === 'POST' && path === '/os-keypairs') {
     const k = { name: body.keypair.name, fingerprint: 'aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99', public_key: body.keypair.public_key || 'ssh-ed25519 AAAA-generated-mock' };

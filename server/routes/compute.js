@@ -4,8 +4,9 @@ import { traceNovaConsole } from '../consoleDiagnostics.js';
 import { changeInstancePassword } from '../passwordChange.js';
 import { assertOwned, fetchOwned, fetchUsableImage, owned } from '../projectScope.js';
 import { attachInterface, createServerWithInterfaces, prepareInterfaces } from '../instanceInterfaces.js';
-import { addInstanceAudit, instanceActionCode, listInstanceAudit, setInstanceAudit } from '../audit.js';
+import { addInstanceAudit, instanceActionCode, listInstanceAudit, recordInstanceErrorOnce, setInstanceAudit } from '../audit.js';
 import { assignmentsForInstances, pruneMissingInstances, removeInstanceAssignments, replaceAssignments, validateSelection } from '../classifications.js';
+import { classifyInstanceError, preflightImageFlavor, publicServer, publicServerPayload } from '../instanceErrors.js';
 
 const router = Router();
 
@@ -30,7 +31,12 @@ router.get('/servers', async (req, res, next) => {
     const ids = servers.map((item) => item.id);
     const assignments = assignmentsForInstances(req.session.os.project.id, ids);
     pruneMissingInstances(req.session.os.project.id, ids);
-    res.json({ servers: servers.map((item) => ({ ...item, classification: assignments[item.id] })) });
+    res.json({ servers: servers.map((item) => {
+      const instanceError = classifyInstanceError(item);
+      if (instanceError) recordInstanceErrorOnce(req.session.os, item, instanceError, req.id);
+      return { ...publicServer(item), classification: assignments[item.id],
+        ...(instanceError ? { instance_error: { code: instanceError.code, category: instanceError.category } } : {}) };
+    }) });
   } catch (e) { next(e); }
 });
 
@@ -44,6 +50,22 @@ router.post('/servers', async (req, res, next) => {
       throw new OSError(400, 'Thiếu thông tin: tên, flavor và image là bắt buộc');
     }
     const image = await fetchUsableImage(sess, imageRef);
+    let flavor;
+    try {
+      flavor = (await osFetch(sess, 'compute', `/flavors/${encodeURIComponent(flavorRef)}`))?.flavor;
+    } catch (failure) {
+      if (failure?.status === 404) throw new OSError(400, 'Flavor đã chọn không khả dụng.', 'flavor_unavailable');
+      if (failure?.status === 401) throw new OSError(401, 'Phiên đăng nhập không còn hiệu lực.', 'authentication_required');
+      if (failure?.status === 403) throw new OSError(403, 'Không có quyền xem Flavor.', 'permission_denied');
+      throw new OSError(502, 'Không thể kiểm tra Flavor đã chọn.', 'provider_failure');
+    }
+    if (!flavor) throw new OSError(502, 'Nova không trả về thông tin Flavor.', 'provider_failure');
+    const preflight = preflightImageFlavor(image, flavor, { bootFromVolume: Number(boot_volume_gb) > 0 });
+    if (preflight) {
+      const error = new OSError(400, 'Image không đáp ứng yêu cầu của Flavor đã chọn.', preflight.code);
+      error.context = preflight.context;
+      throw error;
+    }
     if (req.body?.networks !== undefined || req.body?.security_groups !== undefined) {
       throw new OSError(400, 'Dùng danh sách interfaces; Security Group mặc định do CMP xác định.', 'interface_contract_invalid');
     }
@@ -108,17 +130,42 @@ router.post('/servers', async (req, res, next) => {
       }
     }
     console.log(`[compute] CREATE server name=${name} x${n} by=${sess.user.name}`);
-    res.status(202).json(n === 1 ? { ...created[0], classification_warning: classificationWarning }
-      : { server: created[0]?.server, servers: created.map((item) => item?.server), classification_warning: classificationWarning });
+    res.status(202).json(n === 1 ? { ...publicServerPayload(created[0]), classification_warning: classificationWarning }
+      : { server: publicServer(created[0]?.server), servers: created.map((item) => publicServer(item?.server)), classification_warning: classificationWarning });
   } catch (e) { next(e); }
 });
 
 router.get('/servers/:id', async (req, res, next) => {
   try {
     const server = await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
+    const instanceError = classifyInstanceError(server);
+    if (instanceError) recordInstanceErrorOnce(req.session.os, server, instanceError, req.id);
     const classification = assignmentsForInstances(req.session.os.project.id, [server.id])[server.id];
-    res.json({ server: { ...server, classification } });
+    res.json({ server: { ...publicServer(server), classification,
+      ...(instanceError ? { instance_error: { code: instanceError.code, category: instanceError.category } } : {}) } });
   } catch (e) { next(e); }
+});
+
+router.get('/servers/:id/error', async (req, res, next) => {
+  try {
+    const server = await fetchOwned(req.session.os, 'compute', `/servers/${encodeURIComponent(req.params.id)}`, 'server');
+    const error = classifyInstanceError(server);
+    if (error) recordInstanceErrorOnce(req.session.os, server, error, req.id);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ error });
+  } catch (failure) {
+    // Provider error bodies can contain diagnostics too. The customer-facing
+    // error endpoint never forwards them, including on failed Nova reads.
+    if (failure?.code === 'resource_not_found' || failure?.status === 404) {
+      next(new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found'));
+    } else if (failure?.status === 401) {
+      next(new OSError(401, 'Phiên đăng nhập không còn hiệu lực.', 'authentication_required'));
+    } else if (failure?.status === 403) {
+      next(new OSError(403, 'Không có quyền xem tài nguyên này.', 'permission_denied'));
+    } else {
+      next(new OSError(502, 'Không thể tải thông tin lỗi máy ảo.', 'provider_failure'));
+    }
+  }
 });
 
 router.get('/servers/:id/classifications', async (req, res, next) => {
@@ -214,7 +261,7 @@ router.put('/servers/:id', async (req, res, next) => {
       method: 'PUT', body: { server: { name } },
     });
     console.log(`[compute] RENAME server=${req.params.id} -> ${name} by=${req.session.os.user.name}`);
-    res.json(data);
+    res.json(publicServerPayload(data));
   } catch (e) { next(e); }
 });
 

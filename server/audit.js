@@ -8,12 +8,33 @@ import { config } from './config.js';
 const MAX = 5000;
 const MEM = readJsonlTail('audit.jsonl', MAX);
 if (MEM.length) console.log(`[audit] Nạp lại ${MEM.length} dòng nhật ký từ DATA_DIR`);
+const instanceErrorKey = (projectId, instanceId, code, occurredAt) => JSON.stringify([projectId, instanceId, code, occurredAt || null]);
+const seenInstanceErrors = new Set(MEM.filter((entry) => entry.action === 'instance.error.detected')
+  .map((entry) => instanceErrorKey(entry.project?.id, entry.resource_id, entry.details?.error_code, entry.details?.occurred_at)));
 
 export function record(e) {
   const entry = { ts: new Date().toISOString(), ...e };
   MEM.push(entry);
   if (MEM.length > MAX) MEM.shift();
   appendJsonl('audit.jsonl', entry);
+}
+
+// Observing an ERROR VM is not a user action. Record one safe semantic event
+// per provider fault occurrence; never persist Nova fault text or traceback.
+export function recordInstanceErrorOnce(session, server, normalizedError, requestId = null) {
+  if (!normalizedError || !server?.id || !session?.project?.id) return false;
+  const key = instanceErrorKey(session.project.id, server.id, normalizedError.code, normalizedError.occurred_at);
+  if (seenInstanceErrors.has(key)) return false;
+  record({ user: null, project: { id: session.project.id, name: session.project.name },
+    project_id: session.project.id, provider: 'openstack', source: 'cmp',
+    action: 'instance.error.detected', result: 'failure', resource_type: 'instance',
+    resource_id: server.id, resource_name: server.name,
+    details: { error_code: normalizedError.code, category: normalizedError.category,
+      ...(normalizedError.occurred_at ? { occurred_at: normalizedError.occurred_at } : {}) } });
+  seenInstanceErrors.add(key);
+  console.info('[instance-error] detected', JSON.stringify({ project_id: session.project.id,
+    instance_id: server.id, code: normalizedError.code, request_id: requestId }));
+  return true;
 }
 
 // Routes provide only reviewed operational metadata here, never request bodies.
