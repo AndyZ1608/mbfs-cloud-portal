@@ -8,6 +8,8 @@ import useInstanceActions from '../useInstanceActions.js';
 import { InstanceActionDialogs } from './Instances.jsx';
 import { attachedSecurityGroups, attachedStorage, canDetachVolume, networkRows } from '../instanceDetailData.js';
 import { formatActivity } from '../activityFormatter.js';
+import { instanceLabels, instanceTags } from '../instanceLabelsTags.js';
+import LabelsTagsEditor, { editorPayload, rowsFromLabels } from '../components/LabelsTagsEditor.jsx';
 
 const TABS = ['overview', 'networking', 'storage', 'security', 'activity'];
 const value = (item) => item === undefined || item === null || item === '' ? '—' : item;
@@ -46,6 +48,14 @@ function InstanceDetail({ instanceId }) {
   const [selectedVolumeId, setSelectedVolumeId] = useState('');
   const [volumeBusy, setVolumeBusy] = useState(false);
   const [activityMoreBusy, setActivityMoreBusy] = useState(false);
+  const [editLabelsTags, setEditLabelsTags] = useState(false);
+  const [labelsTagsBusy, setLabelsTagsBusy] = useState(false);
+  const [labelsTagsLoading, setLabelsTagsLoading] = useState(false);
+  const [labelsTagsLoadFailed, setLabelsTagsLoadFailed] = useState(false);
+  const [labelRows, setLabelRows] = useState([]);
+  const [tagRows, setTagRows] = useState([]);
+  const [originalLabelsTags, setOriginalLabelsTags] = useState(null);
+  const [labelsTagsError, setLabelsTagsError] = useState('');
   const current = tabStates[tab] || {};
   const encodedId = encodeURIComponent(instanceId);
 
@@ -180,6 +190,42 @@ function InstanceDetail({ instanceId }) {
     } catch (error) { toast(error.message, 'error'); }
     finally { setActivityMoreBusy(false); }
   }
+  async function openLabelsTags() {
+    setEditLabelsTags(true);
+    setLabelsTagsLoading(true);
+    setLabelsTagsLoadFailed(false);
+    setLabelRows([]);
+    setTagRows([]);
+    setOriginalLabelsTags(null);
+    setLabelsTagsError('');
+    try {
+      const current = await api(`/servers/${encodedId}/labels-tags`);
+      setLabelRows(rowsFromLabels(current.labels));
+      setTagRows(current.tags);
+      setOriginalLabelsTags(current);
+    } catch (error) { setLabelsTagsError(error.message); setLabelsTagsLoadFailed(true); }
+    finally { setLabelsTagsLoading(false); }
+  }
+  async function saveLabelsTags() {
+    if (labelsTagsBusy) return;
+    let payload;
+    try { payload = editorPayload(labelRows, tagRows, t); }
+    catch (error) { setLabelsTagsError(error.message); return; }
+    setLabelsTagsBusy(true);
+    setLabelsTagsError('');
+    try {
+      await api(`/servers/${encodedId}/labels-tags`, { method: 'PUT', body: { ...payload, expected: originalLabelsTags } });
+      setEditLabelsTags(false);
+      toast(t('instance.labelsTags.updated'), 'ok');
+      refresh();
+    } catch (error) {
+      setLabelsTagsError(error.message);
+      if (['labels_tags_partial_failure', 'labels_tags_stale'].includes(error.code)) setLabelsTagsLoadFailed(true);
+    }
+    finally { setLabelsTagsBusy(false); }
+  }
+  const labels = instanceLabels(server);
+  const tags = instanceTags(server);
   return <div className="vm-detail-page">
     <nav className="vm-detail-breadcrumb" aria-label={t('instance.detail.breadcrumb')}>
       <Link to="/instances">{t('navigation.compute')} / {t('navigation.instances')}</Link><span> / {server.name}</span>
@@ -200,7 +246,7 @@ function InstanceDetail({ instanceId }) {
         onClick={() => setParams(key === 'overview' ? {} : { tab: key })}>{t(`instance.detail.${key}`)}</button>)}
     </nav>
     <section className="card vm-detail-content">
-      {tab === 'overview' && <DetailFields rows={[
+      {tab === 'overview' && <><DetailFields rows={[
         [t('instance.detail.instanceId'), <span className="mono">{server.id}</span>],
         [t('instance.detail.status'), <StatusBadge status={server.status} />],
         [t('instance.detail.flavor'), value(specs.original_name || specs.name || specs.id)],
@@ -212,7 +258,18 @@ function InstanceDetail({ instanceId }) {
         [t('instance.detail.project'), sess.project.name],
         [t('instance.detail.availabilityZone'), value(server['OS-EXT-AZ:availability_zone'])],
         [t('instance.detail.host'), value(server['OS-EXT-SRV-ATTR:host'])],
-      ]} />}
+      ]} />
+        <div className="vm-detail-labels-tags">
+          <div className="vm-detail-section-head"><h3>{t('instance.labelsTags.title')}</h3>
+            <button className="btn ghost sm" onClick={openLabelsTags}>{t('instance.labelsTags.edit')}</button></div>
+          <h4>{t('instance.labels.title')}</h4>
+          {Object.keys(labels).length ? <div className="vm-label-grid">{Object.entries(labels).map(([key, labelValue]) =>
+            <div key={key}><span>{key}</span><strong>{labelValue}</strong></div>)}</div>
+            : <p className="dim">{t('instance.labels.empty')}</p>}
+          <h4>{t('instance.tags.title')}</h4>
+          {tags.length ? <div className="vm-tag-chips">{tags.map((tag) => <span className="chip" key={tag}>{tag}</span>)}</div>
+            : <p className="dim">{t('instance.tags.empty')}</p>}
+        </div></>}
       {tab === 'networking' && <><div className="vm-detail-section-head"><h3>{t('instance.detail.networkInterfaces')}</h3><div>
         <button className="btn ghost sm" onClick={() => actions.open('nic', server)}>{t('instance.detail.manageInterfaces')}</button>
         <button className="btn ghost sm" onClick={() => actions.open('fip', server)}>{t('instances.floatingIp')}</button>
@@ -256,6 +313,14 @@ function InstanceDetail({ instanceId }) {
       </TabState></>}
     </section>
     <InstanceActionDialogs actions={actions} />
+    {editLabelsTags && <Modal title={t('instance.labelsTags.edit')} wide onClose={() => !labelsTagsBusy && setEditLabelsTags(false)}
+      footer={<><button className="btn ghost" disabled={labelsTagsBusy} onClick={() => setEditLabelsTags(false)}>{t('common.cancel')}</button>
+        <button className="btn primary" disabled={labelsTagsBusy || labelsTagsLoading || labelsTagsLoadFailed}
+          onClick={saveLabelsTags}>{t(labelsTagsBusy ? 'instance.labelsTags.saving' : 'instance.labelsTags.save')}</button></>}>
+      {labelsTagsLoading ? <Empty>{t('common.loading')}</Empty> : <LabelsTagsEditor rows={labelRows} onRowsChange={setLabelRows}
+        tags={tagRows} onTagsChange={setTagRows} disabled={labelsTagsBusy} />}
+      {labelsTagsError && <p className="err-text" role="alert">{labelsTagsError}</p>}
+    </Modal>}
     {attachVolumeOpen && <Modal title={t('instance.detail.attachVolume')} onClose={() => !volumeBusy && setAttachVolumeOpen(false)}
       footer={<><button className="btn ghost" disabled={volumeBusy} onClick={() => setAttachVolumeOpen(false)}>{t('common.cancel')}</button>
         <button className="btn primary" disabled={volumeBusy || !selectedVolumeId} onClick={attachVolume}>{t('volumes.attach')}</button></>}>

@@ -52,7 +52,7 @@ function seedServer(name, flavor, imageIdx, ip, status) {
     id: uid(), name, status, tenant_id: 'p-demo', created: '2026-05-11T08:30:00Z', updated: now(),
     flavor: { ...flavors.find((f) => f.id === flavor), original_name: flavors.find((f) => f.id === flavor).name },
     image: { id: images[imageIdx].id }, key_name: 'hieptd-key',
-    security_groups: [{ name: 'default' }],
+    security_groups: [{ name: 'default' }], metadata: {}, tags: [],
     addresses: { 'net-internal': [{ addr: ip, 'OS-EXT-IPS:type': 'fixed' }] },
     'os-extended-volumes:volumes_attached': [],
     'OS-EXT-STS:task_state': null, 'OS-EXT-AZ:availability_zone': 'nova',
@@ -167,7 +167,7 @@ function mockCompute(m, path, body, projectId) {
         id: uid(), name, status: 'BUILD', tenant_id: projectId, created: now(), updated: now(),
         flavor: { ...fl, original_name: fl.name },
         image: { id: b.imageRef || (b.block_device_mapping_v2 ? b.block_device_mapping_v2[0].uuid : images[0].id) },
-        key_name: b.key_name || null,
+        key_name: b.key_name || null, metadata: { ...(b.metadata || {}) }, tags: [...(b.tags || [])],
         security_groups: b.security_groups || [{ name: 'default' }],
         addresses: {},
         'os-extended-volumes:volumes_attached': [],
@@ -211,6 +211,22 @@ function mockCompute(m, path, body, projectId) {
       volumes.forEach((v) => { v.attachments = v.attachments.filter((a) => a.server_id !== s.id); if (!v.attachments.length && v.status === 'in-use') v.status = 'available'; });
       return null;
     }
+  }
+  if ((mt = path.match(/^\/servers\/([^/]+)\/metadata(?:\/(.+))?$/))) {
+    const s = servers.find((item) => item.id === mt[1]);
+    if (!s || s.tenant_id !== projectId) throw notFound();
+    s.metadata ||= {};
+    if (m === 'GET' && !mt[2]) return { metadata: { ...s.metadata } };
+    if (m === 'POST' && !mt[2]) { Object.assign(s.metadata, body.metadata); return { metadata: { ...s.metadata } }; }
+    if (m === 'DELETE' && mt[2]) { delete s.metadata[decodeURIComponent(mt[2])]; return null; }
+  }
+  if ((mt = path.match(/^\/servers\/([^/]+)\/tags(?:\/(.+))?$/))) {
+    const s = servers.find((item) => item.id === mt[1]);
+    if (!s || s.tenant_id !== projectId) throw notFound();
+    s.tags ||= [];
+    if (m === 'GET' && !mt[2]) return { tags: [...s.tags] };
+    if (mt[2] && m === 'PUT') { const tag = decodeURIComponent(mt[2]); if (!s.tags.includes(tag)) s.tags.push(tag); return null; }
+    if (mt[2] && m === 'DELETE') { s.tags = s.tags.filter((tag) => tag !== decodeURIComponent(mt[2])); return null; }
   }
   if ((mt = path.match(/^\/servers\/([^/]+)\/os-interface(?:\/([^/]+))?$/))) {
     const server = servers.find((item) => item.id === mt[1]);

@@ -21,6 +21,12 @@ export function formatActivity(event, t) {
   } else if (code === 'instance.security_groups.change') {
     summary = shown(Array.isArray(details.added) && details.added.length && `${t('instance.activity.added')}: ${details.added.join(', ')}`,
       Array.isArray(details.removed) && details.removed.length && `${t('instance.activity.removed')}: ${details.removed.join(', ')}`).join(' · ');
+  } else if (code === 'instance.labels.update' || code === 'instance.tags.update') {
+    summary = shown(
+      Array.isArray(details.added) && details.added.length && `${t('instance.activity.added')}: ${details.added.join(', ')}`,
+      Array.isArray(details.changed) && details.changed.length && `${t('instance.activity.changed')}: ${details.changed.join(', ')}`,
+      Array.isArray(details.removed) && details.removed.length && `${t('instance.activity.removed')}: ${details.removed.join(', ')}`,
+    ).join(' · ');
   } else if (code.startsWith('instance.floating_ip.')) {
     summary = shown(details.floating_ip, details.fixed_ip).join(details.fixed_ip ? ' → ' : '');
   } else if (code.startsWith('instance.volume.')) {

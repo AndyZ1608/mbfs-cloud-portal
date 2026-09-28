@@ -5,6 +5,7 @@ import { changeInstancePassword } from '../passwordChange.js';
 import { assertOwned, fetchOwned, fetchUsableImage, owned } from '../projectScope.js';
 import { attachInterface, createServerWithInterfaces, prepareInterfaces } from '../instanceInterfaces.js';
 import { addInstanceAudit, instanceActionCode, listInstanceAudit, setInstanceAudit } from '../audit.js';
+import { getInstanceLabelsTags, labelsToMetadata, normalizeLabels, normalizeTags, updateInstanceLabelsTags } from '../instanceLabelsTags.js';
 
 const router = Router();
 
@@ -33,6 +34,12 @@ router.post('/servers', async (req, res, next) => {
       name,
       flavorRef,
     };
+    if (req.body?.labels !== undefined) {
+      server.metadata = labelsToMetadata(normalizeLabels(req.body.labels));
+    }
+    if (req.body?.tags !== undefined) {
+      server.tags = normalizeTags(req.body.tags);
+    }
     if (boot_volume_gb && Number(boot_volume_gb) > 0) {
       server.block_device_mapping_v2 = [{
         boot_index: 0,
@@ -84,6 +91,31 @@ router.get('/servers/:id', async (req, res, next) => {
     const server = await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
     res.json({ server });
   } catch (e) { next(e); }
+});
+
+router.get('/servers/:id/labels-tags', async (req, res, next) => {
+  try {
+    const { labels, tags } = await getInstanceLabelsTags(req.session.os, req.params.id);
+    res.json({ labels, tags });
+  } catch (error) { next(error); }
+});
+
+router.put('/servers/:id/labels-tags', async (req, res, next) => {
+  try {
+    const { server, labels, tags, diff } = await updateInstanceLabelsTags(req.session.os, req.params.id, req.body);
+    if (Object.values(diff.labels).some((items) => items.length)) {
+      addInstanceAudit(res, { action: 'instance.labels.update', resourceId: server.id, resourceName: server.name,
+        details: diff.labels });
+    }
+    if (diff.tags.added.length || diff.tags.removed.length) {
+      addInstanceAudit(res, { action: 'instance.tags.update', resourceId: server.id, resourceName: server.name,
+        details: diff.tags });
+    }
+    if (!res.locals.instanceAudits?.length) {
+      setInstanceAudit(res, { action: 'instance.labels_tags.update', resourceId: server.id, resourceName: server.name });
+    }
+    res.json({ labels, tags });
+  } catch (error) { next(error); }
 });
 
 router.get('/servers/:id/activity', async (req, res, next) => {

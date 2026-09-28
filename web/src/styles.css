@@ -754,6 +754,33 @@ html[data-theme="dark"] .toast { background: #0b1220; }
 .audit-details > span, .audit-details > small { display: block; margin-top: 3px; }
 @media (max-width: 900px) { .vm-detail-fields { grid-template-columns: 1fr; } }
 
+/* VM classification stays compact in lists and readable in the detail editor. */
+.vm-list-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 14px; margin-bottom: 14px; }
+.vm-list-filters > span { color: var(--dim); font-size: 13px; font-weight: 600; margin-right: 4px; }
+.vm-list-filters input { width: 150px; max-width: 100%; }
+.vm-list-filters select { width: 110px; }
+.vm-filter-chip { cursor: pointer; font: inherit; font-size: 12px; }
+.vm-list-chips { display: flex; align-items: center; gap: 3px; margin-top: 4px; max-width: 270px; }
+.vm-list-chips .chip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 110px; }
+.vm-list-chips .dim { font-size: 11px; white-space: nowrap; }
+.vm-detail-labels-tags { border-top: 1px solid var(--border); margin-top: 22px; padding-top: 20px; }
+.vm-detail-labels-tags h4 { color: var(--dim); font-size: 13px; }
+.vm-label-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.vm-label-grid > div { background: var(--muted-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+.vm-label-grid span, .vm-label-grid strong { display: block; overflow-wrap: anywhere; }
+.vm-label-grid span { color: var(--dim); font-size: 12px; margin-bottom: 4px; }
+.vm-tag-chips, .tag-edit-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.tag-edit-chips button { border: 0; background: transparent; cursor: pointer; margin-left: 5px; color: inherit; }
+.labels-tags-editor h4 { margin: 18px 0 10px; }
+.label-edit-row { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(100px, 1fr) auto; gap: 8px; margin-bottom: 8px; }
+.label-edit-row input { min-width: 0; }
+.tag-entry { display: flex; gap: 8px; margin-top: 10px; }
+.tag-entry input { flex: 1; min-width: 0; }
+.vm-create-labels-tags { grid-column: 1 / -1; border-top: 1px solid var(--border); padding-top: 14px; }
+.vm-create-labels-tags summary { cursor: pointer; font-weight: 600; }
+.vm-create-labels-tags .dim { font-weight: 400; font-size: 12px; }
+@media (max-width: 600px) { .label-edit-row { grid-template-columns: 1fr; } }
+
 @media (max-width: 700px) {
   .card { padding: 12px; overflow-x: auto; }
   .tbl { min-width: 620px; }

@@ -10,12 +10,28 @@ import useInstanceActions from '../useInstanceActions.js';
 import { useI18n } from '../i18n/react.jsx';
 import NetworkInterfaceFields, { addInterface, newInterface, removeInterface, validInterfaces } from '../components/NetworkInterfaceFields.jsx';
 import OsCatalog from '../components/OsCatalog.jsx';
+import LabelsTagsEditor, { editorPayload } from '../components/LabelsTagsEditor.jsx';
+import { listChips, matchesInstanceFilters } from '../instanceLabelsTags.js';
+
+function InstanceClassificationChips({ server }) {
+  const { visible, remaining } = listChips(server);
+  if (!visible.length) return null;
+  return <div className="vm-list-chips">
+    {visible.map((chip, index) => <span className="chip" key={index} title={chip.text}>{chip.text}</span>)}
+    {remaining > 0 && <span className="dim">+{remaining}</span>}
+  </div>;
+}
 
 export default function Instances() {
   const { t } = useI18n();
   const [servers, setServers] = useState(null);
   const [creating, setCreating] = useState(false);
   const [q, setQ] = useState('');
+  const [filters, setFilters] = useState([]);
+  const [filterKind, setFilterKind] = useState('label');
+  const [filterKey, setFilterKey] = useState('');
+  const [filterValue, setFilterValue] = useState('');
+  const [filterTag, setFilterTag] = useState('');
   const [monFor, setMonFor] = useState(null);
   const [monStatus, setMonStatus] = useState(null);
   const [latest, setLatest] = useState({});
@@ -39,10 +55,25 @@ export default function Instances() {
   }, []);
 
   const shown = !servers ? null : servers.filter((s) => {
-    const t = q.trim().toLowerCase();
-    if (!t) return true;
-    return (s.name || '').toLowerCase().includes(t) || serverIps(s).some((x) => x.ip.includes(t));
+    const query = q.trim().toLowerCase();
+    const searchMatch = !query || matchesInstanceFilters(s, query, []) || serverIps(s).some((x) => x.ip.includes(query));
+    return searchMatch && matchesInstanceFilters(s, '', filters);
   });
+
+  function addFilter() {
+    if (filterKind === 'tag') {
+      const tag = filterTag.trim();
+      if (tag && !filters.some((item) => item.kind === 'tag' && item.tag === tag)) {
+        setFilters([...filters, { kind: 'tag', tag }]); setFilterTag('');
+      }
+      return;
+    }
+    const key = filterKey.trim().toLowerCase();
+    const value = filterValue.trim();
+    if (key && value && !filters.some((item) => item.kind === 'label' && item.key === key && item.value === value)) {
+      setFilters([...filters, { kind: 'label', key, value }]); setFilterKey(''); setFilterValue('');
+    }
+  }
 
   return (
     <>
@@ -50,6 +81,21 @@ export default function Instances() {
         <input placeholder={t('instances.search')} value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 190 }} />
         <button className="btn primary" onClick={() => setCreating(true)}><Plus size={16} /> {t('instances.create')}</button>
       </PageHead>
+
+      <div className="vm-list-filters card">
+        <span>{t('instance.filters.title')}</span>
+        <select aria-label={t('instance.filters.kind')} value={filterKind} onChange={(event) => setFilterKind(event.target.value)}>
+          <option value="label">{t('instance.filters.label')}</option><option value="tag">{t('instance.filters.tag')}</option>
+        </select>
+        {filterKind === 'label' ? <><input aria-label={t('instance.labels.key')} placeholder={t('instance.labels.key')} value={filterKey} onChange={(event) => setFilterKey(event.target.value)} />
+          <input aria-label={t('instance.labels.value')} placeholder={t('instance.labels.value')} value={filterValue} onChange={(event) => setFilterValue(event.target.value)} /></>
+          : <input aria-label={t('instance.tags.title')} placeholder={t('instance.tags.title')} value={filterTag} onChange={(event) => setFilterTag(event.target.value)} />}
+        <button className="btn ghost sm" onClick={addFilter}>{t('instance.filters.add')}</button>
+        {filters.map((filter, index) => <button className="chip vm-filter-chip" key={index}
+          onClick={() => setFilters(filters.filter((_, at) => at !== index))}
+          aria-label={`${t('instance.filters.remove')} ${filter.kind === 'tag' ? filter.tag : `${filter.key}=${filter.value}`}`}>
+          {filter.kind === 'tag' ? `#${filter.tag}` : `${filter.key}=${filter.value}`} ×</button>)}
+      </div>
 
       {!servers ? <Empty>{t('common.loading')}</Empty> : shown.length === 0 ? (
         <Empty>{t('instances.empty')}</Empty>
@@ -60,7 +106,8 @@ export default function Instances() {
             <tbody>
               {shown.map((s) => (
                 <tr key={s.id}>
-                  <td><Link className="link-btn" to={`/instances/${encodeURIComponent(s.id)}`}>{s.name}</Link></td>
+                  <td><Link className="link-btn" to={`/instances/${encodeURIComponent(s.id)}`}>{s.name}</Link>
+                    <InstanceClassificationChips server={s} /></td>
                   <td><StatusBadge status={s.status} />{s['OS-EXT-STS:task_state'] && <span className="dim task"> {s['OS-EXT-STS:task_state']}…</span>}</td>
                   <td>{latest[s.id] ? (
                     <button className={`cpu-chip cpu-${latest[s.id].cpu >= 90 ? 'hot' : latest[s.id].cpu >= 70 ? 'warm' : 'ok'}`}
@@ -124,6 +171,8 @@ function CreateModal({ onClose, onDone }) {
     count: 1, bfv: false, boot_volume_gb: 40,
     show_ud: false, user_data: '',
   });
+  const [labelRows, setLabelRows] = useState([]);
+  const [tags, setTags] = useState([]);
 
   useEffect(() => {
     Promise.all([api('/flavors'), api('/images'), api('/available-networks'), api('/keypairs')])
@@ -160,6 +209,9 @@ function CreateModal({ onClose, onDone }) {
     if (!opts?.images.some((image) => image.id === f.imageRef)) return toast(t('instance.create.imageRequired'), 'error');
     if (!validInterfaces(f.interfaces, opts?.networks || [])) return toast(t('instance.networkInterfaces.required'), 'error');
     if (Number(f.count) > 1 && f.interfaces.some((item) => item.ip_address.trim())) return toast(t('errors.interface_batch_fixed_ip'), 'error');
+    let labelsTags;
+    try { labelsTags = editorPayload(labelRows, tags, t); }
+    catch (error) { return toast(error.message, 'error'); }
     submitting.current = true;
     setBusy(true);
     try {
@@ -171,6 +223,7 @@ function CreateModal({ onClose, onDone }) {
           key_name: f.key_name || undefined, count: Number(f.count) || 1,
           boot_volume_gb: f.bfv ? Number(f.boot_volume_gb) : undefined,
           user_data: f.show_ud && f.user_data.trim() ? f.user_data : undefined,
+          ...labelsTags,
         },
       });
       toast(t('instances.creatingName', { name: f.name }), 'ok');
@@ -233,6 +286,10 @@ function CreateModal({ onClose, onDone }) {
                 placeholder={t('instances.scriptPlaceholder')} />
             )}
           </Field>
+          <details className="vm-create-labels-tags">
+            <summary>{t('instance.labelsTags.title')} <span className="dim">{t('instance.labelsTags.optional')}</span></summary>
+            <LabelsTagsEditor rows={labelRows} onRowsChange={setLabelRows} tags={tags} onTagsChange={setTags} disabled={busy} />
+          </details>
         </div>
       )}
     </Modal>
