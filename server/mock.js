@@ -120,7 +120,7 @@ export function mockFetch(svc, method, rawPath, body, projectId = 'p-demo') {
   const { path, q } = parse(rawPath);
   const m = method.toUpperCase();
 
-  if (svc === 'compute') return mockCompute(m, path, body, projectId);
+  if (svc === 'compute') return mockCompute(m, path, q, body, projectId);
   if (svc === 'network') return mockNetwork(m, path, q, body, projectId);
   if (svc === 'volume') return mockVolume(m, path, body, projectId);
   if (svc === 'image') return mockImage(m, path, q, body, projectId);
@@ -133,7 +133,7 @@ function serverIps(s) {
   return s.addresses;
 }
 
-function mockCompute(m, path, body, projectId) {
+function mockCompute(m, path, q, body, projectId) {
   let dmt;
   if ((dmt = path.match(/^\/servers\/([^/]+)\/diagnostics$/)) && m === 'GET') return mockDiagnostics(dmt[1]);
   if (m === 'GET' && path === '/os-hypervisors/statistics') {
@@ -146,7 +146,12 @@ function mockCompute(m, path, body, projectId) {
     if (m === 'PUT') { Object.assign(mockQuotas[qmt[1]], body.quota_set); return { quota_set: mockQuotas[qmt[1]] }; }
   }
   let mt;
-  if (m === 'GET' && path === '/servers/detail') return { servers };
+  if (m === 'GET' && path === '/servers/detail') {
+    const limit = Number(q.get('limit')) || servers.length;
+    const marker = q.get('marker');
+    const start = marker ? servers.findIndex((item) => item.id === marker) + 1 : 0;
+    return { servers: servers.slice(start, start + limit) };
+  }
   if (m === 'POST' && path === '/servers') {
     const b = body.server;
     const count = Math.min(Number(b.max_count || 1), 10);
@@ -211,22 +216,6 @@ function mockCompute(m, path, body, projectId) {
       volumes.forEach((v) => { v.attachments = v.attachments.filter((a) => a.server_id !== s.id); if (!v.attachments.length && v.status === 'in-use') v.status = 'available'; });
       return null;
     }
-  }
-  if ((mt = path.match(/^\/servers\/([^/]+)\/metadata(?:\/(.+))?$/))) {
-    const s = servers.find((item) => item.id === mt[1]);
-    if (!s || s.tenant_id !== projectId) throw notFound();
-    s.metadata ||= {};
-    if (m === 'GET' && !mt[2]) return { metadata: { ...s.metadata } };
-    if (m === 'POST' && !mt[2]) { Object.assign(s.metadata, body.metadata); return { metadata: { ...s.metadata } }; }
-    if (m === 'DELETE' && mt[2]) { delete s.metadata[decodeURIComponent(mt[2])]; return null; }
-  }
-  if ((mt = path.match(/^\/servers\/([^/]+)\/tags(?:\/(.+))?$/))) {
-    const s = servers.find((item) => item.id === mt[1]);
-    if (!s || s.tenant_id !== projectId) throw notFound();
-    s.tags ||= [];
-    if (m === 'GET' && !mt[2]) return { tags: [...s.tags] };
-    if (mt[2] && m === 'PUT') { const tag = decodeURIComponent(mt[2]); if (!s.tags.includes(tag)) s.tags.push(tag); return null; }
-    if (mt[2] && m === 'DELETE') { s.tags = s.tags.filter((tag) => tag !== decodeURIComponent(mt[2])); return null; }
   }
   if ((mt = path.match(/^\/servers\/([^/]+)\/os-interface(?:\/([^/]+))?$/))) {
     const server = servers.find((item) => item.id === mt[1]);

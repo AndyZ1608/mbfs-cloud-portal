@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { Outlet, Route, Routes, StaticRouter } from 'react-router-dom';
 import { createServer } from 'vite';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +15,14 @@ import { noticeDetail, noticeTitle } from '../src/i18n/notifications.js';
 
 function storage(value) {
   return { getItem: (key) => key === LOCALE_STORAGE_KEY ? value : null };
+}
+
+function withProjectRoute(Page, path) {
+  return React.createElement(StaticRouter, { location: path },
+    React.createElement(Routes, null,
+      React.createElement(Route, { element: React.createElement(Outlet, {
+        context: { sess: { project: { id: 'p-demo' }, roles: ['member'] } },
+      }) }, React.createElement(Route, { path, element: React.createElement(Page) }))));
 }
 
 test('Vietnamese is default; saved English persists; invalid saved values fall back', () => {
@@ -160,7 +169,7 @@ test('critical pages render translated labels without touching VNC session props
     assert.match(consoleHtml, /rows="3"/);
     assert.equal((consoleHtml.match(/class="vnc-screen"/g) || []).length, 1);
     assert.match(render(React.createElement(Billing)), /Loading Billing data/);
-    assert.match(render(React.createElement(Instances)), /Virtual Machines/);
+    assert.match(render(withProjectRoute(Instances, '/instances')), /Virtual Machines/);
     const deleteHtml = render(React.createElement(TypeToConfirmDialog, {
       title: translate('en', 'instances.delete'), description: translate('en', 'instances.deleteDescription'),
       resourceName: 'Ubuntu-Production', resourceId: 'vm-1', confirmLabel: translate('en', 'instances.delete'),
@@ -186,11 +195,13 @@ test('all resource pages render their initial English UI', async () => {
   globalThis.localStorage = storage('en');
   try {
     const { LocaleProvider } = await vite.ssrLoadModule('/src/i18n/react.jsx');
-    for (const page of ['Dashboard', 'Instances', 'Volumes', 'Networks', 'FloatingIPs', 'SecurityGroups',
+    for (const page of ['Dashboard', 'Instances', 'LabelsTags', 'Volumes', 'Networks', 'FloatingIPs', 'SecurityGroups',
       'Images', 'Keypairs', 'Billing', 'LoadBalancers', 'Backup', 'AuditLog', 'Optimize',
       'PowerSchedule', 'ObjectStorage', 'Marketplace', 'K8sClusters', 'Admin']) {
       const { default: Page } = await vite.ssrLoadModule(`/src/pages/${page}.jsx`);
-      const markup = renderToStaticMarkup(React.createElement(LocaleProvider, null, React.createElement(Page)));
+      const element = ['Instances', 'LabelsTags'].includes(page)
+        ? withProjectRoute(Page, page === 'Instances' ? '/instances' : '/labels-tags') : React.createElement(Page);
+      const markup = renderToStaticMarkup(React.createElement(LocaleProvider, null, element));
       assert.ok(markup.length > 0, `${page} rendered no markup`);
       assert.doesNotMatch(markup, />(?:Đang tải|Máy ảo|Tạo|Xoá|Không có)[^<]*</, `${page} retained Vietnamese UI text`);
     }

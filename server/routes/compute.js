@@ -5,7 +5,7 @@ import { changeInstancePassword } from '../passwordChange.js';
 import { assertOwned, fetchOwned, fetchUsableImage, owned } from '../projectScope.js';
 import { attachInterface, createServerWithInterfaces, prepareInterfaces } from '../instanceInterfaces.js';
 import { addInstanceAudit, instanceActionCode, listInstanceAudit, setInstanceAudit } from '../audit.js';
-import { getInstanceLabelsTags, labelsToMetadata, normalizeLabels, normalizeTags, updateInstanceLabelsTags } from '../instanceLabelsTags.js';
+import { assignmentsForInstances, pruneMissingInstances, removeInstanceAssignments, replaceAssignments, validateSelection } from '../classifications.js';
 
 const router = Router();
 
@@ -13,8 +13,24 @@ const router = Router();
 
 router.get('/servers', async (req, res, next) => {
   try {
-    const data = await osFetch(req.session.os, 'compute', '/servers/detail');
-    res.json({ servers: owned(data.servers, req.session.os) });
+    const servers = [];
+    let marker = '';
+    for (let page = 0; page < 100; page++) {
+      const query = new URLSearchParams({ limit: '1000', ...(marker ? { marker } : {}) });
+      const data = await osFetch(req.session.os, 'compute', `/servers/detail?${query}`);
+      if (!Array.isArray(data.servers)) throw new OSError(502, 'Nova trả về danh sách VM không hợp lệ.', 'provider_failure');
+      const batch = data.servers;
+      servers.push(...owned(batch, req.session.os));
+      if (!batch.length) break;
+      const last = batch.at(-1)?.id;
+      if (!last || last === marker) throw new OSError(502, 'Nova trả về phân trang VM không hợp lệ.', 'provider_failure');
+      if (page === 99) throw new OSError(502, 'Danh sách VM vượt giới hạn phân trang an toàn.', 'provider_failure');
+      marker = last;
+    }
+    const ids = servers.map((item) => item.id);
+    const assignments = assignmentsForInstances(req.session.os.project.id, ids);
+    pruneMissingInstances(req.session.os.project.id, ids);
+    res.json({ servers: servers.map((item) => ({ ...item, classification: assignments[item.id] })) });
   } catch (e) { next(e); }
 });
 
@@ -22,6 +38,8 @@ router.post('/servers', async (req, res, next) => {
   try {
     const sess = req.session.os;
     const { name, flavorRef, imageRef, interfaces, key_name, count, boot_volume_gb, user_data } = req.body || {};
+    const classification = req.body?.classification || { labels: [], tag_ids: [] };
+    validateSelection(sess.project.id, classification);
     if (!name || !flavorRef || !imageRef) {
       throw new OSError(400, 'Thiếu thông tin: tên, flavor và image là bắt buộc');
     }
@@ -34,12 +52,6 @@ router.post('/servers', async (req, res, next) => {
       name,
       flavorRef,
     };
-    if (req.body?.labels !== undefined) {
-      server.metadata = labelsToMetadata(normalizeLabels(req.body.labels));
-    }
-    if (req.body?.tags !== undefined) {
-      server.tags = normalizeTags(req.body.tags);
-    }
     if (boot_volume_gb && Number(boot_volume_gb) > 0) {
       server.block_device_mapping_v2 = [{
         boot_index: 0,
@@ -63,6 +75,7 @@ router.post('/servers', async (req, res, next) => {
     }
 
     const created = [];
+    let classificationWarning = false;
     for (let index = 0; index < n; index++) {
       try {
         // A Neutron Port belongs to one server only; a multi-create needs a fresh set per VM.
@@ -70,6 +83,19 @@ router.post('/servers', async (req, res, next) => {
           ...server, name: n > 1 ? `${name}-${index + 1}` : name,
         }, prepared);
         created.push(result.data);
+        if (classification.labels.length || classification.tag_ids.length) {
+          try {
+            const { diff } = replaceAssignments(sess.project.id, result.data.server.id, classification);
+            if (diff.labels.added.length) addInstanceAudit(res, { action: 'instance.labels.update', resourceId: result.data.server.id,
+              resourceName: result.data.server.name, details: diff.labels, provider: 'cmp' });
+            if (diff.tags.added.length) addInstanceAudit(res, { action: 'instance.tags.update', resourceId: result.data.server.id,
+              resourceName: result.data.server.name, details: diff.tags, provider: 'cmp' });
+          }
+          catch {
+            classificationWarning = true;
+            console.error(`[classification] Assignment failed after VM create request_id=${req.id} instance=${result.data.server.id}`);
+          }
+        }
         addInstanceAudit(res, { action: 'instance.create', resourceId: result.data.server.id,
           resourceName: result.data.server.name || (n > 1 ? `${name}-${index + 1}` : name),
           result: 'accepted', status: 202,
@@ -82,39 +108,42 @@ router.post('/servers', async (req, res, next) => {
       }
     }
     console.log(`[compute] CREATE server name=${name} x${n} by=${sess.user.name}`);
-    res.status(202).json(n === 1 ? created[0] : { server: created[0]?.server, servers: created.map((item) => item?.server) });
+    res.status(202).json(n === 1 ? { ...created[0], classification_warning: classificationWarning }
+      : { server: created[0]?.server, servers: created.map((item) => item?.server), classification_warning: classificationWarning });
   } catch (e) { next(e); }
 });
 
 router.get('/servers/:id', async (req, res, next) => {
   try {
     const server = await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
-    res.json({ server });
+    const classification = assignmentsForInstances(req.session.os.project.id, [server.id])[server.id];
+    res.json({ server: { ...server, classification } });
   } catch (e) { next(e); }
 });
 
-router.get('/servers/:id/labels-tags', async (req, res, next) => {
+router.get('/servers/:id/classifications', async (req, res, next) => {
   try {
-    const { labels, tags } = await getInstanceLabelsTags(req.session.os, req.params.id);
-    res.json({ labels, tags });
+    const server = await fetchOwned(req.session.os, 'compute', `/servers/${encodeURIComponent(req.params.id)}`, 'server');
+    res.json({ classification: assignmentsForInstances(req.session.os.project.id, [server.id])[server.id] });
   } catch (error) { next(error); }
 });
 
-router.put('/servers/:id/labels-tags', async (req, res, next) => {
+router.put('/servers/:id/classifications', async (req, res, next) => {
   try {
-    const { server, labels, tags, diff } = await updateInstanceLabelsTags(req.session.os, req.params.id, req.body);
+    if (!req.session.os.roles?.some((role) => ['member', 'admin'].includes(role))) {
+      throw new OSError(403, 'Cần role member hoặc admin để gán Labels/Tags.', 'permission_denied');
+    }
+    const server = await fetchOwned(req.session.os, 'compute', `/servers/${encodeURIComponent(req.params.id)}`, 'server');
+    const { classification, diff } = replaceAssignments(req.session.os.project.id, server.id, req.body);
     if (Object.values(diff.labels).some((items) => items.length)) {
       addInstanceAudit(res, { action: 'instance.labels.update', resourceId: server.id, resourceName: server.name,
-        details: diff.labels });
+        details: diff.labels, provider: 'cmp' });
     }
     if (diff.tags.added.length || diff.tags.removed.length) {
       addInstanceAudit(res, { action: 'instance.tags.update', resourceId: server.id, resourceName: server.name,
-        details: diff.tags });
+        details: diff.tags, provider: 'cmp' });
     }
-    if (!res.locals.instanceAudits?.length) {
-      setInstanceAudit(res, { action: 'instance.labels_tags.update', resourceId: server.id, resourceName: server.name });
-    }
-    res.json({ labels, tags });
+    res.json({ classification });
   } catch (error) { next(error); }
 });
 
@@ -343,8 +372,11 @@ router.delete('/servers/:id', async (req, res, next) => {
     setInstanceAudit(res, { action: 'instance.delete', resourceId: server.id,
       resourceName: server.name, result: 'accepted' });
     await osFetch(req.session.os, 'compute', `/servers/${req.params.id}`, { method: 'DELETE' });
+    let classificationWarning = false;
+    try { removeInstanceAssignments(req.session.os.project.id, server.id); }
+    catch { classificationWarning = true; console.error(`[classification] VM delete cleanup failed request_id=${req.id} instance=${req.params.id}`); }
     console.log(`[compute] DELETE server=${req.params.id} by=${req.session.os.user.name}`);
-    res.json({ ok: true });
+    res.json({ ok: true, classification_warning: classificationWarning });
   } catch (e) { next(e); }
 });
 

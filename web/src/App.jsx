@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Instances from './pages/Instances.jsx';
+import LabelsTags from './pages/LabelsTags.jsx';
 import Volumes from './pages/Volumes.jsx';
 import Networks from './pages/Networks.jsx';
 import FloatingIPs from './pages/FloatingIPs.jsx';
@@ -40,6 +41,7 @@ export default function App() {
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />
           <Route path="/instances" element={<Instances />} />
+          <Route path="/labels-tags" element={<LabelsTags />} />
           <Route path="/instances/:instanceId" element={<Suspense fallback={<PageRouteFallback />}><InstanceDetailRoute /></Suspense>} />
           <Route path="/marketplace" element={<Marketplace />} />
           <Route path="/kubernetes" element={<K8sClusters />} />

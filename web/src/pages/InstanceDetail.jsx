@@ -8,8 +8,8 @@ import useInstanceActions from '../useInstanceActions.js';
 import { InstanceActionDialogs } from './Instances.jsx';
 import { attachedSecurityGroups, attachedStorage, canDetachVolume, networkRows } from '../instanceDetailData.js';
 import { formatActivity } from '../activityFormatter.js';
-import { instanceLabels, instanceTags } from '../instanceLabelsTags.js';
-import LabelsTagsEditor, { editorPayload, rowsFromLabels } from '../components/LabelsTagsEditor.jsx';
+import ClassificationPicker, { ClassificationChip } from '../components/ClassificationPicker.jsx';
+import { emptySelection, selectionFromClassification } from '../classification.js';
 
 const TABS = ['overview', 'networking', 'storage', 'security', 'activity'];
 const value = (item) => item === undefined || item === null || item === '' ? '—' : item;
@@ -28,12 +28,14 @@ function TabState({ state, children, empty, errorKey, t }) {
 
 export default function InstanceDetailRoute() {
   const { instanceId } = useParams();
-  return <InstanceDetail key={instanceId} instanceId={instanceId} />;
+  const { sess } = useOutletContext();
+  return <InstanceDetail key={`${instanceId}:${sess.project.id}`} instanceId={instanceId} />;
 }
 
 function InstanceDetail({ instanceId }) {
   const { t } = useI18n();
   const { sess } = useOutletContext();
+  const canAssign = sess.roles?.some((role) => ['member', 'admin'].includes(role));
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const tab = TABS.includes(params.get('tab')) ? params.get('tab') : 'overview';
@@ -52,9 +54,8 @@ function InstanceDetail({ instanceId }) {
   const [labelsTagsBusy, setLabelsTagsBusy] = useState(false);
   const [labelsTagsLoading, setLabelsTagsLoading] = useState(false);
   const [labelsTagsLoadFailed, setLabelsTagsLoadFailed] = useState(false);
-  const [labelRows, setLabelRows] = useState([]);
-  const [tagRows, setTagRows] = useState([]);
-  const [originalLabelsTags, setOriginalLabelsTags] = useState(null);
+  const [classificationCatalog, setClassificationCatalog] = useState(null);
+  const [classificationSelection, setClassificationSelection] = useState(emptySelection);
   const [labelsTagsError, setLabelsTagsError] = useState('');
   const current = tabStates[tab] || {};
   const encodedId = encodeURIComponent(instanceId);
@@ -194,38 +195,34 @@ function InstanceDetail({ instanceId }) {
     setEditLabelsTags(true);
     setLabelsTagsLoading(true);
     setLabelsTagsLoadFailed(false);
-    setLabelRows([]);
-    setTagRows([]);
-    setOriginalLabelsTags(null);
+    setClassificationCatalog(null);
+    setClassificationSelection(emptySelection());
     setLabelsTagsError('');
     try {
-      const current = await api(`/servers/${encodedId}/labels-tags`);
-      setLabelRows(rowsFromLabels(current.labels));
-      setTagRows(current.tags);
-      setOriginalLabelsTags(current);
+      const [catalog, current] = await Promise.all([
+        api('/classifications/catalog'), api(`/servers/${encodedId}/classifications`),
+      ]);
+      setClassificationCatalog(catalog);
+      setClassificationSelection(selectionFromClassification(current.classification));
     } catch (error) { setLabelsTagsError(error.message); setLabelsTagsLoadFailed(true); }
     finally { setLabelsTagsLoading(false); }
   }
   async function saveLabelsTags() {
     if (labelsTagsBusy) return;
-    let payload;
-    try { payload = editorPayload(labelRows, tagRows, t); }
-    catch (error) { setLabelsTagsError(error.message); return; }
     setLabelsTagsBusy(true);
     setLabelsTagsError('');
     try {
-      await api(`/servers/${encodedId}/labels-tags`, { method: 'PUT', body: { ...payload, expected: originalLabelsTags } });
+      await api(`/servers/${encodedId}/classifications`, { method: 'PUT', body: classificationSelection });
       setEditLabelsTags(false);
-      toast(t('instance.labelsTags.updated'), 'ok');
+      toast(t('instance.classification.updated'), 'ok');
       refresh();
     } catch (error) {
       setLabelsTagsError(error.message);
-      if (['labels_tags_partial_failure', 'labels_tags_stale'].includes(error.code)) setLabelsTagsLoadFailed(true);
     }
     finally { setLabelsTagsBusy(false); }
   }
-  const labels = instanceLabels(server);
-  const tags = instanceTags(server);
+  const labels = server.classification?.labels || [];
+  const tags = server.classification?.tags || [];
   return <div className="vm-detail-page">
     <nav className="vm-detail-breadcrumb" aria-label={t('instance.detail.breadcrumb')}>
       <Link to="/instances">{t('navigation.compute')} / {t('navigation.instances')}</Link><span> / {server.name}</span>
@@ -260,15 +257,16 @@ function InstanceDetail({ instanceId }) {
         [t('instance.detail.host'), value(server['OS-EXT-SRV-ATTR:host'])],
       ]} />
         <div className="vm-detail-labels-tags">
-          <div className="vm-detail-section-head"><h3>{t('instance.labelsTags.title')}</h3>
-            <button className="btn ghost sm" onClick={openLabelsTags}>{t('instance.labelsTags.edit')}</button></div>
-          <h4>{t('instance.labels.title')}</h4>
-          {Object.keys(labels).length ? <div className="vm-label-grid">{Object.entries(labels).map(([key, labelValue]) =>
-            <div key={key}><span>{key}</span><strong>{labelValue}</strong></div>)}</div>
-            : <p className="dim">{t('instance.labels.empty')}</p>}
-          <h4>{t('instance.tags.title')}</h4>
-          {tags.length ? <div className="vm-tag-chips">{tags.map((tag) => <span className="chip" key={tag}>{tag}</span>)}</div>
-            : <p className="dim">{t('instance.tags.empty')}</p>}
+          <div className="vm-detail-section-head"><h3>{t('instance.classification.title')}</h3>
+            {canAssign && <button className="btn ghost sm" onClick={openLabelsTags}>{t('instance.classification.manage')}</button>}</div>
+          {!labels.length && !tags.length ? <p className="dim">{t('instance.classification.none')}</p> : <>
+            {labels.length > 0 && <div className="classification-display-group"><h4>{t('classification.labels')}</h4>
+              <div className="classification-chips">{labels.map((item) => <ClassificationChip key={item.label_id}
+                text={`${item.label_name}: ${item.value}`} color={item.color} />)}</div></div>}
+            {tags.length > 0 && <div className="classification-display-group"><h4>{t('classification.tags')}</h4>
+              <div className="classification-chips">{tags.map((item) => <ClassificationChip key={item.id}
+                text={item.name} color={item.color} />)}</div></div>}
+          </>}
         </div></>}
       {tab === 'networking' && <><div className="vm-detail-section-head"><h3>{t('instance.detail.networkInterfaces')}</h3><div>
         <button className="btn ghost sm" onClick={() => actions.open('nic', server)}>{t('instance.detail.manageInterfaces')}</button>
@@ -313,12 +311,12 @@ function InstanceDetail({ instanceId }) {
       </TabState></>}
     </section>
     <InstanceActionDialogs actions={actions} />
-    {editLabelsTags && <Modal title={t('instance.labelsTags.edit')} wide onClose={() => !labelsTagsBusy && setEditLabelsTags(false)}
+    {editLabelsTags && <Modal title={t('instance.classification.title')} wide onClose={() => !labelsTagsBusy && setEditLabelsTags(false)}
       footer={<><button className="btn ghost" disabled={labelsTagsBusy} onClick={() => setEditLabelsTags(false)}>{t('common.cancel')}</button>
         <button className="btn primary" disabled={labelsTagsBusy || labelsTagsLoading || labelsTagsLoadFailed}
           onClick={saveLabelsTags}>{t(labelsTagsBusy ? 'instance.labelsTags.saving' : 'instance.labelsTags.save')}</button></>}>
-      {labelsTagsLoading ? <Empty>{t('common.loading')}</Empty> : <LabelsTagsEditor rows={labelRows} onRowsChange={setLabelRows}
-        tags={tagRows} onTagsChange={setTagRows} disabled={labelsTagsBusy} />}
+      {labelsTagsLoading ? <Empty>{t('common.loading')}</Empty> : classificationCatalog && <ClassificationPicker
+        catalog={classificationCatalog} selection={classificationSelection} onChange={setClassificationSelection} disabled={labelsTagsBusy} />}
       {labelsTagsError && <p className="err-text" role="alert">{labelsTagsError}</p>}
     </Modal>}
     {attachVolumeOpen && <Modal title={t('instance.detail.attachVolume')} onClose={() => !volumeBusy && setAttachVolumeOpen(false)}

@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import authRoutes from './routes/auth.js';
 import accountRoutes from './routes/account.js';
 import computeRoutes from './routes/compute.js';
+import classificationRoutes from './routes/classifications.js';
 import networkRoutes from './routes/network.js';
 import storageRoutes from './routes/storage.js';
 import billingRoutes from './routes/billing.js';
@@ -33,7 +34,7 @@ import { MOCK } from './openstack.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const protectedRoutes = [
-  accountRoutes, computeRoutes, networkRoutes, storageRoutes, billingRoutes, lbRoutes,
+  accountRoutes, classificationRoutes, computeRoutes, networkRoutes, storageRoutes, billingRoutes, lbRoutes,
   backupRoutes, marketplaceRoutes, powerRoutes, optimizeRoutes, monitorRoutes,
   objectRoutes, iacRoutes, notifyRoutes, k8sRoutes, adminRoutes,
 ];

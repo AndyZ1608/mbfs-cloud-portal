@@ -119,7 +119,7 @@ export function auditMiddleware(req, res, next) {
         source_ip: clientIp(req), ms: Date.now() - t0,
       };
       const events = res.locals.networkAudits?.length ? res.locals.networkAudits : res.locals.instanceAudits?.length ? res.locals.instanceAudits :
-        [res.locals.instanceAudit || res.locals.accountAudit ||
+        [res.locals.classificationAudit || res.locals.instanceAudit || res.locals.accountAudit ||
           (path === '/api/account/change-password' ? {
             action: 'account.password.change', resourceId: os?.user?.id,
             resourceName: os?.user?.name,
@@ -130,7 +130,7 @@ export function auditMiddleware(req, res, next) {
       for (const event of events) {
         const result = res.statusCode >= 400 && !(event?.status === 202 && event?.result === 'accepted') ? 'failure'
           : event?.result || (res.statusCode === 202 ? 'accepted' : 'success');
-        record({ ...base,
+        record({ ...base, provider: event?.provider || base.provider,
           action: event?.action || `${req.method.toLowerCase()}.${path.replace(/^\/api\/?/, '').split('/')[0] || 'api'}`,
           ...(event?.action?.startsWith('instance.') ? {
             resource_type: 'instance', resource_id: event.resourceId || null,
@@ -146,6 +146,10 @@ export function auditMiddleware(req, res, next) {
           ...(event?.action?.startsWith('network.') || event?.action?.startsWith('subnet.') ? {
             resource_type: 'network', resource_id: event.resourceId || null,
             resource_name: event.resourceName || null, details: event.details || {},
+          } : {}),
+          ...(event?.resource_type === 'label' || event?.resource_type === 'tag' ? {
+            resource_type: event.resource_type, resource_id: event.resource_id,
+            resource_name: event.resource_name, details: event.details || {},
           } : {}),
           ...(event?.legacy || {}),
           status: event?.status || base.status, result,

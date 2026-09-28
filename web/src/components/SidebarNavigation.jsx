@@ -3,7 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Server, HardDrive, Network, Globe, Shield, Disc3, KeyRound,
   BarChart3, Scale, DatabaseBackup, History, Store, Boxes, Wrench, PiggyBank,
-  CalendarClock, Archive, ChevronDown, Activity,
+  CalendarClock, Archive, ChevronDown, Activity, Tags,
 } from 'lucide-react';
 import { useI18n } from '../i18n/react.jsx';
 
@@ -15,6 +15,7 @@ export const NAVIGATION = [
     { to: '/instances', labelKey: 'navigation.instances', icon: Server },
     { to: '/images', labelKey: 'navigation.images', icon: Disc3 },
     { to: '/keypairs', labelKey: 'navigation.keypairs', icon: KeyRound },
+    { to: '/labels-tags', labelKey: 'navigation.labelsTags', icon: Tags },
   ] },
   { key: 'storage', labelKey: 'navigation.storage', icon: HardDrive, children: [
     { to: '/volumes', labelKey: 'navigation.volumes', icon: HardDrive },

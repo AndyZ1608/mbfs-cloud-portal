@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useOutletContext } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import { api, fmtDate, ramGB, serverIps } from '../api.js';
 import { Modal, Field, StatusBadge, ActionsMenu, toast, Empty, PageHead } from '../components/ui.jsx';
@@ -10,23 +10,29 @@ import useInstanceActions from '../useInstanceActions.js';
 import { useI18n } from '../i18n/react.jsx';
 import NetworkInterfaceFields, { addInterface, newInterface, removeInterface, validInterfaces } from '../components/NetworkInterfaceFields.jsx';
 import OsCatalog from '../components/OsCatalog.jsx';
-import LabelsTagsEditor, { editorPayload } from '../components/LabelsTagsEditor.jsx';
-import { listChips, matchesInstanceFilters } from '../instanceLabelsTags.js';
+import ClassificationPicker, { ClassificationChip } from '../components/ClassificationPicker.jsx';
+import { classificationChips, emptySelection, matchesClassificationFilters, matchesClassificationSearch } from '../classification.js';
 
 function InstanceClassificationChips({ server }) {
-  const { visible, remaining } = listChips(server);
+  const { visible, remaining } = classificationChips(server.classification);
   if (!visible.length) return null;
   return <div className="vm-list-chips">
-    {visible.map((chip, index) => <span className="chip" key={index} title={chip.text}>{chip.text}</span>)}
+    {visible.map((chip) => <ClassificationChip key={chip.id} text={chip.text} title={chip.title} color={chip.color} />)}
     {remaining > 0 && <span className="dim">+{remaining}</span>}
   </div>;
 }
 
-export default function Instances() {
+export default function InstancesRoute() {
+  const { sess } = useOutletContext();
+  return <Instances key={sess.project.id} sess={sess} />;
+}
+
+function Instances({ sess }) {
   const { t } = useI18n();
   const [servers, setServers] = useState(null);
   const [creating, setCreating] = useState(false);
   const [q, setQ] = useState('');
+  const [catalog, setCatalog] = useState({ labels: [], tags: [] });
   const [filters, setFilters] = useState([]);
   const [filterKind, setFilterKind] = useState('label');
   const [filterKey, setFilterKey] = useState('');
@@ -36,42 +42,47 @@ export default function Instances() {
   const [monStatus, setMonStatus] = useState(null);
   const [latest, setLatest] = useState({});
   const timer = useRef(null);
+  const projectRef = useRef(sess.project.id);
+  projectRef.current = sess.project.id;
   const actions = useInstanceActions({ onChanged: load });
 
   async function load() {
     try {
-      const d = await api('/servers');
+      const [d, classifications] = await Promise.all([api('/servers'), api('/classifications/catalog')]);
+      if (projectRef.current !== sess.project.id) return;
       setServers(d.servers);
+      setCatalog(classifications);
       actions.syncServers(d.servers);
-      api('/monitor/latest').then((m) => setLatest(m.latest || {})).catch(() => {});
+      api('/monitor/latest').then((m) => { if (projectRef.current === sess.project.id) setLatest(m.latest || {}); }).catch(() => {});
     } catch (e) { toast(e.message, 'error'); }
   }
 
   useEffect(() => {
+    setServers(null);
+    setCatalog({ labels: [], tags: [] });
+    setFilters([]);
+    setLatest({});
     load();
     api('/monitor/status').then(setMonStatus).catch(() => {});
     timer.current = setInterval(load, 10000);
     return () => { clearInterval(timer.current); };
-  }, []);
+  }, [sess.project.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const shown = !servers ? null : servers.filter((s) => {
     const query = q.trim().toLowerCase();
-    const searchMatch = !query || matchesInstanceFilters(s, query, []) || serverIps(s).some((x) => x.ip.includes(query));
-    return searchMatch && matchesInstanceFilters(s, '', filters);
+    const searchMatch = !query || matchesClassificationSearch(s, query) || serverIps(s).some((x) => x.ip.includes(query));
+    return searchMatch && matchesClassificationFilters(s.classification, filters);
   });
 
   function addFilter() {
     if (filterKind === 'tag') {
-      const tag = filterTag.trim();
-      if (tag && !filters.some((item) => item.kind === 'tag' && item.tag === tag)) {
-        setFilters([...filters, { kind: 'tag', tag }]); setFilterTag('');
+      if (filterTag && !filters.some((item) => item.kind === 'tag' && item.tag_id === filterTag)) {
+        setFilters([...filters, { kind: 'tag', tag_id: filterTag }]); setFilterTag('');
       }
       return;
     }
-    const key = filterKey.trim().toLowerCase();
-    const value = filterValue.trim();
-    if (key && value && !filters.some((item) => item.kind === 'label' && item.key === key && item.value === value)) {
-      setFilters([...filters, { kind: 'label', key, value }]); setFilterKey(''); setFilterValue('');
+    if (filterKey && filterValue && !filters.some((item) => item.kind === 'label' && item.label_id === filterKey)) {
+      setFilters([...filters, { kind: 'label', label_id: filterKey, value_id: filterValue }]); setFilterKey(''); setFilterValue('');
     }
   }
 
@@ -87,14 +98,20 @@ export default function Instances() {
         <select aria-label={t('instance.filters.kind')} value={filterKind} onChange={(event) => setFilterKind(event.target.value)}>
           <option value="label">{t('instance.filters.label')}</option><option value="tag">{t('instance.filters.tag')}</option>
         </select>
-        {filterKind === 'label' ? <><input aria-label={t('instance.labels.key')} placeholder={t('instance.labels.key')} value={filterKey} onChange={(event) => setFilterKey(event.target.value)} />
-          <input aria-label={t('instance.labels.value')} placeholder={t('instance.labels.value')} value={filterValue} onChange={(event) => setFilterValue(event.target.value)} /></>
-          : <input aria-label={t('instance.tags.title')} placeholder={t('instance.tags.title')} value={filterTag} onChange={(event) => setFilterTag(event.target.value)} />}
+        {filterKind === 'label' ? <><select aria-label={t('classification.labels.name')} value={filterKey}
+          onChange={(event) => { setFilterKey(event.target.value); setFilterValue(''); }}><option value="">{t('classification.labels.name')}</option>
+          {catalog.labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}</select>
+          <select aria-label={t('classification.labels.value')} value={filterValue} onChange={(event) => setFilterValue(event.target.value)}><option value="">{t('classification.labels.value')}</option>
+            {(catalog.labels.find((label) => label.id === filterKey)?.values || []).map((value) => <option key={value.id} value={value.id}>{value.value}</option>)}</select></>
+          : <select aria-label={t('classification.tags')} value={filterTag} onChange={(event) => setFilterTag(event.target.value)}>
+            <option value="">{t('classification.tags')}</option>{catalog.tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}</select>}
         <button className="btn ghost sm" onClick={addFilter}>{t('instance.filters.add')}</button>
         {filters.map((filter, index) => <button className="chip vm-filter-chip" key={index}
           onClick={() => setFilters(filters.filter((_, at) => at !== index))}
-          aria-label={`${t('instance.filters.remove')} ${filter.kind === 'tag' ? filter.tag : `${filter.key}=${filter.value}`}`}>
-          {filter.kind === 'tag' ? `#${filter.tag}` : `${filter.key}=${filter.value}`} ×</button>)}
+          aria-label={t('instance.filters.remove')}>
+          {filter.kind === 'tag' ? catalog.tags.find((tag) => tag.id === filter.tag_id)?.name
+            : `${catalog.labels.find((label) => label.id === filter.label_id)?.name}: ${catalog.labels.find((label) => label.id === filter.label_id)?.values.find((value) => value.id === filter.value_id)?.value}`} ×</button>)}
+        {filters.length > 0 && <button className="btn ghost sm" onClick={() => setFilters([])}>{t('instance.filters.clear')}</button>}
       </div>
 
       {!servers ? <Empty>{t('common.loading')}</Empty> : shown.length === 0 ? (
@@ -171,18 +188,18 @@ function CreateModal({ onClose, onDone }) {
     count: 1, bfv: false, boot_volume_gb: 40,
     show_ud: false, user_data: '',
   });
-  const [labelRows, setLabelRows] = useState([]);
-  const [tags, setTags] = useState([]);
+  const [classification, setClassification] = useState(emptySelection);
 
   useEffect(() => {
-    Promise.all([api('/flavors'), api('/images'), api('/available-networks'), api('/keypairs')])
-      .then(([fl, im, ne, kp]) => {
+    Promise.all([api('/flavors'), api('/images'), api('/available-networks'), api('/keypairs'), api('/classifications/catalog')])
+      .then(([fl, im, ne, kp, classifications]) => {
         const nets = ne.networks.filter((n) => !n['router:external']);
         setOpts({
           flavors: fl.flavors,
           images: im.images.filter((i) => i.status === 'active'),
           networks: nets,
           keypairs: kp.keypairs,
+          classifications,
         });
         setF((x) => ({
           ...x,
@@ -209,13 +226,10 @@ function CreateModal({ onClose, onDone }) {
     if (!opts?.images.some((image) => image.id === f.imageRef)) return toast(t('instance.create.imageRequired'), 'error');
     if (!validInterfaces(f.interfaces, opts?.networks || [])) return toast(t('instance.networkInterfaces.required'), 'error');
     if (Number(f.count) > 1 && f.interfaces.some((item) => item.ip_address.trim())) return toast(t('errors.interface_batch_fixed_ip'), 'error');
-    let labelsTags;
-    try { labelsTags = editorPayload(labelRows, tags, t); }
-    catch (error) { return toast(error.message, 'error'); }
     submitting.current = true;
     setBusy(true);
     try {
-      await api('/servers', {
+      const result = await api('/servers', {
         method: 'POST',
         body: {
           name: f.name.trim(), flavorRef: f.flavorRef, imageRef: f.imageRef,
@@ -223,10 +237,11 @@ function CreateModal({ onClose, onDone }) {
           key_name: f.key_name || undefined, count: Number(f.count) || 1,
           boot_volume_gb: f.bfv ? Number(f.boot_volume_gb) : undefined,
           user_data: f.show_ud && f.user_data.trim() ? f.user_data : undefined,
-          ...labelsTags,
+          classification,
         },
       });
-      toast(t('instances.creatingName', { name: f.name }), 'ok');
+      toast(t(result.classification_warning ? 'instance.classification.warning' : 'instances.creatingName', { name: f.name }),
+        result.classification_warning ? 'error' : 'ok');
       onDone();
     } catch (e) { toast(e.message, 'error'); } finally { submitting.current = false; setBusy(false); }
   }
@@ -288,7 +303,7 @@ function CreateModal({ onClose, onDone }) {
           </Field>
           <details className="vm-create-labels-tags">
             <summary>{t('instance.labelsTags.title')} <span className="dim">{t('instance.labelsTags.optional')}</span></summary>
-            <LabelsTagsEditor rows={labelRows} onRowsChange={setLabelRows} tags={tags} onTagsChange={setTags} disabled={busy} />
+            <ClassificationPicker catalog={opts.classifications} selection={classification} onChange={setClassification} disabled={busy} />
           </details>
         </div>
       )}

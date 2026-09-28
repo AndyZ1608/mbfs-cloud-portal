@@ -6,7 +6,7 @@ export function formatActivity(event, t) {
   const code = event.action || '';
   const key = `instance.activity.action.${code}`;
   const translation = t(key);
-  const semantic = code.startsWith('instance.') ||
+  const semantic = code.startsWith('instance.') || code.startsWith('label.') || code.startsWith('tag.') ||
     code === 'post.servers' && /^\/servers\/[^/]+\/action$/.test(event.path || '');
   const action = semantic ? (translation === key ? code || '—' : translation) : null;
   const details = event.details && !Array.isArray(event.details) ? event.details : {};
