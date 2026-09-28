@@ -12,7 +12,7 @@ import NetworkInterfaceFields, { addInterface, newInterface, removeInterface, va
 import OsCatalog from '../components/OsCatalog.jsx';
 import ClassificationPicker, { ClassificationChip } from '../components/ClassificationPicker.jsx';
 import { classificationChips, emptySelection, matchesClassificationFilters, matchesClassificationSearch } from '../classification.js';
-import { imageFlavorWarning, imageFlavorWarningText, instanceErrorTitle } from '../instanceError.js';
+import { imageFlavorWarning, imageFlavorWarningText, instanceErrorTitle, minimumBootVolumeGiB } from '../instanceError.js';
 
 function InstanceClassificationChips({ server }) {
   const { visible, remaining } = classificationChips(server.classification);
@@ -192,8 +192,11 @@ function CreateModal({ onClose, onDone }) {
     show_ud: false, user_data: '',
   });
   const [classification, setClassification] = useState(emptySelection);
-  const preflight = imageFlavorWarning(opts?.images.find((image) => image.id === f.imageRef),
-    opts?.flavors.find((flavor) => flavor.id === f.flavorRef), f.bfv);
+  const selectedImage = opts?.images.find((image) => image.id === f.imageRef);
+  const bootMinimum = selectedImage && f.bfv ? minimumBootVolumeGiB(selectedImage) : null;
+  const volumeSizeValid = !f.bfv || Number.isSafeInteger(Number(f.boot_volume_gb)) && Number(f.boot_volume_gb) > 0;
+  const preflight = imageFlavorWarning(selectedImage,
+    opts?.flavors.find((flavor) => flavor.id === f.flavorRef), f.bfv, f.boot_volume_gb);
 
   useEffect(() => {
     Promise.all([api('/flavors'), api('/images'), api('/available-networks'), api('/keypairs'), api('/classifications/catalog')])
@@ -229,6 +232,7 @@ function CreateModal({ onClose, onDone }) {
     if (submitting.current) return;
     if (!f.name.trim()) return toast(t('instances.nameRequired'), 'error');
     if (!opts?.images.some((image) => image.id === f.imageRef)) return toast(t('instance.create.imageRequired'), 'error');
+    if (!volumeSizeValid) return toast(t('errors.boot_volume_size_invalid'), 'error');
     if (preflight) return toast(imageFlavorWarningText(t, preflight), 'error');
     if (!validInterfaces(f.interfaces, opts?.networks || [])) return toast(t('instance.networkInterfaces.required'), 'error');
     if (Number(f.count) > 1 && f.interfaces.some((item) => item.ip_address.trim())) return toast(t('errors.interface_batch_fixed_ip'), 'error');
@@ -256,7 +260,7 @@ function CreateModal({ onClose, onDone }) {
     <Modal title={t('instances.createTitle')} onClose={close} wide
       footer={<>
         <button className="btn ghost" onClick={close} disabled={busy}>{t('common.cancel')}</button>
-        <button className="btn primary" onClick={submit} disabled={busy || !opts || !f.imageRef || !!preflight}>{t(busy ? 'instances.creating' : 'instances.create')}</button>
+        <button className="btn primary" onClick={submit} disabled={busy || !opts || !f.imageRef || !volumeSizeValid || !!preflight}>{t(busy ? 'instances.creating' : 'instances.create')}</button>
       </>}>
       {!opts ? <p>{t('instances.loadingOptions')}</p> : (
         <div className="form-grid">
@@ -273,7 +277,7 @@ function CreateModal({ onClose, onDone }) {
               {opts.flavors.map((x) => <option key={x.id} value={x.id}>{x.name} — {x.vcpus} vCPU / {ramGB(x.ram)} / {x.disk} GB</option>)}
             </select>
           </Field>
-          {preflight && <div className="vm-create-warning" role="alert">{imageFlavorWarningText(t, preflight)}</div>}
+          {preflight && preflight.code !== 'IMAGE_SIZE_EXCEEDS_VOLUME' && <div className="vm-create-warning" role="alert">{imageFlavorWarningText(t, preflight)}</div>}
           <Field label="SSH key">
             <select value={f.key_name} onChange={(e) => setF({ ...f, key_name: e.target.value })}>
               <option value="">— {t('instances.none')} —</option>
@@ -284,9 +288,12 @@ function CreateModal({ onClose, onDone }) {
             <div className="row-inline">
               <input type="checkbox" checked={f.bfv} onChange={(e) => setF({ ...f, bfv: e.target.checked })} id="bfv" />
               <label htmlFor="bfv">{t('instances.enable')}</label>
-              {f.bfv && <><input type="number" min="10" style={{ width: 90 }} value={f.boot_volume_gb}
+              {f.bfv && <><input type="number" min="1" step="1" style={{ width: 90 }} value={f.boot_volume_gb}
                 onChange={(e) => setF({ ...f, boot_volume_gb: e.target.value })} /> <span className="dim">GB</span></>}
             </div>
+            {f.bfv && bootMinimum && <small className="dim">{t('instance.error.preflight.minimumBootVolume', { required_disk_gb: bootMinimum })}</small>}
+            {f.bfv && !volumeSizeValid && <small className="err-text" role="alert">{t('errors.boot_volume_size_invalid')}</small>}
+            {f.bfv && preflight?.code === 'IMAGE_SIZE_EXCEEDS_VOLUME' && <small className="err-text" role="alert">{imageFlavorWarningText(t, preflight)}</small>}
           </Field>
           <div className="vm-interface-section">
             <h3>{t('instance.networkInterfaces.title')}</h3>

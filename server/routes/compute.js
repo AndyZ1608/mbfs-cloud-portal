@@ -6,7 +6,7 @@ import { assertOwned, fetchOwned, fetchUsableImage, owned } from '../projectScop
 import { attachInterface, createServerWithInterfaces, prepareInterfaces } from '../instanceInterfaces.js';
 import { addInstanceAudit, instanceActionCode, listInstanceAudit, recordInstanceErrorOnce, setInstanceAudit } from '../audit.js';
 import { assignmentsForInstances, pruneMissingInstances, removeInstanceAssignments, replaceAssignments, validateSelection } from '../classifications.js';
-import { classifyInstanceError, preflightImageFlavor, publicServer, publicServerPayload } from '../instanceErrors.js';
+import { classifyInstanceError, faultImageId, preflightImageFlavor, publicServer, publicServerPayload } from '../instanceErrors.js';
 
 const router = Router();
 
@@ -49,6 +49,9 @@ router.post('/servers', async (req, res, next) => {
     if (!name || !flavorRef || !imageRef) {
       throw new OSError(400, 'Thiếu thông tin: tên, flavor và image là bắt buộc');
     }
+    if (boot_volume_gb !== undefined && (!Number.isSafeInteger(Number(boot_volume_gb)) || Number(boot_volume_gb) <= 0)) {
+      throw new OSError(400, 'Dung lượng boot volume phải là số GiB nguyên dương.', 'boot_volume_size_invalid');
+    }
     const image = await fetchUsableImage(sess, imageRef);
     let flavor;
     try {
@@ -60,7 +63,9 @@ router.post('/servers', async (req, res, next) => {
       throw new OSError(502, 'Không thể kiểm tra Flavor đã chọn.', 'provider_failure');
     }
     if (!flavor) throw new OSError(502, 'Nova không trả về thông tin Flavor.', 'provider_failure');
-    const preflight = preflightImageFlavor(image, flavor, { bootFromVolume: Number(boot_volume_gb) > 0 });
+    const preflight = preflightImageFlavor(image, flavor, {
+      bootFromVolume: Number(boot_volume_gb) > 0, bootVolumeGiB: boot_volume_gb,
+    });
     if (preflight) {
       const error = new OSError(400, 'Image không đáp ứng yêu cầu của Flavor đã chọn.', preflight.code);
       error.context = preflight.context;
@@ -151,8 +156,11 @@ router.get('/servers/:id/error', async (req, res, next) => {
     const server = await fetchOwned(req.session.os, 'compute', `/servers/${encodeURIComponent(req.params.id)}`, 'server');
     const error = classifyInstanceError(server);
     if (error) recordInstanceErrorOnce(req.session.os, server, error, req.id);
+    const imageId = error?.code === 'IMAGE_SIZE_EXCEEDS_VOLUME' ? faultImageId(server) || server.image?.id : null;
+    const image = imageId ? await fetchUsableImage(req.session.os, imageId).catch(() => null) : null;
+    const safeImageName = typeof image?.name === 'string' && image.name.length <= 255 ? image.name : null;
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ error });
+    res.json({ error: error && safeImageName ? { ...error, image_name: safeImageName } : error });
   } catch (failure) {
     // Provider error bodies can contain diagnostics too. The customer-facing
     // error endpoint never forwards them, including on failed Nova reads.

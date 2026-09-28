@@ -1,7 +1,7 @@
 // CMP action codes are stable data. Translate only at display time, and never
 // render arbitrary request payloads or unknown detail keys.
 const shown = (...values) => values.filter((value) => value !== null && value !== undefined && value !== '' && value !== false);
-import { instanceErrorTitle } from './instanceError.js';
+import { instanceErrorTitle, safeVolumeContext } from './instanceError.js';
 
 export function formatActivity(event, t) {
   const code = event.action || '';
@@ -9,11 +9,13 @@ export function formatActivity(event, t) {
   const translation = t(key);
   const semantic = code.startsWith('instance.') || code.startsWith('label.') || code.startsWith('tag.') ||
     code === 'post.servers' && /^\/servers\/[^/]+\/action$/.test(event.path || '');
-  const action = semantic ? (translation === key ? code || '—' : translation) : null;
+  const action = code === 'instance.error.detected' && event.details?.error_code === 'IMAGE_SIZE_EXCEEDS_VOLUME'
+    ? t('instance.error.buildFailed') : semantic ? (translation === key ? code || '—' : translation) : null;
   const details = event.details && !Array.isArray(event.details) ? event.details : {};
   let summary = '';
   if (code === 'instance.error.detected') {
-    summary = instanceErrorTitle(t, details.error_code);
+    const context = details.error_code === 'IMAGE_SIZE_EXCEEDS_VOLUME' ? safeVolumeContext(details) : null;
+    summary = `${instanceErrorTitle(t, details.error_code)}${context ? ` · ${t('instance.error.activity.sizes', context)}` : ''}`;
   } else if (code === 'instance.rename' && details.old_name && details.new_name) {
     summary = `${details.old_name} → ${details.new_name}`;
   } else if (code.startsWith('instance.resize.')) {

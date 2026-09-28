@@ -30,6 +30,10 @@ export function recordInstanceErrorOnce(session, server, normalizedError, reques
     action: 'instance.error.detected', result: 'failure', resource_type: 'instance',
     resource_id: server.id, resource_name: server.name,
     details: { error_code: normalizedError.code, category: normalizedError.category,
+      ...(normalizedError.code === 'IMAGE_SIZE_EXCEEDS_VOLUME' && Number.isSafeInteger(normalizedError.context?.required_disk_gb)
+        && Number.isSafeInteger(normalizedError.context?.requested_volume_gb)
+        ? { required_disk_gb: normalizedError.context.required_disk_gb,
+          requested_volume_gb: normalizedError.context.requested_volume_gb } : {}),
       ...(normalizedError.occurred_at ? { occurred_at: normalizedError.occurred_at } : {}) } });
   seenInstanceErrors.add(key);
   console.info('[instance-error] detected', JSON.stringify({ project_id: session.project.id,

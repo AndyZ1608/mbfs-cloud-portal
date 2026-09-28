@@ -10,7 +10,8 @@ import { attachedSecurityGroups, attachedStorage, canDetachVolume, networkRows }
 import { formatActivity } from '../activityFormatter.js';
 import ClassificationPicker, { ClassificationChip } from '../components/ClassificationPicker.jsx';
 import { emptySelection, selectionFromClassification } from '../classification.js';
-import { instanceErrorCategory, instanceErrorGuidance, instanceErrorTitle, safeInstanceErrorCode } from '../instanceError.js';
+import { instanceErrorCategory, instanceErrorDescription, instanceErrorGuidance,
+  instanceErrorTitle, safeInstanceErrorCode, safeVolumeContext } from '../instanceError.js';
 
 const TABS = ['overview', 'networking', 'storage', 'security', 'activity'];
 const value = (item) => item === undefined || item === null || item === '' ? '—' : item;
@@ -158,6 +159,11 @@ function InstanceDetail({ instanceId }) {
   if (serverError) return <div className="vm-detail-error" role="alert">{t('instance.detail.unavailable')}<div><Link to="/instances">{t('navigation.instances')}</Link></div></div>;
   if (!server) return <Empty>{t('common.loading')}</Empty>;
 
+  const activeError = failure.data || server.instance_error;
+  const volumeContext = activeError?.code === 'IMAGE_SIZE_EXCEEDS_VOLUME' ? safeVolumeContext(activeError.context) : null;
+  const supportReference = /^req-(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8,64})$/i.test(failure.data?.request_id || '')
+    ? failure.data.request_id : null;
+  const errorImageName = failure.data?.image_name || (resolvedImage?.id === server.image?.id ? resolvedImage.name : null);
   const specs = server.flavor?.vcpus != null ? server.flavor
     : flavor?.id === server.flavor?.id ? flavor : server.flavor || {};
   const ips = serverIps(server);
@@ -256,7 +262,7 @@ function InstanceDetail({ instanceId }) {
         <span>{t('instance.detail.ipAddresses')}: <b>{ips.map((item) => item.ip).join(', ') || '—'}</b></span>
       </div>
       {server.status === 'ERROR' && <div className="vm-error-banner" role="alert">
-        <div><strong>{t('instance.error.header')}</strong><span>{failure.error ? t('instance.error.loadFailed') : instanceErrorTitle(t, failure.data?.code || server.instance_error?.code)}</span></div>
+        <div><strong>{t('instance.error.header')}</strong><span>{failure.error ? t('instance.error.loadFailed') : instanceErrorTitle(t, activeError?.code)}</span></div>
         <button className="btn ghost sm" onClick={() => setParams({})}>{t('instance.error.viewDetails')}</button>
       </div>}
     </div>
@@ -269,13 +275,17 @@ function InstanceDetail({ instanceId }) {
         <h3>{t('instance.error.details')}</h3>
         {failure.loading && !failure.data && <p>{t('common.loading')}</p>}
         {failure.error && <p>{t('instance.error.loadFailed')}</p>}
-        {!failure.error && (failure.data || server.instance_error) && <>
+        {!failure.error && activeError && <>
           <div className="vm-error-fields">
-            <div><span>{t('instance.error.type')}</span><strong>{t(`instance.error.category.${instanceErrorCategory(failure.data?.code || server.instance_error?.code)}`)}</strong></div>
-            <div><span>{t('instance.error.reason')}</span><strong>{instanceErrorTitle(t, failure.data?.code || server.instance_error?.code)}</strong></div>
-            <div><span>{t('instance.error.description')}</span><p>{t(`instance.error.description.${instanceErrorCategory(failure.data?.code || server.instance_error?.code)}`)}</p></div>
-            <div><span>{t('instance.error.suggestedActions')}</span><p>{instanceErrorGuidance(t, failure.data?.code || server.instance_error?.code)}</p></div>
-            <div><span>{t('instance.error.code')}</span><code>{safeInstanceErrorCode(failure.data?.code || server.instance_error?.code)}</code></div>
+            <div><span>{t('instance.error.type')}</span><strong>{t(`instance.error.category.${instanceErrorCategory(activeError.code)}`)}</strong></div>
+            <div><span>{t('instance.error.reason')}</span><strong>{instanceErrorTitle(t, activeError.code)}</strong></div>
+            <div><span>{t('instance.error.description')}</span><p>{instanceErrorDescription(t, activeError)}</p></div>
+            {volumeContext && <><div><span>{t('instance.error.requiredDisk')}</span><strong>{volumeContext.required_disk_gb} GB</strong></div>
+              <div><span>{t('instance.error.bootVolume')}</span><strong>{volumeContext.requested_volume_gb} GB</strong></div></>}
+            {activeError.code === 'IMAGE_SIZE_EXCEEDS_VOLUME' && errorImageName && <div><span>{t('instance.detail.image')}</span><strong>{errorImageName}</strong></div>}
+            <div><span>{t('instance.error.suggestedActions')}</span><p>{instanceErrorGuidance(t, activeError.code, activeError.context)}</p></div>
+            <div><span>{t('instance.error.code')}</span><code>{safeInstanceErrorCode(activeError.code)}</code></div>
+            {supportReference && <div><span>{t('instance.error.supportReference')}</span><code>{supportReference}</code></div>}
           </div>
           {failure.data?.occurred_at && <small>{t('instance.error.occurredAt')}: {fmtDate(failure.data.occurred_at)}</small>}
         </>}

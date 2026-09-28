@@ -50,6 +50,10 @@ export function errorHandler(err, req, res, _next) {
       ? { context: { required_disk_gb: err.context.required_disk_gb, flavor_disk_gb: err.context.flavor_disk_gb } } : {}),
     ...(err.code === 'FLAVOR_RAM_TOO_SMALL' && Number.isFinite(err.context?.required_ram_mb) && Number.isFinite(err.context?.flavor_ram_mb)
       ? { context: { required_ram_mb: err.context.required_ram_mb, flavor_ram_mb: err.context.flavor_ram_mb } } : {}),
+    ...(err.code === 'IMAGE_SIZE_EXCEEDS_VOLUME' && Number.isSafeInteger(err.context?.required_disk_gb)
+      && Number.isSafeInteger(err.context?.requested_volume_gb)
+      ? { context: { required_disk_gb: err.context.required_disk_gb,
+        requested_volume_gb: err.context.requested_volume_gb } } : {}),
     ...(['network_partial_failure', 'network_edit_partial_failure'].includes(err.code) && err.resourceIds ? { resourceIds: err.resourceIds } : {}),
   });
 }
