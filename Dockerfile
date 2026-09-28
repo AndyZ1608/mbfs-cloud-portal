@@ -4,6 +4,7 @@ WORKDIR /build/web
 COPY web/package*.json ./
 RUN npm ci
 COPY web/ ./
+COPY shared/ /build/shared/
 RUN npm run build
 
 # ===== Stage 2: runtime =====
@@ -13,6 +14,7 @@ WORKDIR /app
 COPY server/package*.json ./
 RUN npm ci --omit=dev
 COPY server/ ./
+COPY shared/ /shared/
 COPY --from=webbuild /build/web/dist ./public
 
 EXPOSE 8080
