@@ -2,7 +2,8 @@ import React, { useId, useRef } from 'react';
 import { useI18n } from '../i18n/react.jsx';
 import { composeSegmentedIp, fixedIpError, segmentedHostOctets, subnetAddressInfo } from '../fixedIp.js';
 
-export default function FixedIpInput({ subnet, value, onChange, disabled = false }) {
+export default function FixedIpInput({ subnet, value, onChange, disabled = false,
+  required = false, labelKey = 'instance.networkInterfaces.ipAddress' }) {
   const { t } = useI18n();
   const labelId = useId();
   const octetRefs = useRef([]);
@@ -34,7 +35,7 @@ export default function FixedIpInput({ subnet, value, onChange, disabled = false
   }
 
   return <div className="field">
-    <span id={labelId} className="field-label">{t('instance.networkInterfaces.ipAddress')}</span>
+    <span id={labelId} className="field-label">{t(labelKey)}{required ? ' *' : ''}</span>
     {octets ? <div className="vm-ip-control" role="group" aria-labelledby={labelId}>
       <span className="vm-ip-prefix" aria-hidden="true">{info.fixedParts.join('.')}.</span>
       {octets.map((octet, index) => <React.Fragment key={index}>
@@ -42,13 +43,14 @@ export default function FixedIpInput({ subnet, value, onChange, disabled = false
         <input ref={(element) => { octetRefs.current[index] = element; }} type="text" inputMode="numeric"
           value={octet} maxLength={3} disabled={disabled} autoComplete="off"
           aria-label={t('instance.networkInterfaces.hostOctet', { index: index + 1 })}
-          aria-invalid={!!error} onChange={(event) => changeOctet(index, event.target.value)}
+          aria-invalid={!!error} aria-required={required} onChange={(event) => changeOctet(index, event.target.value)}
           onKeyDown={(event) => keyDown(event, index)} onPaste={paste} />
       </React.Fragment>)}
-    </div> : <input aria-labelledby={labelId} aria-invalid={!!error} value={value} disabled={disabled}
+    </div> : <input aria-labelledby={labelId} aria-invalid={!!error} aria-required={required} value={value} disabled={disabled}
       onChange={(event) => onChange(event.target.value)} autoComplete="off" />}
     {subnet?.cidr && !octets && <span className="field-hint">{t('instance.networkInterfaces.subnet')}: {subnet.cidr}</span>}
     {error ? <span className="vm-ip-error" role="alert">{t(`instance.networkInterfaces.${error}`)}</span>
-      : <span className="field-hint">{t('instance.networkInterfaces.autoAssignIp')}</span>}
+      : required ? !value && <span className="field-hint">{t('vip.addressRequired')}</span>
+        : <span className="field-hint">{t('instance.networkInterfaces.autoAssignIp')}</span>}
   </div>;
 }

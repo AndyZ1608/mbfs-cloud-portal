@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import { api } from '../api.js';
 import { Modal, Field, StatusBadge, ActionsMenu, toast, Empty, PageHead } from '../components/ui.jsx';
@@ -51,10 +52,11 @@ export default function Networks() {
             <tbody>
               {nets.map((n) => (
                 <tr key={n.id}>
-                  <td><b>{n.name}</b></td>
+                  <td><Link className="link" to={`/networks/${encodeURIComponent(n.id)}`}>{n.name}</Link></td>
                   <td><StatusBadge status={n.status} /></td>
                   <td>{(n.subnet_details || []).map((s) => (
-                    <span key={s.id} className="mono chip" title={`GW ${s.gateway_ip || '—'} · DHCP ${t(s.enable_dhcp ? 'networks.on' : 'networks.off')}`}>{s.cidr}</span>
+                    <Link key={s.id} className="mono chip" to={`/networks/${encodeURIComponent(n.id)}/subnets/${encodeURIComponent(s.id)}`}
+                      title={`GW ${s.gateway_ip || '—'} · DHCP ${t(s.enable_dhcp ? 'networks.on' : 'networks.off')}`}>{s.cidr}</Link>
                   ))}</td>
                   <td className="dim">{t(n['router:external'] ? 'networks.external' : n.shared ? 'networks.shared' : 'networks.internal')}</td>
                   <td>{!n['router:external'] && (

@@ -7,7 +7,7 @@ export function formatActivity(event, t) {
   const code = event.action || '';
   const key = `instance.activity.action.${code}`;
   const translation = t(key);
-  const semantic = code.startsWith('instance.') || code.startsWith('label.') || code.startsWith('tag.') ||
+  const semantic = code.startsWith('instance.') || code.startsWith('label.') || code.startsWith('tag.') || code.startsWith('vip.') ||
     code === 'post.servers' && /^\/servers\/[^/]+\/action$/.test(event.path || '');
   const action = code === 'instance.error.detected' && event.details?.error_code === 'IMAGE_SIZE_EXCEEDS_VOLUME'
     ? t('instance.error.buildFailed') : semantic ? (translation === key ? code || '—' : translation) : null;
@@ -23,6 +23,8 @@ export function formatActivity(event, t) {
   } else if (code.startsWith('instance.interface.')) {
     summary = shown(details.network_name || details.network_id, details.ip_address,
       details.port_id).join(' · ');
+  } else if (code.startsWith('vip.')) {
+    summary = shown(details.vip_name || details.vip_port_id, details.vip_ip, details.fixed_ip).join(' · ');
   } else if (code === 'instance.security_groups.change') {
     summary = shown(Array.isArray(details.added) && details.added.length && `${t('instance.activity.added')}: ${details.added.join(', ')}`,
       Array.isArray(details.removed) && details.removed.length && `${t('instance.activity.removed')}: ${details.removed.join(', ')}`).join(' · ');

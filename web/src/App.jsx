@@ -25,6 +25,8 @@ import { CONSOLE_ROUTE } from './console/navigation.js';
 import { useI18n } from './i18n/react.jsx';
 
 const InstanceDetailRoute = lazy(() => import('./pages/InstanceDetail.jsx'));
+const NetworkDetailRoute = lazy(() => import('./pages/NetworkDetail.jsx'));
+const SubnetDetailRoute = lazy(() => import('./pages/SubnetDetail.jsx'));
 const Login = lazy(() => import('./pages/Login.jsx'));
 
 function PageRouteFallback() {
@@ -48,6 +50,8 @@ export default function App() {
           <Route path="/admin" element={<Admin />} />
           <Route path="/volumes" element={<Volumes />} />
           <Route path="/networks" element={<Networks />} />
+          <Route path="/networks/:networkId" element={<Suspense fallback={<PageRouteFallback />}><NetworkDetailRoute /></Suspense>} />
+          <Route path="/networks/:networkId/subnets/:subnetId" element={<Suspense fallback={<PageRouteFallback />}><SubnetDetailRoute /></Suspense>} />
           <Route path="/floating-ips" element={<FloatingIPs />} />
           <Route path="/security-groups" element={<SecurityGroups />} />
           <Route path="/images" element={<Images />} />

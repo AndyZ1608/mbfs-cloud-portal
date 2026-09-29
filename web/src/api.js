@@ -28,6 +28,10 @@ export function apiErrorMessage(data, status) {
     subnetId: data?.resourceIds?.subnetId || '—',
   });
   if (code === 'network_edit_partial_failure') return `${text('errors.network_edit_partial_failure')} (${data?.resourceIds?.networkId || '—'} / ${data?.resourceIds?.subnetId || '—'})`;
+  if (code === 'vip_delete_assigned') return text('errors.vip_delete_assigned', { count: data?.count ?? '—' });
+  if (code === 'vip_partial_failure') return text('errors.vip_partial_failure', {
+    count: data?.changed ?? '—', portId: data?.failedPortId || '—',
+  });
   if (code && resources.vi[`errors.${code}`]) return text(`errors.${code}`);
   if (status === 401) return text('errors.authentication_required');
   if (status === 403) return text('errors.permission_denied');

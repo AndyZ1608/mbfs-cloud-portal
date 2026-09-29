@@ -15,6 +15,7 @@ import { instanceErrorCategory, instanceErrorDescription, instanceErrorGuidance,
   instanceErrorTitle, safeInstanceErrorCode, safeVolumeContext } from '../instanceError.js';
 import { canExtendVolume } from '../../../shared/volumeExtend.mjs';
 import useVolumeExtend from '../useVolumeExtend.js';
+import { PortVipsModal } from '../components/VipModals.jsx';
 
 const TABS = ['overview', 'networking', 'storage', 'security', 'activity'];
 const value = (item) => item === undefined || item === null || item === '' ? '—' : item;
@@ -77,6 +78,7 @@ function InstanceDetail({ instanceId, project, roles }) {
   const [resolvedImage, setResolvedImage] = useState(null);
   const [flavor, setFlavor] = useState(null);
   const [attachVolumeOpen, setAttachVolumeOpen] = useState(false);
+  const [vipPortId, setVipPortId] = useState(null);
   const [selectedVolumeId, setSelectedVolumeId] = useState('');
   const [volumeBusy, setVolumeBusy] = useState(false);
   const [activityMoreBusy, setActivityMoreBusy] = useState(false);
@@ -161,11 +163,13 @@ function InstanceDetail({ instanceId, project, roles }) {
     setTabStates((states) => ({ ...states, [tab]: { ...states[tab], loading: true, error: null } }));
     const loaders = {
       networking: async () => {
-        const [ports, networks, fips, groups] = await Promise.all([
+        const [ports, networks, fips, groups, vipView] = await Promise.all([
           api(`/servers/${encodedId}/interfaces`), api('/available-networks'),
-          api('/floatingips'), api('/security-groups'),
+          api('/floatingips'), api('/security-groups'), api(`/servers/${encodedId}/vips`).catch((error) => ({ error: error.message })),
         ]);
-        return networkRows(ports.interfaces, networks.networks, fips.floatingips, groups.security_groups);
+        const byPort = new Map((vipView.ports || []).map((item) => [item.id, item]));
+        return networkRows(ports.interfaces, networks.networks, fips.floatingips, groups.security_groups)
+          .map((port) => ({ ...port, vipView: byPort.get(port.id) || null, vipLoadError: vipView.error || null }));
       },
       storage: async () => {
         const [nova, cinder, snapshots] = await Promise.all([
@@ -358,10 +362,16 @@ function InstanceDetail({ instanceId, project, roles }) {
         <button className="btn ghost sm" onClick={() => actions.open('fip', server)}>{t('instances.floatingIp')}</button>
         <button className="btn ghost sm" onClick={() => actions.open('sg', server)}>{t('instances.securityGroups')}</button>
       </div></div><TabState state={current} t={t} empty={tabData?.length === 0 && 'instance.detail.noInterfaces'} errorKey="instance.detail.networkError">
-        <div className="vm-detail-table"><table className="tbl"><thead><tr>{['port', 'network', 'subnet', 'fixedIp', 'floatingIp', 'securityGroups', 'mac'].map((key) => <th key={key}>{t(`instance.detail.${key}`)}</th>)}</tr></thead><tbody>
+        <div className="vm-detail-table"><table className="tbl"><thead><tr>{['port', 'network', 'subnet', 'fixedIp', 'floatingIp', 'securityGroups', 'mac'].map((key) => <th key={key}>{t(`instance.detail.${key}`)}</th>)}<th>{t('instance.networking.allowedAddressPairs')}</th><th>{t('common.action')}</th></tr></thead><tbody>
           {(tabData || []).map((port) => <tr key={port.id}><td className="mono">{port.name || port.id}</td><td>{port.networkName}</td>
             <td>{port.fixed.map((item) => item.subnet).join(', ') || '—'}</td><td className="mono">{port.fixed.map((item) => item.address).join(', ') || '—'}</td>
-            <td className="mono">{port.floating.join(', ') || '—'}</td><td>{port.groups.map((item) => item.name).join(', ') || '—'}</td><td className="mono">{value(port.mac_address)}</td></tr>)}
+            <td className="mono">{port.floating.join(', ') || '—'}</td><td>{port.groups.map((item) => item.name).join(', ') || '—'}</td><td className="mono">{value(port.mac_address)}</td>
+            <td>{port.vipView ? <div className="vip-pair-list">
+              {port.vipView.vips.map((vip) => <span key={vip.id}><strong>{vip.name || vip.id}</strong> <span className="mono">{vip.ip_address}</span></span>)}
+              {port.vipView.external_pairs.map((pair, index) => <span key={`${pair.ip_address}-${index}`}><small>{t('instance.networking.externalAddressPair')}</small> <span className="mono">{pair.ip_address}</span></span>)}
+              {!port.vipView.vips.length && !port.vipView.external_pairs.length && '—'}
+            </div> : <span className="mono">{port.allowed_address_pairs?.map((pair) => pair.ip_address).join(', ') || '—'}</span>}</td>
+            <td>{port.vipView?.manageable && <button className="btn ghost sm" onClick={() => setVipPortId(port.id)}>{t('instance.networking.manageVips')}</button>}</td></tr>)}
         </tbody></table></div></TabState></>}
       {tab === 'storage' && <><div className="vm-detail-section-head"><h3>{t('instance.detail.storage')}</h3><div><button className="btn ghost sm" disabled={!current.loaded} onClick={() => setAttachVolumeOpen(true)}>{t('instance.detail.attachVolume')}</button><Link className="btn ghost sm" to="/volumes">{t('instance.detail.manageVolumes')}</Link></div></div>
         <DetailFields rows={[[t('instance.detail.rootDisk'), rootDisk]]} />
@@ -398,6 +408,8 @@ function InstanceDetail({ instanceId, project, roles }) {
       </TabState></>}
     </section>
     <InstanceActionDialogs actions={actions} />
+    {vipPortId && <PortVipsModal portId={vipPortId} onClose={() => setVipPortId(null)}
+      onDone={() => { setVipPortId(null); refresh(); }} />}
     {editLabelsTags && <Modal title={t('instance.classification.title')} wide onClose={() => !labelsTagsBusy && setEditLabelsTags(false)}
       footer={<><button className="btn ghost" disabled={labelsTagsBusy} onClick={() => setEditLabelsTags(false)}>{t('common.cancel')}</button>
         <button className="btn primary" disabled={labelsTagsBusy || labelsTagsLoading || labelsTagsLoadFailed}

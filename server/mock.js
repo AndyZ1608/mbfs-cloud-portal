@@ -374,6 +374,7 @@ function mockCompute(m, path, q, body, projectId) {
 
 function mockNetwork(m, path, q, body, projectId) {
   let qmt;
+  if (path === '/v2.0/extensions' && m === 'GET') return { extensions: [{ alias: 'standard-attr-tag' }] };
   if ((qmt = path.match(/^\/v2\.0\/quotas\/([^/]+)$/)) && !path.endsWith('.json')) {
     mockQuotas[qmt[1]] = mockQuotas[qmt[1]] || { instances: 100, cores: 171, ram: 122880, volumes: 100, gigabytes: 135, snapshots: 10, floatingip: 50, network: 100, security_group: 10 };
     if (m === 'GET') return { quota: mockQuotas[qmt[1]] };
@@ -459,8 +460,11 @@ function mockNetwork(m, path, q, body, projectId) {
     const network = networks.find((item) => item.id === spec.network_id);
     const fixed = spec.fixed_ips?.[0];
     const subnet = subnets.find((item) => item.id === fixed?.subnet_id);
+    const vipReservation = spec.admin_state_up === false && spec.port_security_enabled === false
+      && Array.isArray(spec.security_groups) && spec.security_groups.length === 0
+      && spec.device_id === '' && spec.device_owner === '' && !!fixed?.ip_address;
     if (!network || !subnet || subnet.network_id !== network.id || spec.project_id !== projectId
-      || !Array.isArray(spec.security_groups) || !spec.security_groups.length
+      || !Array.isArray(spec.security_groups) || (!vipReservation && !spec.security_groups.length)
       || spec.security_groups.some((id) => !secgroups.some((group) => group.id === id && group.project_id === projectId))) throw notFound();
     let address = fixed.ip_address;
     if (!address) {
@@ -481,7 +485,8 @@ function mockNetwork(m, path, q, body, projectId) {
       id, project_id: projectId, name: spec.name || '', network_id: network.id,
       fixed_ips: [{ subnet_id: subnet.id, ip_address: address }], security_groups: [...spec.security_groups],
       mac_address: `fa:16:3e:${id.slice(0, 2)}:${id.slice(2, 4)}:${id.slice(4, 6)}`,
-      device_id: '', device_owner: '', status: 'DOWN',
+      device_id: '', device_owner: '', status: 'DOWN', tags: [], allowed_address_pairs: [],
+      admin_state_up: spec.admin_state_up ?? true, port_security_enabled: spec.port_security_enabled ?? true,
     };
     ports.push(port);
     return { port };
@@ -490,6 +495,20 @@ function mockNetwork(m, path, q, body, projectId) {
     const port = ports.find((p) => p.id === mt[1]);
     if (!port) throw notFound();
     return { port };
+  }
+  if ((mt = path.match(/^\/v2\.0\/ports\/([^/]+)$/)) && m === 'PUT') {
+    const port = ports.find((p) => p.id === mt[1]);
+    if (!port) throw notFound();
+    if (Object.keys(body?.port || {}).length !== 1 || !Array.isArray(body.port.allowed_address_pairs)) throw conflict('Only AAP update is supported');
+    port.allowed_address_pairs = body.port.allowed_address_pairs;
+    return { port };
+  }
+  if ((mt = path.match(/^\/v2\.0\/ports\/([^/]+)\/tags\/([^/]+)$/)) && m === 'PUT') {
+    const port = ports.find((p) => p.id === mt[1]);
+    if (!port) throw notFound();
+    port.tags ||= [];
+    if (!port.tags.includes(mt[2])) port.tags.push(mt[2]);
+    return null;
   }
   if ((mt = path.match(/^\/v2\.0\/ports\/([^/]+)$/)) && m === 'DELETE') {
     const index = ports.findIndex((port) => port.id === mt[1]);

@@ -157,7 +157,8 @@ export function auditMiddleware(req, res, next) {
         events.push({ action: 'instance.create', result: 'failure' });
       }
       for (const event of events) {
-        const result = res.statusCode >= 400 && !(event?.status === 202 && event?.result === 'accepted') ? 'failure'
+        const result = event?.action?.startsWith('vip.') && event?.result === 'success' ? 'success'
+          : res.statusCode >= 400 && !(event?.status === 202 && event?.result === 'accepted') ? 'failure'
           : event?.result || (res.statusCode === 202 ? 'accepted' : 'success');
         record({ ...base, provider: event?.provider || base.provider,
           action: event?.action || `${req.method.toLowerCase()}.${path.replace(/^\/api\/?/, '').split('/')[0] || 'api'}`,
@@ -179,6 +180,11 @@ export function auditMiddleware(req, res, next) {
           ...(event?.action?.startsWith('volume.') ? {
             resource_type: 'volume', resource_id: event.resourceId || null,
             resource_name: event.resourceName || null, details: event.details || {},
+          } : {}),
+          ...(event?.action?.startsWith('vip.') ? {
+            resource_type: 'vip', resource_id: event.resourceId || null,
+            resource_name: event.resourceName || null, instance_id: event.instanceId || null,
+            details: event.details || {},
           } : {}),
           ...(event?.resource_type === 'label' || event?.resource_type === 'tag' ? {
             resource_type: event.resource_type, resource_id: event.resource_id,
