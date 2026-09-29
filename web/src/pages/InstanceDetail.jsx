@@ -13,6 +13,8 @@ import ClassificationPicker, { ClassificationChip } from '../components/Classifi
 import { emptySelection, selectionFromClassification } from '../classification.js';
 import { instanceErrorCategory, instanceErrorDescription, instanceErrorGuidance,
   instanceErrorTitle, safeInstanceErrorCode, safeVolumeContext } from '../instanceError.js';
+import { canExtendVolume } from '../../../shared/volumeExtend.mjs';
+import useVolumeExtend from '../useVolumeExtend.js';
 
 const TABS = ['overview', 'networking', 'storage', 'security', 'activity'];
 const value = (item) => item === undefined || item === null || item === '' ? '—' : item;
@@ -87,6 +89,8 @@ function InstanceDetail({ instanceId, project, roles }) {
   const [labelsTagsError, setLabelsTagsError] = useState('');
   const current = tabStates[tab] || {};
   const encodedId = encodeURIComponent(instanceId);
+  const volumeExtend = useVolumeExtend({ volumes: tab === 'storage' ? current.data?.attached : [],
+    onRefresh: refresh, enabled: tab === 'storage' });
 
   function refresh() {
     setServerRevision((n) => n + 1);
@@ -365,6 +369,8 @@ function InstanceDetail({ instanceId, project, roles }) {
           <h4>{t('instance.detail.attachedVolumes')}</h4>
           {!tabData?.attached?.length ? <Empty>{t('instance.detail.noVolumes')}</Empty> : <div className="vm-detail-table"><table className="tbl"><thead><tr>{['name', 'volumeId', 'size', 'device', 'status'].map((key) => <th key={key}>{t(`instance.detail.${key}`)}</th>)}<th>{t('common.action')}</th></tr></thead><tbody>
             {tabData.attached.map((volume) => <tr key={volume.id}><td>{volume.name || '—'}</td><td className="mono">{volume.id}</td><td>{volume.size} GB</td><td className="mono">{value(volume.device)}</td><td><StatusBadge status={volume.status} /></td><td><ActionsMenu items={[
+              canExtendVolume(volume.status) && { label: t('volumes.extend'), disabled: volumeExtend.isPending(volume.id),
+                onClick: () => volumeExtend.extend(volume) },
               { label: t('instances.snapshot'), onClick: () => snapshotVolume(volume) },
               canDetachVolume(server, volume) && { label: t('volumes.detachFromInstance'), tone: 'danger', onClick: () => detachVolume(volume) },
             ]} /></td></tr>)}

@@ -3,6 +3,8 @@ import { Plus } from 'lucide-react';
 import { api, fmtDate } from '../api.js';
 import { Modal, Field, StatusBadge, ActionsMenu, toast, Empty, PageHead } from '../components/ui.jsx';
 import { useI18n } from '../i18n/react.jsx';
+import { canExtendVolume } from '../../../shared/volumeExtend.mjs';
+import useVolumeExtend from '../useVolumeExtend.js';
 
 export default function Volumes() {
   const { t } = useI18n();
@@ -12,6 +14,7 @@ export default function Volumes() {
   const [creating, setCreating] = useState(false);
   const [attachFor, setAttachFor] = useState(null);
   const timer = useRef(null);
+  const volumeExtend = useVolumeExtend({ volumes: vols, onRefresh: load });
 
   async function load() {
     try {
@@ -38,14 +41,6 @@ export default function Volumes() {
     if (!sid) return;
     if (!window.confirm(t('volumes.detachConfirm', { name: serverName(sid) }))) return;
     try { await api(`/volumes/${v.id}/detach`, { method: 'POST', body: { server_id: sid } }); toast(t('volumes.detaching'), 'ok'); setTimeout(load, 1000); }
-    catch (e) { toast(e.message, 'error'); }
-  }
-
-  async function extend(v) {
-    const ns = window.prompt(t('volumes.extendPrompt', { size: v.size }), String(v.size + 10));
-    if (!ns) return;
-    if (Number(ns) <= v.size) return toast(t('volumes.extendTooSmall'), 'error');
-    try { await api(`/volumes/${v.id}/extend`, { method: 'POST', body: { new_size: Number(ns) } }); toast(t('volumes.extending'), 'ok'); setTimeout(load, 1000); }
     catch (e) { toast(e.message, 'error'); }
   }
 
@@ -87,7 +82,8 @@ export default function Volumes() {
                     <ActionsMenu items={[
                       v.status === 'available' && { label: t('volumes.attachToInstance'), onClick: () => setAttachFor(v) },
                       v.status === 'in-use' && { label: t('volumes.detachFromInstance'), onClick: () => detach(v) },
-                      { label: t('volumes.extend'), onClick: () => extend(v) },
+                      canExtendVolume(v.status) && { label: t('volumes.extend'), disabled: volumeExtend.isPending(v.id),
+                        onClick: () => volumeExtend.extend(v) },
                       { label: t('instances.snapshot'), onClick: () => snapshot(v) },
                       'divider',
                       { label: t('volumes.delete'), danger: true, disabled: v.status === 'in-use', onClick: () => del(v) },

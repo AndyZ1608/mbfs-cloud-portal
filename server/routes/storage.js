@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { osFetch, OSError, MOCK } from '../openstack.js';
 import { fetchOwned, isUsableImage, owned } from '../projectScope.js';
-import { setInstanceAudit } from '../audit.js';
+import { setInstanceAudit, setVolumeAudit } from '../audit.js';
+import { requestVolumeExtend } from '../volumeExtend.js';
 
 const router = Router();
 
@@ -46,11 +47,14 @@ router.delete('/volumes/:id', async (req, res, next) => {
 
 router.post('/volumes/:id/extend', async (req, res, next) => {
   try {
-    await fetchOwned(req.session.os, 'volume', `/volumes/${req.params.id}`, 'volume');
-    const { new_size } = req.body || {};
-    if (!new_size) throw new OSError(400, 'Thiếu dung lượng mới');
-    await osFetch(req.session.os, 'volume', `/volumes/${req.params.id}/action`, { method: 'POST', body: { 'os-extend': { new_size: Number(new_size) } } });
-    res.json({ ok: true });
+    const volume = await fetchOwned(req.session.os, 'volume', `/volumes/${req.params.id}`, 'volume');
+    const newSize = req.body?.new_size;
+    const oldSize = volume.size;
+    const wasAttached = volume.status === 'in-use';
+    const result = await requestVolumeExtend(req.session.os, volume, newSize);
+    setVolumeAudit(res, { action: 'volume.extend.request', resourceId: volume.id, resourceName: volume.name,
+      details: { volume_id: volume.id, old_size_gb: oldSize, new_size_gb: newSize, attached: wasAttached } });
+    res.status(202).json(result);
   } catch (e) { next(e); }
 });
 

@@ -47,6 +47,10 @@ export function setInstanceAudit(res, event) {
   res.locals.instanceAudit = event;
 }
 
+export function setVolumeAudit(res, event) {
+  res.locals.volumeAudit = event;
+}
+
 export function setAccountAudit(res, event) {
   res.locals.accountAudit = event;
 }
@@ -144,7 +148,7 @@ export function auditMiddleware(req, res, next) {
         source_ip: clientIp(req), ms: Date.now() - t0,
       };
       const events = res.locals.networkAudits?.length ? res.locals.networkAudits : res.locals.instanceAudits?.length ? res.locals.instanceAudits :
-        [res.locals.classificationAudit || res.locals.instanceAudit || res.locals.accountAudit ||
+        [res.locals.classificationAudit || res.locals.volumeAudit || res.locals.instanceAudit || res.locals.accountAudit ||
           (path === '/api/account/change-password' ? {
             action: 'account.password.change', resourceId: os?.user?.id,
             resourceName: os?.user?.name,
@@ -170,6 +174,10 @@ export function auditMiddleware(req, res, next) {
           } : {}),
           ...(event?.action?.startsWith('network.') || event?.action?.startsWith('subnet.') ? {
             resource_type: 'network', resource_id: event.resourceId || null,
+            resource_name: event.resourceName || null, details: event.details || {},
+          } : {}),
+          ...(event?.action?.startsWith('volume.') ? {
+            resource_type: 'volume', resource_id: event.resourceId || null,
             resource_name: event.resourceName || null, details: event.details || {},
           } : {}),
           ...(event?.resource_type === 'label' || event?.resource_type === 'tag' ? {
