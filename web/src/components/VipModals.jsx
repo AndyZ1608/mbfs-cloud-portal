@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { Modal, Field, Empty, toast } from './ui.jsx';
 import FixedIpInput from './FixedIpInput.jsx';
 import { fixedIpError } from '../fixedIp.js';
 import { useI18n } from '../i18n/react.jsx';
+import { filterVipAssignmentVms, toggleVipPort, vipAssignmentVms } from '../vipAssignments.js';
 
 export function CreateVipModal({ subnet, onClose, onDone }) {
   const { t } = useI18n();
@@ -34,18 +35,25 @@ export function VipAssignmentsModal({ vip, onClose, onDone }) {
   const { t } = useI18n();
   const [data, setData] = useState(null);
   const [selected, setSelected] = useState(new Set());
-  const [error, setError] = useState('');
+  const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [search, setSearch] = useState('');
+  const vms = useMemo(() => vipAssignmentVms(data?.targets, data?.subnet?.id), [data]);
+  const visibleVms = filterVipAssignmentVms(vms, search);
   useEffect(() => {
     let live = true;
+    setData(null);
+    setSelected(new Set());
+    setError(false);
+    setSearch('');
     api(`/vips/${encodeURIComponent(vip.id)}/assignments`).then((result) => {
       if (!live) return;
       setData(result); setSelected(new Set(result.targets.filter((target) => target.assigned).map((target) => target.id)));
-    }).catch((failure) => { if (live) setError(failure.message); });
+    }).catch(() => { if (live) setError(true); });
     return () => { live = false; };
   }, [vip.id]);
   function toggle(id) {
-    setSelected((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+    setSelected((current) => toggleVipPort(current, id));
   }
   async function save() {
     if (busy) return;
@@ -54,24 +62,48 @@ export function VipAssignmentsModal({ vip, onClose, onDone }) {
       await api(`/vips/${encodeURIComponent(vip.id)}/assignments`, { method: 'PUT', body: { port_ids: [...selected] } });
       toast(t('vip.assignmentUpdated'), 'ok'); onDone();
     } catch (failure) {
-      toast(failure.message, 'error');
+      toast(failure.code === 'vip_partial_failure' ? t('vip.assignments.partialFailure') : failure.message, 'error');
       if (failure.code === 'vip_partial_failure') onDone();
       else setBusy(false);
     }
   }
-  return <Modal title={`${t('vip.manageAssignments')} — ${vip.name || vip.id}`} wide onClose={() => !busy && onClose()}
+  return <Modal title={`${t('vip.assignments.title')} — ${vip.name || t('vip.assignments.unnamedVip')}`}
+    wide className="vip-assignments-modal" onClose={() => !busy && onClose()}
     footer={<><button className="btn ghost" disabled={busy} onClick={onClose}>{t('common.cancel')}</button>
-      <button className="btn primary" disabled={busy || !data} onClick={save}>{t('common.save')}</button></>}>
-    <p className="mono">{vip.fixed_ips?.[0]?.ip_address}</p>
-    {error ? <p className="err-text" role="alert">{error}</p> : !data ? <Empty>{t('common.loading')}</Empty>
-      : !data.targets.length ? <Empty>{t('vip.noEligibleInterfaces')}</Empty> : <div className="vip-choice-list">
-        {data.targets.map((target) => <label className="vip-choice" key={target.id}>
-          <input type="checkbox" checked={selected.has(target.id)} disabled={busy} onChange={() => toggle(target.id)} />
-          <span><strong>{target.instance_name || target.device_id}</strong>
-            <small>{target.name || target.id} · {target.fixed_ips?.map((fixed) => fixed.ip_address).join(', ')}</small></span>
-        </label>)}
-      </div>}
+      <button className="btn primary" disabled={busy || !data || error || !vms.length} onClick={save}>{t('vip.assignments.save')}</button></>}>
+    <div className="vip-assignment-summary"><span>{t('vip.assignments.vip')}</span>
+      <strong className="mono">{vip.fixed_ips?.[0]?.ip_address || '—'}</strong></div>
+    {error ? <p className="err-text" role="alert">{t('vip.assignments.loadError')}</p>
+      : !data ? <Empty>{t('vip.assignments.loading')}</Empty>
+        : !vms.length ? <VipAssignmentChoices vms={vms} selected={selected} onToggle={toggle} busy={busy} /> : <>
+          <label className="vip-assignment-search"><span>{t('vip.assignments.selectInstances')}</span>
+            <input type="search" value={search} onChange={(event) => setSearch(event.target.value)}
+              placeholder={t('vip.assignments.search')} autoComplete="off" /></label>
+          {!visibleVms.length ? <Empty>{t('vip.assignments.noSearchResults')}</Empty>
+            : <VipAssignmentChoices vms={visibleVms} selected={selected} onToggle={toggle} busy={busy} />}
+        </>}
   </Modal>;
+}
+
+export function VipAssignmentChoices({ vms, selected, onToggle, busy = false }) {
+  const { t } = useI18n();
+  if (!vms.length) return <Empty>{t('vip.assignments.noEligibleInstances')}</Empty>;
+  return <div className="vip-assignment-list">
+    {vms.map((vm) => vm.interfaces.length === 1 ? <label className="vip-vm-choice vip-vm-choice-single" key={vm.instanceId}>
+      <input type="checkbox" checked={selected.has(vm.interfaces[0].portId)} disabled={busy}
+        onChange={() => onToggle(vm.interfaces[0].portId)} />
+      <span className="vip-vm-identity"><strong>{vm.instanceName || t('vip.assignments.unnamedVm')}</strong>
+        {vm.interfaces[0].fixedIp && <small>{vm.interfaces[0].fixedIp}</small>}</span>
+    </label> : <div className="vip-vm-choice" key={vm.instanceId}>
+      <strong className="vip-vm-name">{vm.instanceName || t('vip.assignments.unnamedVm')}</strong>
+      <span className="vip-interface-caption">{t('vip.assignments.interface')}</span>
+      <div className="vip-interface-list">{vm.interfaces.map((item) => <label className="vip-interface-choice" key={item.portId}>
+        <input type="checkbox" checked={selected.has(item.portId)} disabled={busy}
+          onChange={() => onToggle(item.portId)} />
+        <span>{item.fixedIp || '—'}</span>
+      </label>)}</div>
+    </div>)}
+  </div>;
 }
 
 export function PortVipsModal({ portId, onClose, onDone }) {
