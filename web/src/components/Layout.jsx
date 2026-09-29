@@ -9,6 +9,7 @@ import LanguageSwitcher from './LanguageSwitcher.jsx';
 import { noticeDetail, noticeTitle } from '../i18n/notifications.js';
 import SidebarNavigation from './SidebarNavigation.jsx';
 import { canChangeAccountPassword } from '../accountPassword.js';
+import { switchProjectContext } from '../projectSwitch.js';
 
 const AccountPasswordModal = React.lazy(() => import('./AccountPasswordModal.jsx'));
 
@@ -28,9 +29,8 @@ export default function Layout() {
     if (switchingProject || projectId === sess?.project?.id) return;
     setSwitchingProject(true);
     try {
-      const path = sess?.auth_mode === 'sso' ? '/auth/sso/switch-project' : '/auth/switch-project';
-      await api(path, { method: 'POST', body: { projectId } });
-      window.location.reload();
+      await switchProjectContext({ projectId, authMode: sess?.auth_mode, request: api,
+        replace: (route) => window.location.replace(route) });
     } catch (e) {
       setSwitchingProject(false);
       toast(e.message, 'error');
