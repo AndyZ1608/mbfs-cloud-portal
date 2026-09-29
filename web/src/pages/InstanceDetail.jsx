@@ -6,7 +6,8 @@ import { openInstanceConsole } from '../console/navigation.js';
 import { useI18n } from '../i18n/react.jsx';
 import useInstanceActions from '../useInstanceActions.js';
 import { InstanceActionDialogs } from './Instances.jsx';
-import { attachedSecurityGroups, attachedStorage, canDetachVolume, networkRows } from '../instanceDetailData.js';
+import { attachedSecurityGroups, attachedStorage, canDetachVolume, networkRows,
+  resolvedInstanceFlavor, resolvedInstanceImageName } from '../instanceDetailData.js';
 import { formatActivity } from '../activityFormatter.js';
 import ClassificationPicker, { ClassificationChip } from '../components/ClassificationPicker.jsx';
 import { emptySelection, selectionFromClassification } from '../classification.js';
@@ -28,16 +29,40 @@ function TabState({ state, children, empty, errorKey, t }) {
   return children;
 }
 
-export default function InstanceDetailRoute() {
-  const { instanceId } = useParams();
-  const { sess } = useOutletContext();
-  return <InstanceDetail key={`${instanceId}:${sess.project.id}`} instanceId={instanceId} />;
+function DetailCrashFallback({ onRetry }) {
+  const { t } = useI18n();
+  return <div className="vm-detail-error" role="alert">{t('instance.detail.displayFailed')}
+    <div><button className="btn ghost" onClick={onRetry}>{t('common.retry')}</button>
+      <Link className="btn ghost" to="/instances">{t('navigation.instances')}</Link></div>
+  </div>;
 }
 
-function InstanceDetail({ instanceId }) {
+class DetailErrorBoundary extends React.Component {
+  state = { failed: false, attempt: 0 };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() {
+    if (this.state.failed) return <DetailCrashFallback onRetry={() => this.setState((state) => ({ failed: false, attempt: state.attempt + 1 }))} />;
+    return <React.Fragment key={this.state.attempt}>{this.props.children}</React.Fragment>;
+  }
+}
+
+export default function InstanceDetailRoute() {
+  const { instanceId } = useParams();
   const { t } = useI18n();
-  const { sess } = useOutletContext();
-  const canAssign = sess.roles?.some((role) => ['member', 'admin'].includes(role));
+  const { sess } = useOutletContext() || {};
+  const currentProjectId = sess?.project?.id ?? null;
+  if (!sess) return <Empty>{t('common.loading')}</Empty>;
+  if (!currentProjectId) return <Empty>{t('common.loading')}</Empty>;
+  // The key discards every instance-scoped state value on route or project change.
+  return <DetailErrorBoundary key={`${instanceId}:${currentProjectId}`}>
+    <InstanceDetail instanceId={instanceId} project={sess.project} roles={sess.roles} />
+  </DetailErrorBoundary>;
+}
+
+function InstanceDetail({ instanceId, project, roles }) {
+  const { t } = useI18n();
+  const currentProjectId = project.id;
+  const canAssign = roles?.some((role) => ['member', 'admin'].includes(role));
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const tab = TABS.includes(params.get('tab')) ? params.get('tab') : 'overview';
@@ -70,9 +95,11 @@ function InstanceDetail({ instanceId }) {
   const actions = useInstanceActions({ onChanged: refresh, onDeleted: () => navigate('/instances') });
 
   useEffect(() => {
+    if (!currentProjectId) return;
     let live = true;
     api(`/servers/${encodedId}`).then(({ server: next }) => {
       if (!live) return;
+      if (!next || next.id !== instanceId) throw new Error('Invalid instance response');
       setServer(next);
       setServerError(null);
       actions.syncServers([next]);
@@ -83,7 +110,7 @@ function InstanceDetail({ instanceId }) {
       setServerError(error);
     });
     return () => { live = false; };
-  }, [encodedId, sess.project.id, serverRevision]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [encodedId, instanceId, currentProjectId, serverRevision]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const timer = setInterval(() => setServerRevision((n) => n + 1), 10000);
@@ -91,6 +118,7 @@ function InstanceDetail({ instanceId }) {
   }, []);
 
   useEffect(() => {
+    if (!currentProjectId) return;
     if (server?.status !== 'ERROR') {
       setFailure({ loading: false, error: null, data: null });
       return;
@@ -104,26 +132,27 @@ function InstanceDetail({ instanceId }) {
       if (live) setFailure({ loading: false, error: true, data: null });
     });
     return () => { live = false; };
-  }, [server?.id, server?.status, serverRevision, encodedId]);
+  }, [server?.id, server?.status, serverRevision, encodedId, currentProjectId]);
 
   useEffect(() => {
-    if (!server) return;
+    if (!server || !currentProjectId) return;
     let live = true;
     if (server.flavor?.vcpus == null) {
       api('/flavors').then(({ flavors }) => {
-        if (live) setFlavor(flavors.find((item) => item.id === server.flavor?.id) || null);
+        if (live) setFlavor(Array.isArray(flavors) ? flavors.find((item) => item.id === server.flavor?.id) || null : null);
       }).catch(() => {});
     }
     if (server.image?.id) {
       api('/images').then(({ images }) => {
-        if (live) setResolvedImage({ id: server.image.id, name: images.find((item) => item.id === server.image.id)?.name || null });
+        if (live) setResolvedImage({ id: server.image.id,
+          name: Array.isArray(images) ? images.find((item) => item.id === server.image.id)?.name || null : null });
       }).catch(() => {});
     }
     return () => { live = false; };
-  }, [server?.id, server?.image?.id, server?.flavor?.id]);
+  }, [server?.id, server?.image?.id, server?.flavor?.id, currentProjectId]);
 
   useEffect(() => {
-    if (!server || tab === 'overview') return;
+    if (!server || !currentProjectId || tab === 'overview') return;
     let live = true;
     setTabStates((states) => ({ ...states, [tab]: { ...states[tab], loading: true, error: null } }));
     const loaders = {
@@ -154,22 +183,26 @@ function InstanceDetail({ instanceId }) {
       if (live) setTabStates((states) => ({ ...states, [tab]: { loaded: false, loading: false, error: error.message } }));
     });
     return () => { live = false; };
-  }, [server?.id, tab, tabRevision, encodedId, sess.project.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [server?.id, tab, tabRevision, encodedId, currentProjectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (serverError) return <div className="vm-detail-error" role="alert">{t('instance.detail.unavailable')}<div><Link to="/instances">{t('navigation.instances')}</Link></div></div>;
+  if (serverError) return <div className="vm-detail-error" role="alert">
+    {t([403, 404].includes(serverError.status) ? 'instance.detail.unavailable' : 'instance.detail.displayFailed')}
+    <div><Link className="btn ghost" to="/instances">{t('navigation.instances')}</Link>
+      <button className="btn ghost" onClick={refresh}>{t('common.retry')}</button></div></div>;
   if (!server) return <Empty>{t('common.loading')}</Empty>;
 
   const activeError = failure.data || server.instance_error;
   const volumeContext = activeError?.code === 'IMAGE_SIZE_EXCEEDS_VOLUME' ? safeVolumeContext(activeError.context) : null;
   const supportReference = /^req-(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8,64})$/i.test(failure.data?.request_id || '')
     ? failure.data.request_id : null;
-  const errorImageName = failure.data?.image_name || (resolvedImage?.id === server.image?.id ? resolvedImage.name : null);
-  const specs = server.flavor?.vcpus != null ? server.flavor
-    : flavor?.id === server.flavor?.id ? flavor : server.flavor || {};
+  const resolvedImageName = resolvedInstanceImageName(server.image, resolvedImage);
+  const errorImageName = failure.data?.image_name || resolvedImageName;
+  const specs = resolvedInstanceFlavor(server.flavor, flavor);
   const ips = serverIps(server);
   const tabData = current.data;
-  const bootFromVolume = !server.image?.id && (server['os-extended-volumes:volumes_attached'] || []).length > 0;
-  const image = server.image?.id ? (resolvedImage?.id === server.image.id && resolvedImage.name || server.image.id)
+  const bootFromVolume = !server.image?.id && Array.isArray(server['os-extended-volumes:volumes_attached'])
+    && server['os-extended-volumes:volumes_attached'].length > 0;
+  const image = server.image?.id ? (resolvedImageName || server.image.id)
     : bootFromVolume ? t('instance.detail.bootFromVolume') : '—';
   const rootDisk = server.image?.id && specs.disk > 0
     ? t('instance.detail.ephemeralDisk', { size: specs.disk })
@@ -245,8 +278,10 @@ function InstanceDetail({ instanceId }) {
     }
     finally { setLabelsTagsBusy(false); }
   }
-  const labels = server.classification?.labels || [];
-  const tags = server.classification?.tags || [];
+  const labels = Array.isArray(server.classification?.labels)
+    ? server.classification.labels.filter((item) => item && typeof item === 'object') : [];
+  const tags = Array.isArray(server.classification?.tags)
+    ? server.classification.tags.filter((item) => item && typeof item === 'object') : [];
   return <div className="vm-detail-page">
     <nav className="vm-detail-breadcrumb" aria-label={t('instance.detail.breadcrumb')}>
       <Link to="/instances">{t('navigation.compute')} / {t('navigation.instances')}</Link><span> / {server.name}</span>
@@ -256,7 +291,7 @@ function InstanceDetail({ instanceId }) {
         <div className="vm-detail-actions"><button className="btn primary" onClick={() => openInstanceConsole(server.id)}>{t('instance.detail.openConsole')}</button>
           <ActionsMenu items={actions.items(server)} /><button className="btn ghost" onClick={refresh}>{t('common.refresh')}</button></div></div>
       <div className="vm-detail-summary">
-        <span>{t('instance.detail.project')}: <b>{sess.project.name}</b></span>
+        <span>{t('instance.detail.project')}: <b>{value(project.name)}</b></span>
         <span>{t('instance.detail.flavor')}: <b>{value(specs.original_name || specs.name || specs.id)}</b></span>
         <span>{t('instance.detail.created')}: <b>{fmtDate(server.created)}</b></span>
         <span>{t('instance.detail.ipAddresses')}: <b>{ips.map((item) => item.ip).join(', ') || '—'}</b></span>
@@ -298,7 +333,7 @@ function InstanceDetail({ instanceId }) {
         [t('instance.detail.ram'), specs.ram != null ? ramGB(specs.ram) : '—'],
         [t('instance.detail.disk'), specs.disk != null ? `${specs.disk} GB` : '—'],
         [t('instance.detail.created'), fmtDate(server.created)],
-        [t('instance.detail.project'), sess.project.name],
+        [t('instance.detail.project'), value(project.name)],
         [t('instance.detail.availabilityZone'), value(server['OS-EXT-AZ:availability_zone'])],
         [t('instance.detail.host'), value(server['OS-EXT-SRV-ATTR:host'])],
       ]} />

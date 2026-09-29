@@ -1,15 +1,16 @@
 export const emptySelection = () => ({ labels: [], tag_ids: [] });
 export const emptyClassification = () => ({ labels: [], tags: [] });
+const items = (value) => Array.isArray(value) ? value.filter((item) => item && typeof item === 'object') : [];
 
 export function selectionFromClassification(classification) {
-  return { labels: (classification?.labels || []).map((item) => ({ label_id: item.label_id, value_id: item.value_id })),
-    tag_ids: (classification?.tags || []).map((item) => item.id) };
+  return { labels: items(classification?.labels).map((item) => ({ label_id: item.label_id, value_id: item.value_id })),
+    tag_ids: items(classification?.tags).map((item) => item.id) };
 }
 
 export function classificationChips(classification, limit = 3) {
-  const all = [...(classification?.labels || []).map((item) => ({ id: item.value_id,
+  const all = [...items(classification?.labels).map((item) => ({ id: item.value_id,
     text: item.value, title: `${item.label_name}: ${item.value}`, color: item.color })),
-  ...(classification?.tags || []).map((item) => ({ id: item.id, text: item.name, title: item.name, color: item.color }))];
+  ...items(classification?.tags).map((item) => ({ id: item.id, text: item.name, title: item.name, color: item.color }))];
   return { visible: all.slice(0, limit), remaining: Math.max(0, all.length - limit) };
 }
 
@@ -23,14 +24,14 @@ export function foregroundForColor(color) {
 
 export function matchesClassificationFilters(classification, filters) {
   return filters.every((filter) => filter.kind === 'tag'
-    ? (classification?.tags || []).some((item) => item.id === filter.tag_id)
-    : (classification?.labels || []).some((item) => item.label_id === filter.label_id && item.value_id === filter.value_id));
+    ? items(classification?.tags).some((item) => item.id === filter.tag_id)
+    : items(classification?.labels).some((item) => item.label_id === filter.label_id && item.value_id === filter.value_id));
 }
 
 export function matchesClassificationSearch(server, search) {
   const query = search.trim().toLocaleLowerCase();
   if (!query) return true;
-  return [server.name || '', ...(server.classification?.labels || []).flatMap((item) => [item.label_name, item.value]),
-    ...(server.classification?.tags || []).map((item) => item.name)]
+  return [server.name || '', ...items(server.classification?.labels).flatMap((item) => [item.label_name, item.value]),
+    ...items(server.classification?.tags).map((item) => item.name)]
     .some((text) => String(text).toLocaleLowerCase().includes(query));
 }

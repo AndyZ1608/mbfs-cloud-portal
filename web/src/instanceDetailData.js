@@ -1,3 +1,14 @@
+export function resolvedInstanceFlavor(serverFlavor, catalogFlavor) {
+  if (serverFlavor?.vcpus != null) return serverFlavor;
+  if (serverFlavor?.id && catalogFlavor?.id === serverFlavor.id) return catalogFlavor;
+  return serverFlavor || {};
+}
+
+export function resolvedInstanceImageName(serverImage, catalogImage) {
+  // Two missing IDs are not a match (undefined === undefined).
+  return serverImage?.id && catalogImage?.id === serverImage.id ? catalogImage.name : null;
+}
+
 export function networkRows(ports = [], networks = [], floatingIps = [], groups = []) {
   const netById = new Map(networks.map((item) => [item.id, item]));
   const subnetById = new Map(networks.flatMap((item) => item.subnet_details || []).map((item) => [item.id, item]));

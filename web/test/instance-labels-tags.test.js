@@ -33,6 +33,10 @@ test('CMP classifications use ID-based AND filters and compact customer-colored 
   assert.deepEqual(selectionFromClassification(a.classification), {
     labels: [{ label_id: 'environment', value_id: 'production' }], tag_ids: ['critical'],
   });
+  assert.deepEqual(selectionFromClassification(null), emptySelection());
+  assert.deepEqual(selectionFromClassification({ labels: null, tags: null }), emptySelection());
+  assert.deepEqual(classificationChips({ labels: null, tags: null }).visible, []);
+  assert.equal(matchesClassificationSearch({ name: 'vm-a', classification: { labels: null, tags: null } }, 'missing'), false);
   assert.deepEqual(emptySelection(), { labels: [], tag_ids: [] });
   assert.equal(foregroundForColor('#111827'), '#FFFFFF');
   assert.equal(foregroundForColor('#FDE68A'), '#111827');

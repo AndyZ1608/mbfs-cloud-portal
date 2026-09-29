@@ -83,10 +83,11 @@ export function ramGB(mb) {
 // Trích danh sách IP của server: [{ip, type, net}]
 export function serverIps(server) {
   const out = [];
-  const addrs = server.addresses || {};
+  const addrs = server?.addresses;
+  if (!addrs || typeof addrs !== 'object' || Array.isArray(addrs)) return out;
   for (const [net, list] of Object.entries(addrs)) {
-    for (const a of list || []) {
-      out.push({ ip: a.addr, type: a['OS-EXT-IPS:type'] || 'fixed', net });
+    for (const a of Array.isArray(list) ? list : []) {
+      if (a && typeof a.addr === 'string') out.push({ ip: a.addr, type: a['OS-EXT-IPS:type'] || 'fixed', net });
     }
   }
   return out;

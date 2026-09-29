@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { networkRows, attachedStorage, attachedSecurityGroups, canDetachVolume } from '../src/instanceDetailData.js';
+import { networkRows, attachedStorage, attachedSecurityGroups, canDetachVolume,
+  resolvedInstanceFlavor, resolvedInstanceImageName } from '../src/instanceDetailData.js';
+import { serverIps } from '../src/api.js';
 import { translate } from '../src/i18n/index.js';
 
 const source = (path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
@@ -50,6 +52,19 @@ test('storage and security tabs show only attached/known project resources', () 
   assert.equal(canDetachVolume({ image: {} }, { bootable: 'true' }), false);
   assert.equal(canDetachVolume({ image: {} }, { bootable: 'false' }), true);
   assert.equal(canDetachVolume({ image: { id: 'image-1' } }, { bootable: 'true' }), true);
+});
+
+test('missing and malformed optional provider data cannot crash overview rendering', () => {
+  assert.deepEqual(serverIps({}), []);
+  assert.deepEqual(serverIps({ addresses: null }), []);
+  assert.deepEqual(serverIps({ addresses: { net: null, other: 'not-an-array' } }), []);
+  assert.deepEqual(serverIps({ addresses: { net: [{ addr: '10.0.0.2' }, null] } }).map((item) => item.ip), ['10.0.0.2']);
+  assert.deepEqual(resolvedInstanceFlavor(null, null), {});
+  assert.deepEqual(resolvedInstanceFlavor({ id: 'flavor-a' }, null), { id: 'flavor-a' });
+  assert.equal(resolvedInstanceFlavor({ id: 'flavor-a' }, { id: 'flavor-a', vcpus: 2 }).vcpus, 2);
+  assert.equal(resolvedInstanceImageName(null, null), null);
+  assert.equal(resolvedInstanceImageName({}, null), null);
+  assert.equal(resolvedInstanceImageName({ id: 'image-a' }, { id: 'image-a', name: 'Ubuntu' }), 'Ubuntu');
 });
 
 test('all five detail tabs and critical empty/error labels translate in Vietnamese and English', () => {

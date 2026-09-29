@@ -49,6 +49,18 @@ export default function Layout() {
   }
 
   if (!sess) return <div className="boot">{t('common.loading')}</div>;
+  // An authenticated session can arrive before its scoped project is restored.
+  // Keep all project-scoped routes and their provider requests unmounted until then.
+  if (!sess.project?.id) return <div className="boot" role="status"><div>
+    <p>{t('common.projectRequired')}</p>
+    {Array.isArray(sess.projects) && sess.projects.length > 0
+      ? <select aria-label={t('admin.selectProject')} defaultValue="" disabled={switchingProject}
+        onChange={(event) => switchProject(event.target.value)}>
+        <option value="" disabled>{t('admin.selectProject')}</option>
+        {sess.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+      </select>
+      : <button className="btn ghost" onClick={() => window.location.reload()}>{t('common.retry')}</button>}
+  </div></div>;
 
   return (
     <div className="app">
@@ -69,7 +81,7 @@ export default function Layout() {
           <div className="topbar-left">
             <span className="tb-label">{t('common.project')}</span>
             <select className="project-select" value={sess.project.id} disabled={switchingProject} onChange={(e) => switchProject(e.target.value)}>
-              {sess.projects.map((p) => (
+              {(Array.isArray(sess.projects) ? sess.projects : []).map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>

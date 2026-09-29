@@ -56,6 +56,8 @@ test('37 GiB image and 26 GiB boot volume show specific safe vi/en guidance', ()
   assert.equal(imageFlavorWarning(image, { ram: 4096, disk: 0 }, true, 37), null);
   assert.equal(minimumBootVolumeGiB({ virtual_size: 37 * 1024 ** 3 + 1 }), 38);
   assert.equal(safeVolumeContext({ required_disk_gb: 37, requested_volume_gb: 26 }).required_disk_gb, 37);
+  assert.equal(safeVolumeContext(null), null);
+  assert.equal(safeVolumeContext(undefined), null);
   assert.equal(safeVolumeContext({ required_disk_gb: '37', requested_volume_gb: 26 }), null);
   for (const locale of ['en', 'vi']) {
     const t = (key, variables) => translate(locale, key, variables);
