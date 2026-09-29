@@ -8,7 +8,21 @@ process.env.DATA_ENCRYPTION_KEY = 'test-only-encryption-material';
 
 const { mockFetch } = await import('../mock.js');
 const { OSError } = await import('../openstack.js');
-const { prepareInterfaces, createServerWithInterfaces, attachInterface, rollbackInterfacePorts } = await import('../instanceInterfaces.js');
+const { prepareInterfaces, createServerWithInterfaces, attachInterface, rollbackInterfacePorts,
+  validateFixedIp } = await import('../instanceInterfaces.js');
+
+test('backend validates full IPv4/IPv6 subnet membership and exact boundary addresses', () => {
+  const subnet24 = { cidr: '10.20.31.128/24', gateway_ip: '10.20.31.1' };
+  assert.doesNotThrow(() => validateFixedIp('10.20.31.50', subnet24));
+  for (const ip of ['10.20.31.0', '10.20.31.255', '10.20.31.1', '10.20.40.50']) {
+    assert.throws(() => validateFixedIp(ip, subnet24), { code: 'interface_invalid_ip' });
+  }
+  assert.doesNotThrow(() => validateFixedIp('10.20.31.50', { cidr: '10.20.16.0/20' }));
+  assert.throws(() => validateFixedIp('10.20.40.10', { cidr: '10.20.16.0/20' }), { code: 'interface_invalid_ip' });
+  assert.doesNotThrow(() => validateFixedIp('10.20.0.255', { cidr: '10.20.0.0/16' }));
+  assert.doesNotThrow(() => validateFixedIp('2001:db8::50', { cidr: '2001:db8::/64' }));
+  assert.throws(() => validateFixedIp('2001:db9::50', { cidr: '2001:db8::/64' }), { code: 'interface_invalid_ip' });
+});
 
 const session = (projectId) => ({ project: { id: projectId }, user: { name: 'test' }, roles: ['admin'] });
 let serial = 0;

@@ -284,6 +284,13 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 .vm-interface-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
 .vm-interface-grid .field { min-width: 0; margin-bottom: 10px; }
 .vm-interface-default { display: flex; align-items: center; min-height: 34px; color: var(--dim); }
+.vm-ip-control { display: flex; align-items: center; width: 100%; min-height: 36px; padding: 0 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); font-family: var(--mono); font-size: 13px; }
+.vm-ip-control:focus-within { border-color: var(--accent); outline: 2px solid var(--accent-soft); }
+.vm-ip-prefix { flex: 0 0 auto; color: var(--dim); white-space: nowrap; }
+.vm-ip-dot { color: var(--dim); }
+.vm-ip-control input { flex: 0 1 48px; width: 48px; min-width: 0; padding: 7px 3px; border: 0; border-radius: 0; background: transparent; font-family: var(--mono); text-align: center; }
+.vm-ip-control input:focus { border: 0; outline: 0; }
+.vm-ip-error { color: var(--err); font-size: 12px; }
 .vm-interface-table { max-width: 100%; overflow-x: auto; }
 .vm-interface-table .tbl { white-space: nowrap; }
 .row-inline { display: flex; align-items: center; gap: 10px; }
@@ -712,6 +719,7 @@ html[data-theme="dark"] {
 html[data-theme="dark"] .tbl tr:hover td { background: #1b2636; }
 html[data-theme="dark"] .tbl td { border-bottom-color: #202c3e; }
 html[data-theme="dark"] input, html[data-theme="dark"] select, html[data-theme="dark"] textarea { background: #121a26; color: var(--text); }
+html[data-theme="dark"] .vm-ip-control input { background: transparent; }
 html[data-theme="dark"] .btn { background: #1b2636; color: var(--text); }
 html[data-theme="dark"] .btn:hover { background: #22303f; }
 html[data-theme="dark"] .btn.primary { background: var(--accent); color: #0b1220; }

@@ -8,7 +8,8 @@ import TypeToConfirmDialog from '../components/TypeToConfirmDialog.jsx';
 import { validResizeFlavor, submitResizeOnce } from '../resize.js';
 import useInstanceActions from '../useInstanceActions.js';
 import { useI18n } from '../i18n/react.jsx';
-import NetworkInterfaceFields, { addInterface, newInterface, removeInterface, validInterfaces } from '../components/NetworkInterfaceFields.jsx';
+import NetworkInterfaceFields, { addInterface, interfaceRequestSpec, interfaceValidationError,
+  newInterface, removeInterface, validInterfaces } from '../components/NetworkInterfaceFields.jsx';
 import OsCatalog from '../components/OsCatalog.jsx';
 import ClassificationPicker, { ClassificationChip } from '../components/ClassificationPicker.jsx';
 import { classificationChips, emptySelection, matchesClassificationFilters, matchesClassificationSearch } from '../classification.js';
@@ -234,7 +235,8 @@ function CreateModal({ onClose, onDone }) {
     if (!opts?.images.some((image) => image.id === f.imageRef)) return toast(t('instance.create.imageRequired'), 'error');
     if (!volumeSizeValid) return toast(t('errors.boot_volume_size_invalid'), 'error');
     if (preflight) return toast(imageFlavorWarningText(t, preflight), 'error');
-    if (!validInterfaces(f.interfaces, opts?.networks || [])) return toast(t('instance.networkInterfaces.required'), 'error');
+    const interfaceError = interfaceValidationError(f.interfaces, opts?.networks || []);
+    if (interfaceError) return toast(t(interfaceError), 'error');
     if (Number(f.count) > 1 && f.interfaces.some((item) => item.ip_address.trim())) return toast(t('errors.interface_batch_fixed_ip'), 'error');
     submitting.current = true;
     setBusy(true);
@@ -243,7 +245,7 @@ function CreateModal({ onClose, onDone }) {
         method: 'POST',
         body: {
           name: f.name.trim(), flavorRef: f.flavorRef, imageRef: f.imageRef,
-          interfaces: f.interfaces.map(({ network_id, subnet_id, ip_address }) => ({ network_id, subnet_id, ip_address: ip_address.trim() || null })),
+          interfaces: f.interfaces.map(interfaceRequestSpec),
           key_name: f.key_name || undefined, count: Number(f.count) || 1,
           boot_volume_gb: f.bfv ? Number(f.boot_volume_gb) : undefined,
           user_data: f.show_ud && f.user_data.trim() ? f.user_data : undefined,
@@ -585,9 +587,7 @@ function NicModal({ server, onClose, onDone }) {
     operationPending.current = true;
     setBusy(true);
     try {
-      await api(`/servers/${server.id}/interfaces`, { method: 'POST', body: {
-        network_id: nic.network_id, subnet_id: nic.subnet_id, ip_address: nic.ip_address.trim() || null,
-      } });
+      await api(`/servers/${server.id}/interfaces`, { method: 'POST', body: interfaceRequestSpec(nic) });
       toast(t('instances.nicAttached'), 'ok'); await load(); onDone();
     }
     catch (e) { toast(e.message, 'error'); }

@@ -1,5 +1,7 @@
 import React from 'react';
 import { useI18n } from '../i18n/react.jsx';
+import FixedIpInput from './FixedIpInput.jsx';
+import { fixedIpError } from '../fixedIp.js';
 
 export function newInterface(networks = []) {
   const network = networks[0];
@@ -18,6 +20,10 @@ export function selectInterfaceNetwork(networkId) {
   return { network_id: networkId, subnet_id: '', ip_address: '' };
 }
 
+export function selectInterfaceSubnet(value, subnetId) {
+  return { ...value, subnet_id: subnetId, ip_address: '' };
+}
+
 export function addInterface(interfaces, networks) {
   return [...interfaces, newInterface(networks)];
 }
@@ -27,13 +33,28 @@ export function removeInterface(interfaces, index) {
 }
 
 export function validInterfaces(interfaces, networks) {
-  return Array.isArray(interfaces) && interfaces.length > 0 && interfaces.every((item) =>
-    item.network_id && item.subnet_id && subnetsForNetwork(networks, item.network_id).some((subnet) => subnet.id === item.subnet_id));
+  return interfaceValidationError(interfaces, networks) === null;
+}
+
+export function interfaceValidationError(interfaces, networks) {
+  if (!Array.isArray(interfaces) || !interfaces.length) return 'instance.networkInterfaces.required';
+  for (const item of interfaces) {
+    const subnet = subnetsForNetwork(networks, item?.network_id).find((candidate) => candidate.id === item?.subnet_id);
+    if (!item?.network_id || !subnet) return 'instance.networkInterfaces.required';
+    const error = fixedIpError(item.ip_address, subnet);
+    if (error) return `instance.networkInterfaces.${error}`;
+  }
+  return null;
+}
+
+export function interfaceRequestSpec({ network_id, subnet_id, ip_address }) {
+  return { network_id, subnet_id, ip_address: ip_address.trim() || null };
 }
 
 export default function NetworkInterfaceFields({ value, onChange, networks, index, onRemove, disabled = false }) {
   const { t } = useI18n();
   const subnets = subnetsForNetwork(networks, value.network_id);
+  const subnet = subnets.find((candidate) => candidate.id === value.subnet_id);
   return <div className="vm-interface-card">
     <div className="vm-interface-heading">
       <strong>{t('instance.networkInterfaces.interface')} {index + 1}</strong>
@@ -47,15 +68,13 @@ export default function NetworkInterfaceFields({ value, onChange, networks, inde
         </select>
       </label>
       <label className="field"><span className="field-label">{t('instance.networkInterfaces.subnet')} *</span>
-        <select value={value.subnet_id} disabled={disabled || !value.network_id} onChange={(event) => onChange({ ...value, subnet_id: event.target.value, ip_address: '' })}>
+        <select value={value.subnet_id} disabled={disabled || !value.network_id} onChange={(event) => onChange(selectInterfaceSubnet(value, event.target.value))}>
           <option value="">{t('instance.networkInterfaces.chooseSubnet')}</option>
           {subnets.map((subnet) => <option key={subnet.id} value={subnet.id}>{subnet.name || subnet.cidr} — {subnet.cidr}</option>)}
         </select>
       </label>
-      <label className="field"><span className="field-label">{t('instance.networkInterfaces.ipAddress')}</span>
-        <input value={value.ip_address} disabled={disabled || !value.subnet_id} onChange={(event) => onChange({ ...value, ip_address: event.target.value })}
-          placeholder={t('instance.networkInterfaces.ipOptional')} autoComplete="off" />
-      </label>
+      <FixedIpInput subnet={subnet} value={value.ip_address} disabled={disabled || !subnet}
+        onChange={(ip_address) => onChange({ ...value, ip_address })} />
       <div className="field"><span className="field-label">{t('instance.networkInterfaces.securityGroup')}</span>
         <span className="vm-interface-default">{t('instance.networkInterfaces.defaultSecurityGroup')}</span>
       </div>
