@@ -7,6 +7,7 @@ import { attachInterface, createServerWithInterfaces, prepareInterfaces } from '
 import { addInstanceAudit, instanceActionCode, listInstanceAudit, recordInstanceErrorOnce, setInstanceAudit } from '../audit.js';
 import { assignmentsForInstances, pruneMissingInstances, removeInstanceAssignments, replaceAssignments, validateSelection } from '../classifications.js';
 import { classifyInstanceError, faultImageId, preflightImageFlavor, publicServer, publicServerPayload } from '../instanceErrors.js';
+import { deleteInstanceWithPorts } from '../instanceDeletion.js';
 
 const router = Router();
 
@@ -423,15 +424,30 @@ router.post('/servers/:id/action', async (req, res, next) => {
 
 router.delete('/servers/:id', async (req, res, next) => {
   try {
-    const server = await fetchOwned(req.session.os, 'compute', `/servers/${req.params.id}`, 'server');
-    setInstanceAudit(res, { action: 'instance.delete', resourceId: server.id,
-      resourceName: server.name, result: 'accepted' });
-    await osFetch(req.session.os, 'compute', `/servers/${req.params.id}`, { method: 'DELETE' });
+    let auditEvent;
+    const result = await deleteInstanceWithPorts(req.session.os, req.params.id, { onValidated(server) {
+      auditEvent = { action: 'instance.delete', resourceId: server.id, resourceName: server.name };
+      setInstanceAudit(res, auditEvent);
+    } });
     let classificationWarning = false;
-    try { removeInstanceAssignments(req.session.os.project.id, server.id); }
-    catch { classificationWarning = true; console.error(`[classification] VM delete cleanup failed request_id=${req.id} instance=${req.params.id}`); }
+    if (result.instance_deleted) {
+      try { removeInstanceAssignments(req.session.os.project.id, result.server.id); }
+      catch { classificationWarning = true; console.error(`[classification] VM delete cleanup failed request_id=${req.id} instance=${req.params.id}`); }
+    }
+    auditEvent.result = result.instance_deleted ? 'success' : 'accepted';
+    auditEvent.details = { instance_id: result.server.id,
+      ports_captured: result.cleanup.ports_captured,
+      ports_deleted: result.cleanup.ports_deleted,
+      ports_already_gone: result.cleanup.ports_already_gone,
+      ports_pending: result.cleanup.ports_pending || 0,
+      failed_port_ids: result.cleanup.failed_port_ids,
+      volume_policy: 'nova_delete_on_termination' };
+    for (const warning of result.warnings) {
+      console.warn(`[compute] VM delete cleanup warning request_id=${req.id} instance=${result.server.id} port=${warning.port_id || '-'} reason=${warning.reason || warning.code}`);
+    }
     console.log(`[compute] DELETE server=${req.params.id} by=${req.session.os.user.name}`);
-    res.json({ ok: true, classification_warning: classificationWarning });
+    res.status(result.instance_deleted ? 200 : 202).json({ ok: true, success: true, instance_deleted: result.instance_deleted,
+      cleanup: result.cleanup, warnings: result.warnings, classification_warning: classificationWarning });
   } catch (e) { next(e); }
 });
 

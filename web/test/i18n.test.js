@@ -63,6 +63,10 @@ test('locale resources match and interpolation preserves resource identifiers', 
   const name = 'Ubuntu-Production';
   assert.match(translate('vi', 'instances.deleteSent', { name }), /Ubuntu-Production/);
   assert.match(translate('en', 'instances.deleteSent', { name }), /Ubuntu-Production/);
+  for (const locale of ['vi', 'en']) {
+    assert.notEqual(translate(locale, 'instances.deleteSuccess'), 'instances.deleteSuccess');
+    assert.notEqual(translate(locale, 'instances.deleteNetworkWarning'), 'instances.deleteNetworkWarning');
+  }
   assert.equal(translate('en', 'instances.resizeWaiting', { name }).includes('VERIFY_RESIZE'), true);
   assert.equal(translate('en', 'instances.confirmResize').includes('Confirm Resize'), true);
   assert.equal(translate('en', 'instances.revertResize'), 'Revert Resize');

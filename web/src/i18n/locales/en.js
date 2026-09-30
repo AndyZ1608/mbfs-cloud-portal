@@ -391,6 +391,8 @@ export default {
   'instances.deleteDescription': 'This permanently deletes the virtual machine and its root disk data. This action cannot be undone.',
   'instances.deleting': 'Deleting…',
   'instances.deleteSent': 'Delete request submitted for {{name}}',
+  'instances.deleteSuccess': 'Virtual machine deleted successfully.',
+  'instances.deleteNetworkWarning': 'The virtual machine was deleted, but some network resources could not be fully cleaned up.',
   'instances.deleteWarning': 'This action cannot be undone',
   'instances.typeToConfirm': 'Type {{name}} exactly to confirm',
   'instances.confirmCaseHint': 'Capitalization and spaces must match.',

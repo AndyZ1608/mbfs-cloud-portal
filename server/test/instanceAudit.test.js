@@ -52,8 +52,16 @@ test('CMP VM mutations produce semantic, scoped audit records retained after del
   assert.equal(activity.next_offset, 2);
   assert.ok((await read(`/servers/${id}/activity?limit=20`)).entries.some((event) => event.action === 'instance.create'));
 
+  assert.equal((await request(`/floatingips/${fip.id}/associate`, 'POST', { server_id: id })).status, 200);
   const deletion = await request(`/servers/${id}`, 'DELETE');
   assert.equal(deletion.status, 200);
+  const deletionResult = await deletion.json();
+  assert.equal(deletionResult.instance_deleted, true);
+  assert.ok(deletionResult.cleanup.ports_captured > 0);
+  assert.equal(deletionResult.cleanup.ports_failed, 0);
+  assert.equal(deletionResult.cleanup.ports_captured,
+    deletionResult.cleanup.ports_deleted + deletionResult.cleanup.ports_already_gone);
+  assert.ok((await read('/floatingips')).floatingips.some((item) => item.id === fip.id));
   assert.equal((await request(`/servers/${id}/activity`)).status, 404);
   const global = (await read('/audit?limit=100')).entries.filter((entry) => entry.resource_id === id);
   const codes = global.map((entry) => entry.action);
@@ -76,7 +84,10 @@ test('CMP VM mutations produce semantic, scoped audit records retained after del
   assert.equal(removed.resource_name, renamed);
   assert.equal(removed.resource_id, id);
   assert.equal(removed.project_id, 'p-demo');
-  assert.equal(removed.result, 'accepted');
+  assert.equal(removed.result, 'success');
+  assert.equal(removed.details.ports_captured, deletionResult.cleanup.ports_captured);
+  assert.equal(removed.details.ports_already_gone, deletionResult.cleanup.ports_already_gone);
+  assert.deepEqual(removed.details.failed_port_ids, []);
   assert.equal(JSON.stringify(global).includes('PRIVATE-CLOUD-INIT-SECRET'), false);
 
   const switchProject = await request('/auth/switch-project', 'POST', { projectId: 'p-devops' });

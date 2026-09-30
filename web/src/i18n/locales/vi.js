@@ -391,6 +391,8 @@ export default {
   'instances.deleteDescription': 'Máy ảo và dữ liệu trên đĩa gốc sẽ bị xoá vĩnh viễn. Hành động này không thể hoàn tác.',
   'instances.deleting': 'Đang xoá…',
   'instances.deleteSent': 'Đã gửi lệnh xoá {{name}}',
+  'instances.deleteSuccess': 'Xóa máy ảo thành công.',
+  'instances.deleteNetworkWarning': 'Máy ảo đã được xóa nhưng một số tài nguyên mạng chưa thể dọn dẹp hoàn toàn.',
   'instances.deleteWarning': 'Hành động không thể hoàn tác',
   'instances.typeToConfirm': 'Nhập chính xác {{name}} để xác nhận',
   'instances.confirmCaseHint': 'Phân biệt chữ hoa, chữ thường và khoảng trắng.',

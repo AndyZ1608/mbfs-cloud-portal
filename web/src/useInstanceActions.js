@@ -79,10 +79,13 @@ export default function useInstanceActions({ onChanged, onDeleted = () => {} }) 
     deleteRequest.current = true;
     setDeleting(true);
     try {
-      await api(`/servers/${server.id}`, { method: 'DELETE' });
-      toast(t('instances.deleteSent', { name: server.name }), 'ok');
+      const result = await api(`/servers/${server.id}`, { method: 'DELETE' });
+      const warning = result.instance_deleted && result.cleanup?.ports_failed > 0;
+      toast(t(warning ? 'instances.deleteNetworkWarning'
+        : result.instance_deleted ? 'instances.deleteSuccess' : 'instances.deleteSent', { name: server.name }),
+      warning ? 'error' : 'ok');
       close();
-      onDeleted(server);
+      if (result.instance_deleted) onDeleted(server);
       setTimeout(changed, 800);
     } catch (error) {
       toast(error.message, 'error');
