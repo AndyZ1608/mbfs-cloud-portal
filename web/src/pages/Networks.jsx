@@ -55,7 +55,7 @@ export default function Networks() {
                   <td><Link className="link" to={`/networks/${encodeURIComponent(n.id)}`}>{n.name}</Link></td>
                   <td><StatusBadge status={n.status} /></td>
                   <td>{(n.subnet_details || []).map((s) => (
-                    <Link key={s.id} className="mono chip" to={`/networks/${encodeURIComponent(n.id)}/subnets/${encodeURIComponent(s.id)}`}
+                    <Link key={s.id} className="mono chip" to={`/networks/${encodeURIComponent(n.id)}`}
                       title={`GW ${s.gateway_ip || '—'} · DHCP ${t(s.enable_dhcp ? 'networks.on' : 'networks.off')}`}>{s.cidr}</Link>
                   ))}</td>
                   <td className="dim">{t(n['router:external'] ? 'networks.external' : n.shared ? 'networks.shared' : 'networks.internal')}</td>

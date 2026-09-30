@@ -4,6 +4,7 @@ import { currentProjectId, fetchOwned, isOwned, isUsableNetwork, owned, projectQ
 import { createNetwork } from '../networkCreation.js';
 import { editNetwork, loadNetworkEdit } from '../networkEdit.js';
 import { setInstanceAudit } from '../audit.js';
+import { networkResources, createOnlySubnet } from '../networkTopology.js';
 
 const router = Router();
 
@@ -63,6 +64,16 @@ router.get('/external-networks', async (req, res, next) => {
 
 router.get('/networks/:id', async (req, res, next) => {
   try { res.json({ network: await fetchOwned(req.session.os, 'network', `/v2.0/networks/${req.params.id}`, 'network') }); }
+  catch (error) { next(error); }
+});
+
+router.get('/networks/:id/resources', async (req, res, next) => {
+  try { res.json(await networkResources(req.session.os, req.params.id)); }
+  catch (error) { next(error); }
+});
+
+router.post('/networks/:id/subnet', async (req, res, next) => {
+  try { res.status(201).json(await createOnlySubnet(req.session.os, req.params.id, req.body)); }
   catch (error) { next(error); }
 });
 

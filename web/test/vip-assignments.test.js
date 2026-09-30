@@ -40,21 +40,29 @@ test('a normal VM renders one named row with its subnet IP, never instance or Po
   });
 });
 
-test('many VMs remain one row each and long names wrap inside a vertically scrolling picker', async () => {
-  const longName = `FW-${'production-'.repeat(12)}`;
+test('many VMs remain compact rows and long names truncate inside a vertically scrolling picker', async () => {
+  const longName = 'NSW-UAT-PRODUCTION-FIREWALL-PRIMARY-01';
   const targets = Array.from({ length: 35 }, (_, index) => target(
-    index === 0 ? longName : `FW-${String(index).padStart(2, '0')}`,
+    index === 2 ? longName : `C-P-GW${String(index + 1).padStart(2, '0')}`,
     `instance-${index}`, `port-${index}`, `10.20.31.${index + 10}`));
   const vms = vipAssignmentVms(targets, subnetId);
   await withChoices((render) => {
     const html = render(vms);
-    assert.equal((html.match(/class="vip-vm-choice vip-vm-choice-single"/g) || []).length, 35);
+    assert.equal((html.match(/class="vip-assignment-option"/g) || []).length, 35);
+    assert.match(html, /C-P-GW01/);
+    assert.match(html, /C-P-GW02/);
     assert.match(html, new RegExp(longName));
     assert.doesNotMatch(html, /instance-0|port-0/);
   });
   const css = readFileSync(fileURLToPath(new URL('../src/styles.css', import.meta.url)), 'utf8');
-  assert.match(css, /\.vip-assignment-list \{[^}]*max-height:[^}]*overflow-y: auto;[^}]*overflow-x: hidden;/);
-  assert.match(css, /\.vip-vm-identity strong, \.vip-vm-name \{ overflow-wrap: anywhere; \}/);
+  assert.match(css, /input, select, textarea \{[^}]*width: 100%;/);
+  assert.match(css, /\.vip-assignment-list \{[^}]*display: flex; flex-direction: column;[^}]*overflow-y: auto;[^}]*overflow-x: hidden;/);
+  assert.match(css, /\.vip-assignment-option \{[^}]*display: flex; align-items: center;[^}]*width: 100%;[^}]*min-width: 0;/);
+  assert.match(css, /\.vip-assignment-option input\[type="checkbox"\] \{[^}]*flex: 0 0 16px; width: 16px;[^}]*min-width: 16px;/);
+  assert.match(css, /\.vip-choice input\[type="checkbox"\] \{[^}]*flex: 0 0 16px; width: 16px;/);
+  assert.match(css, /\.vip-assignment-option__content \{[^}]*flex: 1 1 auto;[^}]*min-width: 0; overflow: hidden;/);
+  assert.match(css, /\.vip-assignment-option__content strong \{[^}]*text-overflow: ellipsis; white-space: nowrap;/);
+  assert.doesNotMatch(css, /\.vip-vm-choice|\.vip-interface-choice|\.vip-vm-identity/);
   assert.match(css, /\.vip-assignments-modal \.modal-body \{[^}]*overflow-x: hidden;/);
 });
 
@@ -76,6 +84,18 @@ test('two eligible Ports on one VM render one VM group with distinct interface c
   const chosen = toggleVipPort(new Set(['port-a', 'port-b']), 'port-a');
   chosen.add('port-c');
   assert.deepEqual([...chosen].sort(), ['port-b', 'port-c']);
+});
+
+test('an external matching address pair is visible but cannot be selected or removed', async () => {
+  const external = { ...target('Firewall A', 'vm-a', 'port-a', '10.20.31.10'), external_pair: true };
+  const vms = vipAssignmentVms([external], subnetId);
+  assert.equal(vms[0].interfaces[0].externalPair, true);
+  await withChoices((render) => {
+    const html = render(vms);
+    assert.match(html, /disabled=""/);
+    assert.match(html, /10\.20\.31\.10/);
+    assert.doesNotMatch(html, /port-a|vm-a/);
+  });
 });
 
 test('search uses VM name or fixed IP, not UUID; empty and locale messages are present', async () => {

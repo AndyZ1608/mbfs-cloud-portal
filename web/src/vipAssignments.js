@@ -12,7 +12,8 @@ export function vipAssignmentVms(targets, subnetId) {
     if (!vm.instanceName && typeof target.instance_name === 'string') vm.instanceName = target.instance_name.trim();
     const fixedIp = (target.fixed_ips || []).filter((fixed) => fixed.subnet_id === subnetId)
       .map((fixed) => fixed.ip_address).filter(Boolean).join(', ');
-    vm.interfaces.push({ portId: target.id, fixedIp, assigned: target.assigned === true });
+    vm.interfaces.push({ portId: target.id, fixedIp, assigned: target.assigned === true,
+      externalPair: target.external_pair === true });
   }
   const compare = (left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });
   return [...byInstance.values()].map((vm) => ({ ...vm,

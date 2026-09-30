@@ -462,7 +462,7 @@ function mockNetwork(m, path, q, body, projectId) {
     const subnet = subnets.find((item) => item.id === fixed?.subnet_id);
     const vipReservation = spec.admin_state_up === false && spec.port_security_enabled === false
       && Array.isArray(spec.security_groups) && spec.security_groups.length === 0
-      && spec.device_id === '' && spec.device_owner === '' && !!fixed?.ip_address;
+      && spec.device_id === '' && spec.device_owner === '' && !!fixed?.subnet_id;
     if (!network || !subnet || subnet.network_id !== network.id || spec.project_id !== projectId
       || !Array.isArray(spec.security_groups) || (!vipReservation && !spec.security_groups.length)
       || spec.security_groups.some((id) => !secgroups.some((group) => group.id === id && group.project_id === projectId))) throw notFound();
@@ -508,6 +508,12 @@ function mockNetwork(m, path, q, body, projectId) {
     if (!port) throw notFound();
     port.tags ||= [];
     if (!port.tags.includes(mt[2])) port.tags.push(mt[2]);
+    return null;
+  }
+  if ((mt = path.match(/^\/v2\.0\/ports\/([^/]+)\/tags\/([^/]+)$/)) && m === 'DELETE') {
+    const port = ports.find((p) => p.id === mt[1]);
+    if (!port) throw notFound();
+    port.tags = (port.tags || []).filter((tag) => tag !== mt[2]);
     return null;
   }
   if ((mt = path.match(/^\/v2\.0\/ports\/([^/]+)$/)) && m === 'DELETE') {

@@ -4,6 +4,7 @@ import { assertOwned, fetchOwned, owned, projectQuery, currentProjectId } from '
 import { validateFixedIp } from './instanceInterfaces.js';
 
 export const VIP_TAG = 'cmp-vip';
+export const vipAssignmentTag = (vipId) => `cmp-vip-aap-${vipId}`;
 const missing = () => new OSError(404, 'VIP or interface not found in the current project.', 'resource_not_found');
 const invalid = (code, message) => new OSError(400, message, code);
 const portPath = (id) => `/v2.0/ports/${encodeURIComponent(id)}`;
@@ -20,6 +21,8 @@ export const vipPair = (ip) => ({ ip_address: `${ip}/${isIP(ip) === 4 ? 32 : 128
 const matchesVipPair = (port, pair, ip) => hostAddress(pair.ip_address) === hostAddress(ip)
   && (!pair.mac_address || pair.mac_address.toLowerCase() === port.mac_address?.toLowerCase());
 export const hasVipPair = (port, ip) => (port.allowed_address_pairs || []).some((pair) => matchesVipPair(port, pair, ip));
+export const hasManagedVipPair = (port, vip) => hasVipPair(port, vip.fixed_ips[0].ip_address)
+  && Array.isArray(port.tags) && port.tags.includes(vipAssignmentTag(vip.id));
 
 export function isVipPort(port) {
   return Array.isArray(port?.tags) && port.tags.includes(VIP_TAG)
@@ -35,12 +38,14 @@ export async function ownedSubnet(session, subnetId, request = osFetch) {
   const subnet = assertOwned((await request(session, 'network', `/v2.0/subnets/${encodeURIComponent(subnetId)}`))?.subnet, session);
   const network = assertOwned((await request(session, 'network', `/v2.0/networks/${encodeURIComponent(subnet.network_id)}`))?.network, session);
   if (network['router:external'] || !network.subnets?.includes(subnet.id)) throw missing();
+  if (network.subnets.length !== 1) throw new OSError(409, 'CMP requires exactly one Subnet for VIP operations.', 'network_multiple_subnets');
   return { subnet, network };
 }
 
 export async function projectPorts(session, request = osFetch, networkId = null) {
   const path = projectQuery(session, '/v2.0/ports', networkId ? { network_id: networkId } : {});
-  return owned((await request(session, 'network', path))?.ports, session);
+  return owned((await request(session, 'network', path))?.ports, session)
+    .filter((port) => !networkId || port.network_id === networkId);
 }
 
 export async function projectServers(session, request = osFetch) {
@@ -71,10 +76,8 @@ export async function subnetPorts(session, subnetId, request = osFetch) {
 
 export async function subnetVips(session, subnetId, request = osFetch) {
   const { subnet, network, ports } = await subnetPorts(session, subnetId, request);
-  const servers = await projectServers(session, request);
-  const targets = eligibleVmPorts(ports, servers, subnet.id);
   const vips = ports.filter(isVipPort).map((port) => ({ ...port,
-    assignment_count: targets.filter((candidate) => candidate.id !== port.id
+    assignment_count: ports.filter((candidate) => candidate.id !== port.id
       && hasVipPair(candidate, port.fixed_ips[0].ip_address)).length }));
   return { subnet, network, vips };
 }
@@ -82,10 +85,9 @@ export async function subnetVips(session, subnetId, request = osFetch) {
 export async function createVip(session, subnetId, input, request = osFetch) {
   const { subnet, network } = await ownedSubnet(session, subnetId, request);
   const name = typeof input?.name === 'string' ? input.name.trim() : '';
-  const ip = input?.ip_address;
+  const ip = typeof input?.ip_address === 'string' ? input.ip_address.trim() : '';
   if (!name || name.length > 255) throw invalid('vip_name_invalid', 'Enter a VIP name.');
-  if (typeof ip !== 'string' || !ip.trim()) throw invalid('vip_address_required', 'Choose an explicit VIP address.');
-  validateFixedIp(ip, subnet);
+  if (ip) validateFixedIp(ip, subnet);
   let extensions;
   try { extensions = (await request(session, 'network', '/v2.0/extensions'))?.extensions || []; }
   catch { throw new OSError(409, 'Neutron port tagging could not be verified.', 'vip_tags_unavailable'); }
@@ -93,7 +95,7 @@ export async function createVip(session, subnetId, input, request = osFetch) {
     throw new OSError(409, 'Neutron port tags are required for CMP VIP management.', 'vip_tags_unavailable');
   }
   const ports = await projectPorts(session, request, network.id);
-  if (ports.some((port) => port.fixed_ips?.some((fixed) => fixed.ip_address === ip))) {
+  if (ip && ports.some((port) => port.fixed_ips?.some((fixed) => fixed.ip_address === ip))) {
     throw new OSError(409, 'VIP address is already in use.', 'vip_address_in_use');
   }
   let port;
@@ -101,7 +103,7 @@ export async function createVip(session, subnetId, input, request = osFetch) {
     port = (await request(session, 'network', '/v2.0/ports', { method: 'POST', body: { port: {
       name, network_id: network.id, project_id: currentProjectId(session),
       admin_state_up: false, port_security_enabled: false, security_groups: [],
-      device_id: '', device_owner: '', fixed_ips: [{ subnet_id: subnet.id, ip_address: ip }],
+      device_id: '', device_owner: '', fixed_ips: [{ subnet_id: subnet.id, ...(ip ? { ip_address: ip } : {}) }],
     } } }))?.port;
   } catch (error) {
     if ([400, 409].includes(error?.status) && /(?:already|allocated|in use|duplicate)/i.test(error.message || '')) {
@@ -125,12 +127,16 @@ export async function createVip(session, subnetId, input, request = osFetch) {
 
 export async function deleteVip(session, id, request = osFetch) {
   const { port } = await getVip(session, id, request);
-  const ports = await projectPorts(session, request);
+  const ports = await projectPorts(session, request, port.network_id);
   const count = ports.filter((candidate) => candidate.id !== port.id && hasVipPair(candidate, port.fixed_ips[0].ip_address)).length;
   if (count) {
     const error = new OSError(409, `VIP is assigned to ${count} interfaces.`, 'vip_delete_assigned');
     error.count = count;
     throw error;
+  }
+  for (const candidate of ports.filter((item) => item.tags?.includes(vipAssignmentTag(id)))) {
+    await request(session, 'network', `${portPath(candidate.id)}/tags/${vipAssignmentTag(id)}`,
+      { method: 'DELETE', responseType: 'none' });
   }
   await request(session, 'network', portPath(id), { method: 'DELETE', responseType: 'none' });
   return port;
@@ -166,18 +172,65 @@ export async function updateVmPortPairs(session, targetId, subnetId, changes, re
     return { port: updated || { ...port, allowed_address_pairs: desired }, changed: true };
   } catch (error) {
     if ([400, 409].includes(error?.status)) {
-      throw new OSError(409, 'VIP cannot be assigned with the current Port configuration.', 'vip_port_rejected');
+      throw new OSError(409, error.message || 'Neutron rejected this Allowed Address Pair.', 'vip_port_rejected');
     }
     throw error;
   }
+}
+
+export async function applyVipPair(session, targetId, subnetId, vip, assign, request = osFetch) {
+  const ip = vip.fixed_ips[0].ip_address;
+  const tagPath = `${portPath(targetId)}/tags/${vipAssignmentTag(vip.id)}`;
+  const fresh = assertOwned((await request(session, 'network', portPath(targetId)))?.port, session);
+  if (assign && hasVipPair(fresh, ip)) return { port: fresh, changed: false };
+  if (!assign && !hasManagedVipPair(fresh, vip)) return { port: fresh, changed: false };
+  const result = await updateVmPortPairs(session, targetId, subnetId, [{ ip, assign }], request);
+  if (!result.changed) return result;
+  try {
+    await request(session, 'network', tagPath, { method: assign ? 'PUT' : 'DELETE', responseType: 'none' });
+  } catch {
+    if (assign) {
+      try { await updateVmPortPairs(session, targetId, subnetId, [{ ip, assign: false }], request); }
+      catch { /* The pair may remain; report the uncertain outcome. */ }
+    }
+    const error = new OSError(502, 'VIP association changed but its ownership marker could not be synchronized. Refresh before retrying.', 'vip_partial_failure');
+    error.operationChanged = true;
+    throw error;
+  }
+  return result;
 }
 
 export async function vipAssignments(session, id, request = osFetch) {
   const { port: vip, subnet } = await getVip(session, id, request);
   const [ports, servers] = await Promise.all([projectPorts(session, request, vip.network_id), projectServers(session, request)]);
   const targets = eligibleVmPorts(ports, servers, subnet.id).map((port) => ({ ...port,
-    assigned: hasVipPair(port, vip.fixed_ips[0].ip_address) }));
+    assigned: hasManagedVipPair(port, vip),
+    external_pair: hasVipPair(port, vip.fixed_ips[0].ip_address) && !hasManagedVipPair(port, vip) }));
   return { vip, subnet, targets };
+}
+
+export async function changeVipVmAssignment(session, vipId, serverId, portId, assign, request = osFetch) {
+  if (typeof serverId !== 'string' || !serverId) throw invalid('vip_targets_invalid', 'Choose a virtual machine.');
+  const { vip, subnet, targets } = await vipAssignments(session, vipId, request);
+  const candidates = targets.filter((port) => port.device_id === serverId && (assign || port.assigned));
+  if (!candidates.length) throw missing();
+  let target;
+  if (portId) {
+    target = candidates.find((port) => port.id === portId);
+    if (!target) throw missing();
+  } else if (candidates.length === 1) target = candidates[0];
+  else {
+    const error = new OSError(409, 'Choose a VM interface for this Network and Subnet.', 'vip_interface_required');
+    error.interfaces = candidates.map((port) => ({ id: port.id,
+      fixed_ips: port.fixed_ips?.filter((fixed) => fixed.subnet_id === subnet.id) || [] }));
+    throw error;
+  }
+  if (assign && target.external_pair) {
+    throw new OSError(409, 'This address pair already exists outside CMP VIP management.', 'vip_external_pair');
+  }
+  const result = await applyVipPair(session, target.id, subnet.id, vip, assign, request);
+  return { vip, events: result.changed ? [{ action: assign ? 'vip.assign' : 'vip.unassign',
+    vip, target: result.port }] : [] };
 }
 
 export async function setVipAssignments(session, id, ids, request = osFetch) {
@@ -187,16 +240,18 @@ export async function setVipAssignments(session, id, ids, request = osFetch) {
   const byId = new Map(targets.map((port) => [port.id, port]));
   if (ids.some((id) => !byId.has(id))) throw missing();
   const desired = new Set(ids);
-  const changes = targets.filter((port) => desired.has(port.id) !== port.assigned);
+  if (targets.some((port) => desired.has(port.id) && port.external_pair)) {
+    throw new OSError(409, 'This address pair already exists outside CMP VIP management.', 'vip_external_pair');
+  }
+  const changes = targets.filter((port) => desired.has(port.id) !== port.assigned && !port.external_pair);
   const events = [];
   for (const target of changes) {
     const assign = desired.has(target.id);
     try {
-      const result = await updateVmPortPairs(session, target.id, subnet.id,
-        [{ ip: vip.fixed_ips[0].ip_address, assign }], request);
+      const result = await applyVipPair(session, target.id, subnet.id, vip, assign, request);
       if (result.changed) events.push({ action: assign ? 'vip.assign' : 'vip.unassign', vip, target: result.port });
     } catch (error) {
-      if (events.length) {
+      if (events.length || error.operationChanged) {
         const partial = new OSError(409, 'Some VIP assignments changed. Refresh before retrying.', 'vip_partial_failure');
         partial.events = events;
         partial.failedPortId = target.id;
@@ -218,13 +273,17 @@ export async function portVips(session, id, request = osFetch) {
     request(session, 'network', projectQuery(session, '/v2.0/subnets'))]);
   const network = assertOwned(networkData?.network, session);
   if (network['router:external']) throw missing();
+  if (network.subnets?.length !== 1) {
+    throw new OSError(409, 'CMP requires exactly one Subnet for VIP operations.', 'network_multiple_subnets');
+  }
   const ownedSubnetIds = new Set(owned(subnetData.subnets, session).map((subnet) => subnet.id));
   const subnets = new Set((port.fixed_ips || []).map((fixed) => fixed.subnet_id));
   const vips = ports.filter((candidate) => isVipPort(candidate)
     && subnets.has(candidate.fixed_ips[0].subnet_id) && ownedSubnetIds.has(candidate.fixed_ips[0].subnet_id));
-  return { port, vips: vips.map((vip) => ({ ...vip, assigned: hasVipPair(port, vip.fixed_ips[0].ip_address) })),
+  return { port, vips: vips.map((vip) => ({ ...vip, assigned: hasManagedVipPair(port, vip),
+    external_pair: hasVipPair(port, vip.fixed_ips[0].ip_address) && !hasManagedVipPair(port, vip) })),
     external_pairs: (port.allowed_address_pairs || []).filter((pair) => !vips.some((vip) =>
-      matchesVipPair(port, pair, vip.fixed_ips[0].ip_address))) };
+      hasManagedVipPair(port, vip) && matchesVipPair(port, pair, vip.fixed_ips[0].ip_address))) };
 }
 
 export async function serverVips(session, serverId, request = osFetch) {
@@ -233,7 +292,7 @@ export async function serverVips(session, serverId, request = osFetch) {
     request(session, 'network', projectQuery(session, '/v2.0/networks')),
     request(session, 'network', projectQuery(session, '/v2.0/subnets'))]);
   const ownedNetworkIds = new Set(owned(networkData.networks, session)
-    .filter((network) => !network['router:external']).map((network) => network.id));
+    .filter((network) => !network['router:external'] && network.subnets?.length === 1).map((network) => network.id));
   const subnetIdsOwned = new Set(owned(subnetData.subnets, session).map((subnet) => subnet.id));
   const reservations = ports.filter((port) => isVipPort(port) && ownedNetworkIds.has(port.network_id)
     && subnetIdsOwned.has(port.fixed_ips[0].subnet_id));
@@ -244,10 +303,10 @@ export async function serverVips(session, serverId, request = osFetch) {
         && subnetIds.has(vip.fixed_ips[0].subnet_id));
       return { id: port.id, manageable: ownedNetworkIds.has(port.network_id)
         && [...subnetIds].some((id) => subnetIdsOwned.has(id)),
-      vips: vips.filter((vip) => hasVipPair(port, vip.fixed_ips[0].ip_address))
+      vips: vips.filter((vip) => hasManagedVipPair(port, vip))
         .map((vip) => ({ id: vip.id, name: vip.name, ip_address: vip.fixed_ips[0].ip_address })),
       external_pairs: (port.allowed_address_pairs || []).filter((pair) => !vips.some((vip) =>
-        matchesVipPair(port, pair, vip.fixed_ips[0].ip_address))) };
+        hasManagedVipPair(port, vip) && matchesVipPair(port, pair, vip.fixed_ips[0].ip_address))) };
     }) };
 }
 
@@ -258,13 +317,26 @@ export async function setPortVips(session, id, ids, request = osFetch) {
   const byId = new Map(vips.map((vip) => [vip.id, vip]));
   if (ids.some((vipId) => !byId.has(vipId))) throw missing();
   const desired = new Set(ids);
-  const changes = vips.filter((vip) => desired.has(vip.id) !== vip.assigned).map((vip) => ({
+  if (vips.some((vip) => desired.has(vip.id) && vip.external_pair)) {
+    throw new OSError(409, 'This address pair already exists outside CMP VIP management.', 'vip_external_pair');
+  }
+  const changes = vips.filter((vip) => desired.has(vip.id) !== vip.assigned && !vip.external_pair).map((vip) => ({
     vip, ip: vip.fixed_ips[0].ip_address, assign: desired.has(vip.id),
   }));
   if (!changes.length) return { port, events: [] };
-  const subnetIds = new Set(changes.map((item) => item.vip.fixed_ips[0].subnet_id));
-  const result = await updateVmPortPairs(session, id, [...subnetIds], changes, request);
-  return { port: result.port, events: result.changed ? changes.map((item) => ({
-    action: item.assign ? 'vip.assign' : 'vip.unassign', vip: item.vip, target: result.port,
-  })) : [] };
+  const events = [];
+  for (const change of changes) {
+    try {
+      const result = await applyVipPair(session, id, change.vip.fixed_ips[0].subnet_id,
+        change.vip, change.assign, request);
+      if (result.changed) events.push({ action: change.assign ? 'vip.assign' : 'vip.unassign',
+        vip: change.vip, target: result.port });
+    } catch (error) {
+      if (!events.length && !error.operationChanged) throw error;
+      const partial = new OSError(409, 'Some VIP assignments changed. Refresh before retrying.', 'vip_partial_failure');
+      partial.events = events;
+      throw partial;
+    }
+  }
+  return { port, events };
 }

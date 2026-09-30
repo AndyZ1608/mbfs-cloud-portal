@@ -11,18 +11,22 @@ import { translate } from '../src/i18n/index.js';
 
 const source = (path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 
-test('network and subnet detail routes, links, and project-keyed state are present', () => {
+test('Network detail is the primary Port/VIP route and legacy Subnet links redirect', () => {
   const app = source('../src/App.jsx');
   assert.match(app, /path="\/networks\/:networkId"/);
   assert.match(app, /path="\/networks\/:networkId\/subnets\/:subnetId"/);
   assert.match(source('../src/pages/Networks.jsx'), /to=\{`\/networks\/\$\{encodeURIComponent\(n.id\)\}`\}/);
-  assert.match(source('../src/pages/NetworkDetail.jsx'), /to=\{`\/networks\/\$\{encodeURIComponent\(network.id\)\}\/subnets\/\$\{encodeURIComponent\(subnet.id\)\}`\}/);
-  assert.match(source('../src/pages/SubnetDetail.jsx'), /key=\{`\$\{sess.project.id\}:\$\{networkId\}:\$\{subnetId\}`\}/);
-  assert.match(source('../src/pages/SubnetDetail.jsx'), /api\(`\/subnets\/\$\{encodeURIComponent\(subnetId\)\}`\)/);
-  assert.match(source('../src/pages/SubnetDetail.jsx'), /\['overview', 'ports', 'virtualIps'\]/);
+  assert.match(app, /<LegacySubnetRedirect \/>/);
+  assert.doesNotMatch(source('../src/pages/Networks.jsx'), /to=\{`\/networks\/\$\{encodeURIComponent\(n.id\)\}\/subnets\//);
+  const detail = source('../src/pages/NetworkDetail.jsx');
+  assert.match(detail, /key=\{`\$\{sess.project.id\}:\$\{networkId\}`\}/);
+  assert.match(detail, /\/resources`\)/);
+  assert.match(detail, /subnetState === 'none'/);
+  assert.match(detail, /subnetState === 'multiple'/);
+  assert.match(detail, /subnetState === 'single'/);
 });
 
-test('VIP creation uses required subnet-aware input and assignment editors submit IDs only', async () => {
+test('VIP creation offers optional subnet-aware IP and assignment editors submit IDs only', async () => {
   const vite = await createServer({ server: { middlewareMode: true, watch: null }, appType: 'custom' });
   try {
     const { CreateVipModal } = await vite.ssrLoadModule('/src/components/VipModals.jsx');
@@ -31,7 +35,7 @@ test('VIP creation uses required subnet-aware input and assignment editors submi
       onClose() {}, onDone() {},
     }));
     assert.match(html, /Địa chỉ VIP/);
-    assert.match(html, /aria-required="true"/);
+    assert.match(html, /aria-required="false"/);
     assert.match(html, /10\.20\.31\./);
     assert.match(html, /disabled=""[^>]*>Tạo Virtual IP/);
     const modals = source('../src/components/VipModals.jsx');
@@ -42,18 +46,18 @@ test('VIP creation uses required subnet-aware input and assignment editors submi
   } finally { await vite.close(); }
 });
 
-test('Subnet Port/VIP classification, VM AAP view, assigned delete guard, and independent tab load are wired', async () => {
+test('Network Port/VIP classification, VM AAP view and assigned-delete guard are wired', async () => {
   const vite = await createServer({ server: { middlewareMode: true, watch: null }, appType: 'custom' });
   try {
-    const { portType } = await vite.ssrLoadModule('/src/pages/SubnetDetail.jsx');
+    const { portType } = await vite.ssrLoadModule('/src/pages/NetworkDetail.jsx');
     assert.equal(portType({ cmp_vip: true, device_owner: '' }), 'vip');
     assert.equal(portType({ device_owner: 'compute:nova' }), 'vm');
     assert.equal(portType({ device_owner: 'network:router_interface' }), 'router');
     assert.equal(portType({ device_owner: 'network:dhcp' }), 'dhcp');
-    const subnet = source('../src/pages/SubnetDetail.jsx');
-    assert.match(subnet, /vip\.assignment_count > 0/);
-    assert.match(subnet, /tab === 'ports' \? 'ports' : 'vips'/);
-    assert.match(subnet, /subnet\.port\.type\.\$\{portType\(port\)\}/);
+    const network = source('../src/pages/NetworkDetail.jsx');
+    assert.match(network, /vip\.assignment_count > 0/);
+    assert.match(network, /subnet\.port\.type\.\$\{portType\(port\)\}/);
+    assert.match(network, /<AttachVipModal/);
     const detail = source('../src/pages/InstanceDetail.jsx');
     assert.match(detail, /api\(`\/servers\/\$\{encodedId\}\/vips`\)/);
     assert.match(detail, /<PortVipsModal/);
@@ -63,7 +67,8 @@ test('Subnet Port/VIP classification, VM AAP view, assigned delete guard, and in
 
 test('VIP UI and semantic activity labels translate in both languages and suppress unknown details', () => {
   for (const locale of ['en', 'vi']) {
-    for (const key of ['vip.create', 'vip.manageAssignments', 'vip.reserved', 'vip.deleteConfirm',
+    for (const key of ['vip.create', 'vip.manageAssignments', 'vip.attachToVm', 'vip.reserved', 'vip.deleteConfirm',
+      'network.detail.noSubnetTitle', 'network.detail.multipleSubnets',
       'subnet.detail.virtualIps', 'subnet.port.allowedPairs', 'instance.networking.manageVips',
       'instance.networking.externalAddressPair', 'errors.vip_delete_assigned']) {
       assert.notEqual(translate(locale, key), key, `${locale}: ${key}`);

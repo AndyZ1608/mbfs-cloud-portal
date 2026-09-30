@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { subnetPorts, subnetVips, createVip, deleteVip, vipAssignments, setVipAssignments,
-  portVips, setPortVips, ownedSubnet, isVipPort, serverVips } from '../vip.js';
+  portVips, setPortVips, ownedSubnet, isVipPort, serverVips, changeVipVmAssignment } from '../vip.js';
 
 const router = Router();
 const eventFor = ({ action, vip, target }) => ({ action, resourceId: vip.id, resourceName: vip.name,
@@ -44,6 +44,17 @@ router.delete('/vips/:id', async (req, res, next) => {
 router.get('/vips/:id/assignments', async (req, res, next) => {
   try { res.json(await vipAssignments(req.session.os, req.params.id)); } catch (error) { next(error); }
 });
+
+for (const [action, assign] of [['attach', true], ['detach', false]]) {
+  router.post(`/vips/:id/${action}`, async (req, res, next) => {
+    try {
+      const result = await changeVipVmAssignment(req.session.os, req.params.id,
+        req.body?.server_id, req.body?.port_id, assign);
+      res.locals.networkAudits = result.events.map(eventFor);
+      res.json({ ok: true, changed: result.events.length });
+    } catch (error) { next(error); }
+  });
+}
 
 router.put('/vips/:id/assignments', async (req, res, next) => {
   try {

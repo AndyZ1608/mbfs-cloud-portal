@@ -8,7 +8,7 @@ process.env.DATA_ENCRYPTION_KEY = 'test-only-encryption-material';
 
 const { mockFetch } = await import('../mock.js');
 const { createVip, deleteVip, setVipAssignments, setPortVips, vipAssignments,
-  portVips, subnetVips, updateVmPortPairs, hostAddress } = await import('../vip.js');
+  portVips, subnetVips, updateVmPortPairs, hostAddress, changeVipVmAssignment } = await import('../vip.js');
 const session = { project: { id: 'p-demo' }, roles: ['admin'], user: { name: 'vip-test' } };
 const direct = (sess, svc, path, options = {}) => mockFetch(svc, options.method || 'GET', path, options.body, sess.project.id);
 
@@ -36,6 +36,24 @@ test('VIP reservation is tagged, disabled, unbound, and never attached to Nova',
     assert.ok((await subnetVips(session, subnet.id, request)).vips.some((item) => item.id === vip.id));
     await assert.rejects(createVip({ ...session, project: { id: 'p-devops' } }, subnet.id,
       { name: 'foreign', ip_address: '10.10.10.101' }, request), { status: 404 });
+  } finally { await deleteVip(session, vip.id, request); }
+});
+
+test('VIP reservation can let Neutron allocate an unused address in the sole Subnet', async () => {
+  const subnet = mockFetch('network', 'GET', '/v2.0/subnets', null, 'p-demo').subnets.find((item) => item.project_id === 'p-demo');
+  const calls = [];
+  const request = (sess, svc, path, options = {}) => {
+    calls.push({ path, options });
+    return direct(sess, svc, path, options);
+  };
+  const vip = await createVip(session, subnet.id, { name: 'AUTO-VIP' }, request);
+  try {
+    const spec = calls.find((call) => call.path === '/v2.0/ports' && call.options.method === 'POST').options.body.port;
+    assert.deepEqual(spec.fixed_ips, [{ subnet_id: subnet.id }]);
+    assert.equal(vip.fixed_ips[0].subnet_id, subnet.id);
+    assert.equal(vip.admin_state_up, false);
+    assert.equal(vip.port_security_enabled, false);
+    assert.deepEqual(vip.security_groups, []);
   } finally { await deleteVip(session, vip.id, request); }
 });
 
@@ -121,6 +139,27 @@ test('foreign and wrong-subnet target Ports are denied before mutation; host for
     assert.equal(hostAddress('10.10.10.102'), hostAddress('10.10.10.102/32'));
     assert.ok(wrong.length >= 1);
   } finally { await deleteVip(session, vip.id, direct); }
+});
+
+test('VM attach resolves its sole eligible Port and requires an interface choice when it has two', async () => {
+  const subnet = mockFetch('network', 'GET', '/v2.0/subnets', null, 'p-demo').subnets.find((item) => item.project_id === 'p-demo');
+  const vip = await createVip(session, subnet.id, { name: 'VM-CHOICE-VIP', ip_address: '10.10.10.109' }, direct);
+  const [a, b] = (await vipAssignments(session, vip.id, direct)).targets;
+  const second = direct(session, 'network', `/v2.0/ports/${b.id}`).port;
+  const oldDevice = second.device_id;
+  try {
+    second.device_id = a.device_id;
+    await assert.rejects(changeVipVmAssignment(session, vip.id, a.device_id, null, true, direct),
+      (error) => error.code === 'vip_interface_required' && error.interfaces.length === 2);
+    assert.equal((await changeVipVmAssignment(session, vip.id, a.device_id, a.id, true, direct)).events.length, 1);
+    assert.equal((await changeVipVmAssignment(session, vip.id, a.device_id, a.id, true, direct)).events.length, 0);
+    assert.equal((await changeVipVmAssignment(session, vip.id, a.device_id, null, false, direct)).events.length, 1);
+    await assert.rejects(changeVipVmAssignment({ ...session, project: { id: 'p-devops' } },
+      vip.id, a.device_id, null, true, direct), { status: 404 });
+  } finally {
+    second.device_id = oldDevice;
+    await deleteVip(session, vip.id, direct);
+  }
 });
 
 test('provider AAP rejection and multi-port partial failure never mutate firewall fields or reservation Port', async () => {
@@ -209,7 +248,7 @@ test('VIP creation fails closed without Port tags and rolls back only its newly 
   assert.deepEqual(direct(session, 'network', '/v2.0/ports').ports.map((port) => port.id), before);
 });
 
-test('a provider-side AAP change is discovered without a CMP assignment record', async () => {
+test('a pre-existing matching provider AAP is visible but never claimed or removed by CMP', async () => {
   const subnet = mockFetch('network', 'GET', '/v2.0/subnets', null, 'p-demo').subnets.find((item) => item.project_id === 'p-demo');
   const vip = await createVip(session, subnet.id, { name: 'PROVIDER-VIP', ip_address: '10.10.10.108' }, direct);
   const target = (await vipAssignments(session, vip.id, direct)).targets[0];
@@ -218,9 +257,14 @@ test('a provider-side AAP change is discovered without a CMP assignment record',
     direct(session, 'network', `/v2.0/ports/${target.id}`, { method: 'PUT', body: { port: {
       allowed_address_pairs: [...before, { ip_address: '10.10.10.108' }],
     } } });
-    assert.equal((await vipAssignments(session, vip.id, direct)).targets.find((item) => item.id === target.id).assigned, true);
-    assert.equal((await portVips(session, target.id, direct)).vips.find((item) => item.id === vip.id).assigned, true);
+    const assignment = (await vipAssignments(session, vip.id, direct)).targets.find((item) => item.id === target.id);
+    assert.equal(assignment.assigned, false);
+    assert.equal(assignment.external_pair, true);
+    assert.equal((await portVips(session, target.id, direct)).vips.find((item) => item.id === vip.id).assigned, false);
     assert.equal((await subnetVips(session, subnet.id, direct)).vips.find((item) => item.id === vip.id).assignment_count, 1);
+    await setVipAssignments(session, vip.id, [], direct);
+    assert.equal((await vipAssignments(session, vip.id, direct)).targets.find((item) => item.id === target.id).external_pair, true);
+    await assert.rejects(setVipAssignments(session, vip.id, [target.id], direct), { code: 'vip_external_pair' });
   } finally {
     direct(session, 'network', `/v2.0/ports/${target.id}`, { method: 'PUT', body: { port: { allowed_address_pairs: before } } });
     await deleteVip(session, vip.id, direct);

@@ -29,6 +29,8 @@ export function apiErrorMessage(data, status) {
   });
   if (code === 'network_edit_partial_failure') return `${text('errors.network_edit_partial_failure')} (${data?.resourceIds?.networkId || '—'} / ${data?.resourceIds?.subnetId || '—'})`;
   if (code === 'vip_delete_assigned') return text('errors.vip_delete_assigned', { count: data?.count ?? '—' });
+  if (code === 'vip_port_rejected' && typeof data?.error === 'string' && data.error
+    && data.error !== 'Neutron rejected this Allowed Address Pair.') return data.error;
   if (code === 'vip_partial_failure') return text('errors.vip_partial_failure', {
     count: data?.changed ?? '—', portId: data?.failedPortId || '—',
   });

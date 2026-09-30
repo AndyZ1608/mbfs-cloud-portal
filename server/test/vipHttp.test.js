@@ -28,6 +28,12 @@ test('VIP HTTP routes are project-scoped and emit semantic VM activity', async (
     item.subnet_details?.some((entry) => entry.cidr === '10.10.10.0/24'));
   assert.ok(network);
   const subnet = network.subnet_details.find((entry) => entry.cidr === '10.10.10.0/24');
+  const resources = await request(`/networks/${network.id}/resources`);
+  assert.equal(resources.status, 200);
+  assert.equal((await resources.json()).subnet.id, subnet.id);
+  const secondSubnet = await request(`/networks/${network.id}/subnet`, 'POST', { cidr: '10.10.20.0/24' });
+  assert.equal(secondSubnet.status, 409);
+  assert.equal((await secondSubnet.json()).code, 'network_multiple_subnets');
   const detail = await request(`/subnets/${subnet.id}`);
   assert.equal(detail.status, 200);
   assert.equal((await detail.json()).subnet.id, subnet.id);
@@ -59,6 +65,8 @@ test('VIP HTTP routes are project-scoped and emit semantic VM activity', async (
   assert.equal((await request(`/vips/${vip.id}/assignments`, 'PUT', { port_ids: [a.id, b.id] })).status, 200);
   const assigned = await request(`/vips/${vip.id}/assignments`);
   assert.equal((await assigned.json()).targets.filter((item) => item.assigned).length, 2);
+  assert.deepEqual(await (await request(`/vips/${vip.id}/attach`, 'POST', { server_id: a.device_id })).json(),
+    { ok: true, changed: 0 });
   const vmView = await request(`/servers/${a.device_id}/vips`);
   assert.ok((await vmView.json()).ports.some((item) => item.id === a.id && item.manageable
     && item.vips.some((entry) => entry.id === vip.id)));
@@ -79,11 +87,13 @@ test('VIP HTTP routes are project-scoped and emit semantic VM activity', async (
   const switched = await request('/auth/switch-project', 'POST', { projectId: 'p-devops' });
   assert.equal(switched.status, 200);
   if (switched.headers.get('set-cookie')) cookie = switched.headers.get('set-cookie').split(';')[0];
-  for (const path of [`/subnets/${subnet.id}`, `/subnets/${subnet.id}/vips`, `/vips/${vip.id}/assignments`,
+  for (const path of [`/networks/${network.id}/resources`, `/subnets/${subnet.id}`, `/subnets/${subnet.id}/vips`, `/vips/${vip.id}/assignments`,
     `/ports/${a.id}/vips`, `/servers/${a.device_id}/vips`]) {
     assert.equal((await request(path)).status, 404, path);
   }
   assert.equal((await request(`/vips/${vip.id}`, 'DELETE')).status, 404);
+  assert.equal((await request(`/networks/${network.id}/subnet`, 'POST', { cidr: '10.10.20.0/24' })).status, 404);
+  assert.equal((await request(`/vips/${vip.id}/attach`, 'POST', { server_id: a.device_id })).status, 404);
   assert.equal((await request(`/vips/${vip.id}/assignments`, 'PUT', { port_ids: [] })).status, 404);
   assert.equal((await request(`/ports/${a.id}/vips`, 'PUT', { vip_port_ids: [] })).status, 404);
   assert.ok(!(await (await request('/audit?limit=100')).json()).entries.some((event) => event.resource_id === vip.id));
