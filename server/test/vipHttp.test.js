@@ -73,6 +73,17 @@ test('VIP HTTP routes are project-scoped and emit semantic VM activity', async (
   const portView = await request(`/ports/${a.id}/vips`);
   assert.ok((await portView.json()).vips.some((item) => item.id === vip.id && item.assigned));
   assert.equal((await request(`/ports/${a.id}/vips`, 'PUT', { vip_port_ids: [] })).status, 200);
+  mockFetch('network', 'PUT', `/v2.0/ports/${a.id}`, { port: { allowed_address_pairs: [
+    { ip_address: '0.0.0.0/0' }, { ip_address: '10.10.10.105/32' },
+  ] } }, 'p-demo');
+  const providerAddedView = await request(`/ports/${a.id}/vips`);
+  const providerAddedData = await providerAddedView.json();
+  assert.ok(providerAddedData.vips.some((item) => item.id === vip.id && item.assigned));
+  assert.deepEqual(providerAddedData.external_pairs, [{ ip_address: '0.0.0.0/0' }]);
+  assert.equal((await request(`/ports/${a.id}/vips`, 'PUT', { vip_port_ids: [] })).status, 200);
+  assert.deepEqual(mockFetch('network', 'GET', `/v2.0/ports/${a.id}`, null, 'p-demo').port.allowed_address_pairs,
+    [{ ip_address: '0.0.0.0/0' }]);
+  mockFetch('network', 'PUT', `/v2.0/ports/${a.id}`, { port: { allowed_address_pairs: [] } }, 'p-demo');
   assert.equal((await request(`/ports/${a.id}/vips`, 'PUT', { vip_port_ids: [vip.id] })).status, 200);
   const vmActivity = await request(`/servers/${a.device_id}/activity`);
   assert.ok((await vmActivity.json()).entries.some((event) => event.action === 'vip.assign'

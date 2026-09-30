@@ -99,7 +99,7 @@ export function AttachVipModal({ vip, onClose, onDone }) {
     return () => { live = false; };
   }, [vip.id]);
   const vms = useMemo(() => vipAssignmentVms(data?.targets, data?.subnet?.id).map((vm) => ({ ...vm,
-    interfaces: vm.interfaces.filter((item) => !item.assigned && !item.externalPair),
+    interfaces: vm.interfaces.filter((item) => !item.assigned),
   })).filter((vm) => vm.interfaces.length), [data]);
   const chosen = vms.find((vm) => vm.instanceId === vmId);
   async function submit() {
@@ -140,17 +140,17 @@ export function VipAssignmentChoices({ vms, selected, onToggle, busy = false }) 
   if (!vms.length) return <Empty>{t('vip.assignments.noEligibleInstances')}</Empty>;
   return <div className="vip-assignment-list">
     {vms.map((vm) => vm.interfaces.length === 1 ? <label className="vip-assignment-option" key={vm.instanceId}>
-      <input type="checkbox" checked={selected.has(vm.interfaces[0].portId)} disabled={busy || vm.interfaces[0].externalPair}
+      <input type="checkbox" checked={selected.has(vm.interfaces[0].portId)} disabled={busy}
         onChange={() => onToggle(vm.interfaces[0].portId)} />
       <span className="vip-assignment-option__content"><strong>{vm.instanceName || t('vip.assignments.unnamedVm')}</strong>
-        <small>{vm.interfaces[0].fixedIp || '—'}{vm.interfaces[0].externalPair && ` · ${t('vip.assignments.externalPair')}`}</small></span>
+        <small>{vm.interfaces[0].fixedIp || '—'}</small></span>
     </label> : <div className="vip-assignment-vm" key={vm.instanceId}>
       <strong className="vip-assignment-vm__name">{vm.instanceName || t('vip.assignments.unnamedVm')}</strong>
       <span className="vip-assignment-vm__caption">{t('vip.assignments.interface')}</span>
       <div className="vip-assignment-vm__interfaces">{vm.interfaces.map((item) => <label className="vip-assignment-option vip-assignment-option--interface" key={item.portId}>
-        <input type="checkbox" checked={selected.has(item.portId)} disabled={busy || item.externalPair}
+        <input type="checkbox" checked={selected.has(item.portId)} disabled={busy}
           onChange={() => onToggle(item.portId)} />
-        <span className="vip-assignment-option__content">{item.fixedIp || '—'}{item.externalPair && ` · ${t('vip.assignments.externalPair')}`}</span>
+        <span className="vip-assignment-option__content">{item.fixedIp || '—'}</span>
       </label>)}</div>
     </div>)}
   </div>;
@@ -187,9 +187,8 @@ export function PortVipsModal({ portId, onClose, onDone }) {
     {error ? <p className="err-text" role="alert">{error}</p> : !data ? <Empty>{t('common.loading')}</Empty> : <>
       {!data.vips.length ? <Empty>{t('vip.noAvailable')}</Empty> : <div className="vip-choice-list">
         {data.vips.map((vip) => <label className="vip-choice" key={vip.id}>
-          <input type="checkbox" checked={selected.has(vip.id)} disabled={busy || vip.external_pair} onChange={() => toggle(vip.id)} />
-          <span><strong>{vip.name || vip.fixed_ips?.[0]?.ip_address}</strong><small>{vip.fixed_ips?.[0]?.ip_address}
-            {vip.external_pair && ` · ${t('vip.assignments.externalPair')}`}</small></span>
+          <input type="checkbox" checked={selected.has(vip.id)} disabled={busy} onChange={() => toggle(vip.id)} />
+          <span><strong>{vip.name || vip.fixed_ips?.[0]?.ip_address}</strong><small>{vip.fixed_ips?.[0]?.ip_address}</small></span>
         </label>)}
       </div>}
       {!!data.external_pairs?.length && <div className="vip-external"><strong>{t('instance.networking.externalAddressPair')}</strong>

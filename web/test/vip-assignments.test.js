@@ -86,15 +86,16 @@ test('two eligible Ports on one VM render one VM group with distinct interface c
   assert.deepEqual([...chosen].sort(), ['port-b', 'port-c']);
 });
 
-test('an external matching address pair is visible but cannot be selected or removed', async () => {
-  const external = { ...target('Firewall A', 'vm-a', 'port-a', '10.20.31.10'), external_pair: true };
-  const vms = vipAssignmentVms([external], subnetId);
-  assert.equal(vms[0].interfaces[0].externalPair, true);
+test('a known VIP assigned from Neutron renders checked and removable regardless of AAP origin', async () => {
+  const vms = vipAssignmentVms([target('Firewall A', 'vm-a', 'port-a', '10.20.31.10', true)], subnetId);
+  assert.equal(vms[0].interfaces[0].assigned, true);
   await withChoices((render) => {
-    const html = render(vms);
-    assert.match(html, /disabled=""/);
+    const html = render(vms, new Set(['port-a']));
+    assert.match(html, /checked=""/);
+    assert.doesNotMatch(html, /disabled=""/);
     assert.match(html, /10\.20\.31\.10/);
     assert.doesNotMatch(html, /port-a|vm-a/);
+    assert.doesNotMatch(html, /External Address Pair/);
   });
 });
 

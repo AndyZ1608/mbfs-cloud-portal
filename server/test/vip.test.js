@@ -8,7 +8,8 @@ process.env.DATA_ENCRYPTION_KEY = 'test-only-encryption-material';
 
 const { mockFetch } = await import('../mock.js');
 const { createVip, deleteVip, setVipAssignments, setPortVips, vipAssignments,
-  portVips, subnetVips, updateVmPortPairs, hostAddress, changeVipVmAssignment } = await import('../vip.js');
+  portVips, subnetVips, updateVmPortPairs, hostAddress, normalizeHostAddress,
+  changedVipPairs, classifyVipPairs, changeVipVmAssignment, serverVips } = await import('../vip.js');
 const session = { project: { id: 'p-demo' }, roles: ['admin'], user: { name: 'vip-test' } };
 const direct = (sess, svc, path, options = {}) => mockFetch(svc, options.method || 'GET', path, options.body, sess.project.id);
 
@@ -205,20 +206,21 @@ test('provider AAP rejection and multi-port partial failure never mutate firewal
   }
 });
 
-test('same-IP AAP with custom MAC remains manual and is never removed by VIP operations', async () => {
+test('known VIP AAP with a custom MAC is assigned and removable without touching unrelated MAC-bearing pairs', async () => {
   const subnet = mockFetch('network', 'GET', '/v2.0/subnets', null, 'p-demo').subnets.find((item) => item.project_id === 'p-demo');
   const vip = await createVip(session, subnet.id, { name: 'MANUAL-MAC-VIP', ip_address: '10.10.10.104' }, direct);
   const target = (await vipAssignments(session, vip.id, direct)).targets[0];
   const original = structuredClone(direct(session, 'network', `/v2.0/ports/${target.id}`).port.allowed_address_pairs || []);
   const manual = { ip_address: '10.10.10.104/32', mac_address: 'fa:16:3e:12:34:56' };
+  const unrelated = { ip_address: '192.168.50.100/32', mac_address: 'fa:16:3e:ab:cd:ef' };
   try {
-    direct(session, 'network', `/v2.0/ports/${target.id}`, { method: 'PUT', body: { port: { allowed_address_pairs: [...original, manual] } } });
+    direct(session, 'network', `/v2.0/ports/${target.id}`, { method: 'PUT', body: { port: { allowed_address_pairs: [...original, manual, unrelated] } } });
     const view = await portVips(session, target.id, direct);
-    assert.equal(view.vips.find((item) => item.id === vip.id).assigned, false);
-    assert.deepEqual(view.external_pairs.at(-1), manual);
-    await assert.rejects(setPortVips(session, target.id, [vip.id], direct), { code: 'vip_port_rejected' });
-    await setPortVips(session, target.id, [], direct);
-    assert.deepEqual(direct(session, 'network', `/v2.0/ports/${target.id}`).port.allowed_address_pairs, [...original, manual]);
+    assert.equal(view.vips.find((item) => item.id === vip.id).assigned, true);
+    assert.deepEqual(view.external_pairs.at(-1), unrelated);
+    const removed = await setPortVips(session, target.id, [], direct);
+    assert.equal(removed.events[0].action, 'vip.unassign');
+    assert.deepEqual(direct(session, 'network', `/v2.0/ports/${target.id}`).port.allowed_address_pairs, [...original, unrelated]);
   } finally {
     direct(session, 'network', `/v2.0/ports/${target.id}`, { method: 'PUT', body: { port: { allowed_address_pairs: original } } });
     await deleteVip(session, vip.id, direct);
@@ -248,25 +250,99 @@ test('VIP creation fails closed without Port tags and rolls back only its newly 
   assert.deepEqual(direct(session, 'network', '/v2.0/ports').ports.map((port) => port.id), before);
 });
 
-test('a pre-existing matching provider AAP is visible but never claimed or removed by CMP', async () => {
+test('a provider-added known VIP is checked, not external, and removable while 0.0.0.0/0 survives', async () => {
   const subnet = mockFetch('network', 'GET', '/v2.0/subnets', null, 'p-demo').subnets.find((item) => item.project_id === 'p-demo');
   const vip = await createVip(session, subnet.id, { name: 'PROVIDER-VIP', ip_address: '10.10.10.108' }, direct);
   const target = (await vipAssignments(session, vip.id, direct)).targets[0];
   const before = structuredClone(direct(session, 'network', `/v2.0/ports/${target.id}`).port.allowed_address_pairs || []);
   try {
     direct(session, 'network', `/v2.0/ports/${target.id}`, { method: 'PUT', body: { port: {
-      allowed_address_pairs: [...before, { ip_address: '10.10.10.108' }],
+      allowed_address_pairs: [...before, { ip_address: '0.0.0.0/0' }, { ip_address: '10.10.10.108/32' }],
     } } });
     const assignment = (await vipAssignments(session, vip.id, direct)).targets.find((item) => item.id === target.id);
-    assert.equal(assignment.assigned, false);
-    assert.equal(assignment.external_pair, true);
-    assert.equal((await portVips(session, target.id, direct)).vips.find((item) => item.id === vip.id).assigned, false);
+    assert.equal(assignment.assigned, true);
+    const vmView = await portVips(session, target.id, direct);
+    assert.equal(vmView.vips.find((item) => item.id === vip.id).assigned, true);
+    assert.deepEqual(vmView.external_pairs, [{ ip_address: '0.0.0.0/0' }]);
+    const serverView = await serverVips(session, target.device_id, direct);
+    assert.equal(serverView.ports.find((port) => port.id === target.id).vips[0].name, 'PROVIDER-VIP');
+    assert.deepEqual(serverView.ports.find((port) => port.id === target.id).external_pairs,
+      [{ ip_address: '0.0.0.0/0' }]);
     assert.equal((await subnetVips(session, subnet.id, direct)).vips.find((item) => item.id === vip.id).assignment_count, 1);
-    await setVipAssignments(session, vip.id, [], direct);
-    assert.equal((await vipAssignments(session, vip.id, direct)).targets.find((item) => item.id === target.id).external_pair, true);
-    await assert.rejects(setVipAssignments(session, vip.id, [target.id], direct), { code: 'vip_external_pair' });
+    const removed = await setVipAssignments(session, vip.id, [], direct);
+    assert.equal(removed.events[0].action, 'vip.unassign');
+    assert.deepEqual(direct(session, 'network', `/v2.0/ports/${target.id}`).port.allowed_address_pairs,
+      [...before, { ip_address: '0.0.0.0/0' }]);
+    await setPortVips(session, target.id, [vip.id], direct);
+    assert.deepEqual(direct(session, 'network', `/v2.0/ports/${target.id}`).port.allowed_address_pairs,
+      [...before, { ip_address: '0.0.0.0/0' }, { ip_address: '10.10.10.108/32' }]);
   } finally {
     direct(session, 'network', `/v2.0/ports/${target.id}`, { method: 'PUT', body: { port: { allowed_address_pairs: before } } });
+    await deleteVip(session, vip.id, direct);
+  }
+});
+
+test('host normalization recognizes bare IPv4/IPv6 hosts but not network prefixes', () => {
+  assert.equal(normalizeHostAddress('10.20.31.10'), '10.20.31.10/32');
+  assert.equal(normalizeHostAddress('10.20.31.10/32'), '10.20.31.10/32');
+  assert.equal(normalizeHostAddress('10.20.31.0/24'), null);
+  assert.equal(normalizeHostAddress('2001:db8::10'), '2001:db8::10/128');
+  assert.equal(normalizeHostAddress('2001:0db8:0:0:0:0:0:10/128'), '2001:db8::10/128');
+  assert.equal(normalizeHostAddress('2001:db8::/64'), null);
+});
+
+test('known VIP classification deduplicates host forms and preserves full unknown AAP objects', () => {
+  const vip = { id: 'vip-a', fixed_ips: [{ ip_address: '10.20.31.10' }] };
+  const external = { ip_address: '192.168.50.100/32', mac_address: 'fa:16:3e:12:34:56' };
+  const port = { allowed_address_pairs: [
+    { ip_address: '0.0.0.0/0' }, { ip_address: '10.20.31.10' },
+    { ip_address: '10.20.31.10/32' }, external,
+  ] };
+  const classified = classifyVipPairs(port, [vip]);
+  assert.deepEqual([...classified.assignedIds], ['vip-a']);
+  assert.deepEqual(classified.externalPairs, [{ ip_address: '0.0.0.0/0' }, external]);
+  assert.deepEqual(changedVipPairs(port, [{ ip: '10.20.31.10', assign: false }]),
+    [{ ip_address: '0.0.0.0/0' }, external]);
+  assert.deepEqual(changedVipPairs({ allowed_address_pairs: [
+    { ip_address: '0.0.0.0/0' }, { ip_address: '10.20.31.10/32' }, { ip_address: '10.20.31.11/32' },
+  ] }, [{ ip: '10.20.31.10', assign: false }, { ip: '10.20.31.11', assign: true }]),
+  [{ ip_address: '0.0.0.0/0' }, { ip_address: '10.20.31.11/32' }]);
+  assert.deepEqual(changedVipPairs({ allowed_address_pairs: [{ ip_address: '2001:db8::10' }] },
+    [{ ip: '2001:0db8:0:0:0:0:0:10/128', assign: false }]), []);
+  assert.equal(changedVipPairs({ allowed_address_pairs: [{ ip_address: '10.20.31.10' }] },
+    [{ ip: '10.20.31.10/32', assign: true }]), null);
+});
+
+test('VM-side desired VIP Save rereads Port, preserves newly added external AAP and changes only AAP', async () => {
+  const subnet = mockFetch('network', 'GET', '/v2.0/subnets', null, 'p-demo').subnets.find((item) => item.project_id === 'p-demo');
+  const vip = await createVip(session, subnet.id, { name: 'FRESH-READ-VIP', ip_address: '10.10.10.110' }, direct);
+  const target = (await vipAssignments(session, vip.id, direct)).targets[0];
+  const original = structuredClone(direct(session, 'network', `/v2.0/ports/${target.id}`).port.allowed_address_pairs || []);
+  const writes = [];
+  const request = (sess, svc, path, options = {}) => {
+    if (svc === 'network' && path === `/v2.0/ports/${target.id}` && options.method === 'PUT') {
+      writes.push(structuredClone(options.body));
+    }
+    return direct(sess, svc, path, options);
+  };
+  try {
+    direct(session, 'network', `/v2.0/ports/${target.id}`, { method: 'PUT', body: { port: {
+      allowed_address_pairs: [...original, { ip_address: '0.0.0.0/0' }],
+    } } });
+    await setPortVips(session, target.id, [vip.id], request);
+    assert.deepEqual(writes[0], { port: { allowed_address_pairs: [
+      ...original, { ip_address: '0.0.0.0/0' }, { ip_address: '10.10.10.110/32' },
+    ] } });
+    // Simulate an operator adding another manual pair after the modal's initial read.
+    direct(session, 'network', `/v2.0/ports/${target.id}`, { method: 'PUT', body: { port: {
+      allowed_address_pairs: [...writes[0].port.allowed_address_pairs, { ip_address: '192.168.50.100/32' }],
+    } } });
+    await setPortVips(session, target.id, [], request);
+    assert.deepEqual(writes[1], { port: { allowed_address_pairs: [
+      ...original, { ip_address: '0.0.0.0/0' }, { ip_address: '192.168.50.100/32' },
+    ] } });
+  } finally {
+    direct(session, 'network', `/v2.0/ports/${target.id}`, { method: 'PUT', body: { port: { allowed_address_pairs: original } } });
     await deleteVip(session, vip.id, direct);
   }
 });

@@ -42,6 +42,7 @@ test('VIP creation offers optional subnet-aware IP and assignment editors submit
     assert.match(modals, /body: \{ port_ids: \[\.\.\.selected\] \}/);
     assert.match(modals, /body: \{ vip_port_ids: \[\.\.\.selected\] \}/);
     assert.match(modals, /data\.external_pairs\.map/);
+    assert.doesNotMatch(modals, /externalPair|external_pair\b|vip\.assignments\.externalPair/);
     assert.doesNotMatch(modals, /allowed_address_pairs:|port_security_enabled:|security_groups:/);
   } finally { await vite.close(); }
 });
