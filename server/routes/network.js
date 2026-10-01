@@ -5,6 +5,7 @@ import { createNetwork } from '../networkCreation.js';
 import { editNetwork, loadNetworkEdit } from '../networkEdit.js';
 import { setInstanceAudit } from '../audit.js';
 import { networkResources, createOnlySubnet } from '../networkTopology.js';
+import { listProjectNeutron } from '../projectResourceList.js';
 
 const router = Router();
 
@@ -14,12 +15,12 @@ router.get('/networks', async (req, res, next) => {
   try {
     const sess = req.session.os;
     const [nets, subs] = await Promise.all([
-      osFetch(sess, 'network', projectQuery(sess, '/v2.0/networks')),
-      osFetch(sess, 'network', projectQuery(sess, '/v2.0/subnets')),
+      listProjectNeutron(sess, 'networks'),
+      listProjectNeutron(sess, 'subnets'),
     ]);
     const subMap = {};
-    owned(subs.subnets, sess).forEach((s) => (subMap[s.id] = s));
-    const networks = owned(nets.networks, sess).map((n) => ({
+    subs.forEach((s) => (subMap[s.id] = s));
+    const networks = nets.map((n) => ({
       ...n,
       subnet_details: (n.subnets || []).map((id) => subMap[id]).filter(Boolean),
     }));

@@ -5,6 +5,8 @@ import { api } from '../api.js';
 import { Modal, Field, StatusBadge, ActionsMenu, toast, Empty, PageHead } from '../components/ui.jsx';
 import { useI18n } from '../i18n/react.jsx';
 import NetworkEditModal from '../components/NetworkEditModal.jsx';
+import ResourceNameFilter from '../components/ResourceNameFilter.jsx';
+import { matchesResourceName } from '../resourceNameFilter.js';
 
 export default function Networks() {
   const { t } = useI18n();
@@ -14,6 +16,7 @@ export default function Networks() {
   const [creatingRouter, setCreatingRouter] = useState(false);
   const [ifaceFor, setIfaceFor] = useState(null);
   const [editNetworkId, setEditNetworkId] = useState(null);
+  const [nameQuery, setNameQuery] = useState('');
 
   async function load() {
     try {
@@ -36,13 +39,20 @@ export default function Networks() {
   }
 
   const extName = (id) => nets?.find((n) => n.id === id)?.name || id?.slice(0, 8);
+  const shown = nets?.filter((network) => matchesResourceName(network, nameQuery));
 
   return (
     <>
-      <PageHead title={t('navigation.networks')} count={nets?.length} onRefresh={load}>
+      <PageHead title={t('navigation.networks')} count={shown?.length} onRefresh={load}>
         <button className="btn ghost" onClick={() => setCreatingRouter(true)}><Plus size={16} /> {t('networks.createRouter')}</button>
         <button className="btn primary" onClick={() => setCreating(true)}><Plus size={16} /> {t('networks.createNetwork')}</button>
       </PageHead>
+
+      <div className="network-list-filters card">
+        <ResourceNameFilter value={nameQuery} onChange={setNameQuery} resources={nets || []}
+          label={t('common.name')} placeholder={t('networks.nameFilterPlaceholder')}
+          clearLabel={t('resourceName.clear')} emptyText={t('resourceName.noMatches')} />
+      </div>
 
       {!nets ? <Empty>{t('common.loading')}</Empty> : (
         <div className="card">
@@ -50,7 +60,7 @@ export default function Networks() {
           <table className="tbl">
             <thead><tr><th>{t('common.name')}</th><th>{t('common.status')}</th><th>Subnet (CIDR)</th><th>{t('networks.type')}</th><th /></tr></thead>
             <tbody>
-              {nets.map((n) => (
+              {shown.map((n) => (
                 <tr key={n.id}>
                   <td><Link className="link" to={`/networks/${encodeURIComponent(n.id)}`}>{n.name}</Link></td>
                   <td><StatusBadge status={n.status} /></td>
@@ -66,6 +76,7 @@ export default function Networks() {
               ))}
             </tbody>
           </table>
+          {shown.length === 0 && <Empty>{t('resourceName.noMatches')}</Empty>}
         </div>
       )}
 

@@ -12,7 +12,9 @@ import NetworkInterfaceFields, { addInterface, interfaceRequestSpec, interfaceVa
   newInterface, removeInterface, validInterfaces } from '../components/NetworkInterfaceFields.jsx';
 import OsCatalog from '../components/OsCatalog.jsx';
 import ClassificationPicker, { ClassificationChip } from '../components/ClassificationPicker.jsx';
-import { classificationChips, emptySelection, matchesClassificationFilters, matchesClassificationSearch } from '../classification.js';
+import ResourceNameFilter from '../components/ResourceNameFilter.jsx';
+import { matchesResourceName } from '../resourceNameFilter.js';
+import { classificationChips, emptySelection, matchesClassificationFilters } from '../classification.js';
 import { imageFlavorWarning, imageFlavorWarningText, instanceErrorTitle, minimumBootVolumeGiB } from '../instanceError.js';
 
 function InstanceClassificationChips({ server }) {
@@ -71,10 +73,9 @@ function Instances({ sess }) {
   }, [sess.project.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const shown = !servers ? null : servers.filter((s) => {
-    const query = q.trim().toLowerCase();
-    const searchMatch = !query || matchesClassificationSearch(s, query) || serverIps(s).some((x) => x.ip.includes(query));
-    return searchMatch && matchesClassificationFilters(s.classification, filters);
+    return matchesResourceName(s, q) && matchesClassificationFilters(s.classification, filters);
   });
+  const suggestedServers = servers?.filter((s) => matchesClassificationFilters(s.classification, filters)) || [];
 
   function addFilter() {
     if (filterKind === 'tag') {
@@ -91,12 +92,14 @@ function Instances({ sess }) {
   return (
     <>
       <PageHead title={t('instances.title')} count={shown?.length} onRefresh={load}>
-        <input placeholder={t('instances.search')} value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 190 }} />
         <button className="btn primary" onClick={() => setCreating(true)}><Plus size={16} /> {t('instances.create')}</button>
       </PageHead>
 
       <div className="vm-list-filters card">
         <span>{t('instance.filters.title')}</span>
+        <ResourceNameFilter value={q} onChange={setQ} resources={suggestedServers}
+          label={t('common.name')} placeholder={t('instances.nameFilterPlaceholder')}
+          clearLabel={t('resourceName.clear')} emptyText={t('resourceName.noMatches')} />
         <select aria-label={t('instance.filters.kind')} value={filterKind} onChange={(event) => setFilterKind(event.target.value)}>
           <option value="label">{t('instance.filters.label')}</option><option value="tag">{t('instance.filters.tag')}</option>
         </select>
@@ -117,7 +120,7 @@ function Instances({ sess }) {
       </div>
 
       {!servers ? <Empty>{t('common.loading')}</Empty> : shown.length === 0 ? (
-        <Empty>{t('instances.empty')}</Empty>
+        <Empty>{t(q.trim() || filters.length ? 'resourceName.noMatches' : 'instances.empty')}</Empty>
       ) : (
         <div className="card">
           <table className="tbl">
