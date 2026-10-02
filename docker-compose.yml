@@ -6,6 +6,7 @@ services:
     env_file: .env
     environment:
       CMP_CONFIG_FILE: /app/config/application.yml
+      IMAGE_UPLOAD_TEMP_DIR: /data/image-upload-temp
     ports:
       - "8080:8080"
     volumes:

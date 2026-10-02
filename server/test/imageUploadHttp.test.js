@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import http from 'node:http';
+import { MAX_IMAGE_UPLOAD_BYTES } from '../../shared/imageUploadPolicy.mjs';
 
 process.env.OS_MOCK = 'true';
 process.env.DATA_DIR = fileURLToPath(new URL('../.test-data', import.meta.url));
@@ -23,6 +25,24 @@ test('ISO upload reaches Glance as binary and appears active in the current proj
       'X-Image-Filename': encodeURIComponent(filename), 'X-Image-Name': encodeURIComponent(name) }, body: bytes,
   });
   const before = mockFetch('image', 'GET', '/v2/images', null, 'p-demo').images.length;
+  for (const declaredSize of [MAX_IMAGE_UPLOAD_BYTES, 16 * 1024 ** 3, 20 * 1024 ** 3]) {
+    const rejected = await new Promise((resolve, reject) => {
+      const request = http.request(`${base}/images/upload`, { method: 'POST', headers: {
+        Cookie: cookie, 'X-CMP-Request': '1', 'Content-Type': 'application/octet-stream',
+        'Content-Length': String(declaredSize), 'X-Image-Filename': 'huge.iso', 'X-Image-Name': 'Huge',
+      } }, (response) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => resolve({ status: response.statusCode,
+          body: JSON.parse(Buffer.concat(chunks).toString()) }));
+      });
+      request.on('error', reject);
+      request.end();
+    });
+    assert.equal(rejected.status, 413);
+    assert.equal(rejected.body.code, 'image_upload_too_large');
+  }
+  assert.equal(mockFetch('image', 'GET', '/v2/images', null, 'p-demo').images.length, before);
   for (const filename of ['bad.raw', 'bad.img', 'bad.qcow2.gz']) {
     const rejected = await upload(filename, 'Rejected');
     assert.equal(rejected.status, 400);

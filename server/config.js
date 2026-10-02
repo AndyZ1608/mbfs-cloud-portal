@@ -1,6 +1,7 @@
 // Centralized process and YAML application configuration.
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 
@@ -72,6 +73,7 @@ export const config = Object.freeze({
   trustProxy: bool('TRUST_PROXY'),
   providerTimeoutMs: integer('OS_REQUEST_TIMEOUT_MS', 30_000, { min: 1_000, max: 300_000 }),
   providerUploadTimeoutMs: integer('OS_UPLOAD_TIMEOUT_MS', 3_600_000, { min: 60_000, max: 86_400_000 }),
+  imageUploadTempDir: process.env.IMAGE_UPLOAD_TEMP_DIR || path.join(os.tmpdir(), 'cmp-image-uploads'),
   applicationConfigFile: application.filePath,
   billing: application.billing,
 });

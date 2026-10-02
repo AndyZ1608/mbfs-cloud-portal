@@ -1,4 +1,5 @@
 import { apiErrorMessage } from './api.js';
+import { imageUploadSizeAllowed } from '../../shared/imageUploadPolicy.mjs';
 
 export function imageUploadFormat(filename) {
   const extension = typeof filename === 'string' ? filename.match(/\.([^.]+)$/)?.[1]?.toLowerCase() : null;
@@ -7,6 +8,9 @@ export function imageUploadFormat(filename) {
 
 export function uploadImageFile({ file, name, minDisk, minRam, onProgress = () => {}, onRequest = () => {},
   createRequest = () => new XMLHttpRequest() }) {
+  if (!imageUploadSizeAllowed(file?.size)) {
+    return Promise.reject(new Error(apiErrorMessage({ code: 'image_upload_too_large' }, 413)));
+  }
   return new Promise((resolve, reject) => {
     const xhr = createRequest();
     onRequest(xhr);

@@ -4,6 +4,7 @@ import { api, fmtDate, fmtBytes } from '../api.js';
 import { Modal, Field, StatusBadge, toast, Empty, PageHead } from '../components/ui.jsx';
 import { useI18n } from '../i18n/react.jsx';
 import { imageUploadFormat, uploadImageFile } from '../imageUpload.js';
+import { MAX_IMAGE_UPLOAD_BYTES } from '../../../shared/imageUploadPolicy.mjs';
 
 export default function Images() {
   const { t } = useI18n();
@@ -76,6 +77,7 @@ function UploadModal({ onClose, onDone }) {
       return;
     }
     setFile(fl);
+    if (fl.size >= MAX_IMAGE_UPLOAD_BYTES) toast(t('images.sizeTooLarge'), 'error');
     if (!f.name) {
       setF((x) => ({ ...x, name: fl.name.replace(/\.(qcow2|iso)$/i, '') }));
     }
@@ -86,6 +88,7 @@ function UploadModal({ onClose, onDone }) {
     if (!f.name.trim()) return toast(t('images.nameRequired'), 'error');
     if (!file) return toast(t('images.fileRequired'), 'error');
     if (!imageUploadFormat(file.name)) return toast(t('images.unsupportedFormat'), 'error');
+    if (file.size >= MAX_IMAGE_UPLOAD_BYTES) return toast(t('images.sizeTooLarge'), 'error');
     submitting.current = true;
     setPhase('uploading');
     setProgress(0);
@@ -128,6 +131,7 @@ function UploadModal({ onClose, onDone }) {
         <input type="file" accept=".qcow2,.iso" onChange={pickFile} disabled={busy} />
       </Field>
       {file && <p className="dim">{t('images.selected')}: <b>{file.name}</b> ({fmtBytes(file.size)})</p>}
+      {file && file.size >= MAX_IMAGE_UPLOAD_BYTES && <p className="err-text">{t('images.sizeTooLarge')}</p>}
       <Field label={t('images.imageName')}><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} disabled={busy} /></Field>
       <div className="row-inline">
         <Field label={t('images.minDisk')}><input type="number" min="0" value={f.min_disk} onChange={(e) => setF({ ...f, min_disk: e.target.value })} disabled={busy} /></Field>

@@ -116,9 +116,10 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        # Upload image lớn: không giới hạn size, không buffer ra đĩa tại nginx.
+        # CMP giới hạn file < 15 GiB; 16G cho phép overhead HTTP nhưng chặn request quá lớn sớm.
+        # Không buffer request ra đĩa tại nginx.
         # Giữ proxy_read_timeout/proxy_send_timeout phù hợp OS_UPLOAD_TIMEOUT_MS.
-        client_max_body_size 0;
+        client_max_body_size 16G;
         proxy_request_buffering off;
         proxy_read_timeout 3600;
         proxy_send_timeout 3600;
@@ -126,11 +127,17 @@ server {
 }
 ```
 
-Image Upload hỗ trợ QCOW2 và ISO. CMP stream request body trực tiếp đến Glance, không tạo
-file tạm hoặc buffer toàn bộ image trong Node.js. Express JSON limit 1 MB không áp dụng cho
-raw image upload. Thời gian truyền đến Glance dùng `OS_UPLOAD_TIMEOUT_MS` (mặc định 1 giờ);
-Node giữ một request-body deadline hữu hạn dài hơn 60 giây. Kiểm tra giới hạn của reverse
-proxy và Glance khi triển khai image lớn.
+Image Upload hỗ trợ QCOW2 và ISO, với kích thước file **nhỏ hơn** 15 GiB
+(16,106,127,360 byte; đúng 15 GiB bị từ chối). CMP nhận raw request body và ghi tạm vào
+`IMAGE_UPLOAD_TEMP_DIR` theo từng chunk; Docker Compose dùng `/data/image-upload-temp`
+trên volume `portal-data`. CMP dừng ghi trước mốc 15 GiB, trả 413, và xoá thư mục tạm
+riêng của request. Chỉ sau khi nhận đủ file hợp lệ, CMP mới tạo metadata và stream file
+tạm đến Glance; thư mục tạm được xoá sau thành công hoặc lỗi provider. Không buffer cả
+image trong Node.js. Express JSON limit 1 MB không áp dụng cho raw image upload.
+`OS_UPLOAD_TIMEOUT_MS` mặc định 1 giờ; Node giữ request-body deadline hữu hạn dài hơn 60
+giây. Provision đủ dung lượng tạm cho nhiều upload đồng thời (mỗi file gần 15 GiB);
+giới hạn mỗi file không phải quota tổng. Sau sự cố process/host bất thường, kiểm tra
+thư mục tạm để dọn file mồ côi trước khi tiếp tục upload.
 
 Sau đó thêm service card `cloud.mbfs.vn` vào dashboard insight.mbfs.vn là xong.
 
@@ -159,7 +166,7 @@ OS_MOCK=true PORT=8080 node index.js
 | Login được nhưng list VM lỗi timeout | Portal không gọi được endpoint Nova/Neutron public → thử `OS_INTERFACE=internal` hoặc mở firewall |
 | Console noVNC không mở | Trình duyệt user không resolve/truy cập được WebSocket của novncproxy, hoặc không tin cậy chứng chỉ TLS — kiểm tra DNS/firewall/certificate |
 | Đăng xuất ngẫu nhiên sau khi restart container | Session lưu RAM (thiết kế v1) — restart container là mất session, đăng nhập lại |
-| Upload image báo 413 | nginx thiếu `client_max_body_size 0;` |
+| Upload image báo 413 | File từ 15 GiB trở lên bị CMP từ chối đúng chính sách; nếu file nhỏ hơn 15 GiB, kiểm tra nginx `client_max_body_size 16G;` |
 | Upload image chậm/timeout với file lớn | nginx thiếu `proxy_request_buffering off;` + tăng `proxy_read_timeout` |
 | Resize báo lỗi "No valid host" | Cụm 1 compute node cần `allow_resize_to_same_host=True` trong nova.conf |
 | Trang Báo cáo sử dụng trống | Kỳ chọn không có máy nào chạy; lưu ý mốc thời gian tính theo UTC |

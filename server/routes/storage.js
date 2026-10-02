@@ -163,7 +163,7 @@ router.get('/images', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// One request owns Glance metadata, the streamed binary PUT, and status verification.
+// One request stages a bounded raw image, then owns Glance create/PUT/verification.
 router.post('/images/upload', async (req, res, next) => {
   try {
     const sess = { ...req.session.os, project: { ...req.session.os.project } };
@@ -177,7 +177,14 @@ router.post('/images/upload', async (req, res, next) => {
       },
     });
     res.status(result.processing ? 202 : 200).json(result);
-  } catch (e) { next(e); }
+  } catch (e) {
+    if (e?.code === 'image_upload_too_large') {
+      req.pause();
+      res.shouldKeepAlive = false;
+      res.setHeader('Connection', 'close');
+    }
+    next(e);
+  }
 });
 
 router.delete('/images/:id', async (req, res, next) => {

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { imageUploadFormat, uploadImageFile } from '../src/imageUpload.js';
 import { translate } from '../src/i18n/index.js';
+import { MAX_IMAGE_UPLOAD_BYTES } from '../../shared/imageUploadPolicy.mjs';
 
 const source = (path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 
@@ -18,10 +19,33 @@ test('frontend accepts QCOW2 and ISO by case-insensitive extension only', () => 
   assert.doesNotMatch(page, /disk_format: f\.disk_format|<select value=\{f\.disk_format\}/);
 });
 
+test('oversized browser files are rejected before constructing an upload request', async () => {
+  for (const size of [MAX_IMAGE_UPLOAD_BYTES, 16 * 1024 ** 3, 20 * 1024 ** 3]) {
+    let created = false;
+    await assert.rejects(uploadImageFile({ file: { name: 'huge.iso', size }, name: 'Huge',
+      createRequest: () => { created = true; return {}; } }), /15/);
+    assert.equal(created, false);
+  }
+});
+
+test('14 GiB browser file passes the pre-check for normal upload', async () => {
+  let xhr;
+  const pending = uploadImageFile({ file: { name: 'valid.qcow2', size: 14 * 1024 ** 3 },
+    name: 'Valid', minDisk: '', minRam: '', createRequest: () => {
+      xhr = { upload: {}, open() {}, setRequestHeader() {}, send(body) { this.body = body; } };
+      return xhr;
+    } });
+  assert.equal(xhr.body.size, 14 * 1024 ** 3);
+  xhr.status = 200;
+  xhr.responseText = JSON.stringify({ image: { status: 'active' }, processing: false });
+  xhr.onload();
+  assert.equal((await pending).image.status, 'active');
+});
+
 test('browser transfer reaching 100% does not resolve until CMP confirms active Glance image', async () => {
   let xhr;
   const progress = [];
-  const pending = uploadImageFile({ file: { name: 'recovery.ISO' }, name: 'Recovery', minDisk: '', minRam: '',
+  const pending = uploadImageFile({ file: { name: 'recovery.ISO', size: 100 }, name: 'Recovery', minDisk: '', minRam: '',
     onProgress: (value) => progress.push(value), createRequest: () => {
       xhr = { upload: {}, headers: {}, open(method, path) { this.method = method; this.path = path; },
         setRequestHeader(key, value) { this.headers[key] = value; }, send(body) { this.body = body; } };
@@ -50,7 +74,7 @@ test('processing and failed provider results never produce confirmed success', a
     [200, { image: { status: 'queued' }, processing: false }, false],
   ]) {
     let xhr;
-    const pending = uploadImageFile({ file: { name: 'test.qcow2' }, name: 'Test', minDisk: '', minRam: '',
+    const pending = uploadImageFile({ file: { name: 'test.qcow2', size: 100 }, name: 'Test', minDisk: '', minRam: '',
       createRequest: () => { xhr = { upload: {}, open() {}, setRequestHeader() {}, send() {} }; return xhr; } });
     xhr.status = status;
     xhr.responseText = JSON.stringify(body);
@@ -63,6 +87,7 @@ test('processing and failed provider results never produce confirmed success', a
 test('image upload labels and errors are localized in Vietnamese and English', () => {
   for (const locale of ['vi', 'en']) {
     for (const key of ['images.unsupportedFormat', 'images.sendingToOpenStack', 'images.processing',
-      'images.uploaded', 'errors.image_upload_failed']) assert.notEqual(translate(locale, key), key);
+      'images.uploaded', 'images.sizeTooLarge', 'errors.image_upload_too_large',
+      'errors.image_upload_failed']) assert.notEqual(translate(locale, key), key);
   }
 });
