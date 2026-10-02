@@ -116,7 +116,8 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        # Cần cho upload image lớn (v1.1): không giới hạn size, không buffer ra đĩa
+        # Upload image lớn: không giới hạn size, không buffer ra đĩa tại nginx.
+        # Giữ proxy_read_timeout/proxy_send_timeout phù hợp OS_UPLOAD_TIMEOUT_MS.
         client_max_body_size 0;
         proxy_request_buffering off;
         proxy_read_timeout 3600;
@@ -124,6 +125,12 @@ server {
     }
 }
 ```
+
+Image Upload hỗ trợ QCOW2 và ISO. CMP stream request body trực tiếp đến Glance, không tạo
+file tạm hoặc buffer toàn bộ image trong Node.js. Express JSON limit 1 MB không áp dụng cho
+raw image upload. Thời gian truyền đến Glance dùng `OS_UPLOAD_TIMEOUT_MS` (mặc định 1 giờ);
+Node giữ một request-body deadline hữu hạn dài hơn 60 giây. Kiểm tra giới hạn của reverse
+proxy và Glance khi triển khai image lớn.
 
 Sau đó thêm service card `cloud.mbfs.vn` vào dashboard insight.mbfs.vn là xong.
 

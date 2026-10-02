@@ -28,6 +28,7 @@ const RULES = [
   [/^DELETE \/snapshots\//, 'deleteSnapshot'],
   [/^POST \/images\/[^/]+\/file$/, 'uploadImageData'],
   [/^PUT \/images\/[^/]+\/file$/, 'uploadImageData'],
+  [/^POST \/images\/upload$/, 'uploadImageData'],
   [/^POST \/images$/, 'createImage'],
   [/^DELETE \/images\//, 'deleteImage'],
   [/^POST \/networks$/, 'createNetwork'],

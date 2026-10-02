@@ -1,8 +1,9 @@
 import { Router } from 'express';
-import { osFetch, OSError, MOCK } from '../openstack.js';
+import { osFetch, OSError } from '../openstack.js';
 import { fetchOwned, isUsableImage, owned } from '../projectScope.js';
 import { setInstanceAudit, setVolumeAudit } from '../audit.js';
 import { requestVolumeExtend } from '../volumeExtend.js';
+import { decodeUploadHeader, uploadImage } from '../imageUpload.js';
 
 const router = Router();
 
@@ -162,34 +163,20 @@ router.get('/images', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Tạo metadata image (bước 1 của upload)
-router.post('/images', async (req, res, next) => {
+// One request owns Glance metadata, the streamed binary PUT, and status verification.
+router.post('/images/upload', async (req, res, next) => {
   try {
-    const { name, disk_format, min_disk, min_ram } = req.body || {};
-    if (!name || !disk_format) throw new OSError(400, 'Thiếu tên hoặc định dạng image');
-    const image = { name, disk_format, container_format: 'bare', visibility: 'private' };
-    if (min_disk) image.min_disk = Number(min_disk);
-    if (min_ram) image.min_ram = Number(min_ram);
-    const data = await osFetch(req.session.os, 'image', '/v2/images', { method: 'POST', body: image });
-    console.log(`[image] CREATE image name=${name} format=${disk_format} by=${req.session.os.user.name}`);
-    res.json({ image: data });
-  } catch (e) { next(e); }
-});
-
-// Upload dữ liệu image (bước 2) — stream thẳng browser → portal → Glance, không buffer
-router.put('/images/:id/file', async (req, res, next) => {
-  try {
-    const sess = req.session.os;
-    await ownedImage(sess, req.params.id);
-    if (MOCK) {
-      let size = 0;
-      for await (const chunk of req) size += chunk.length;
-      await osFetch(sess, 'image', `/v2/images/${req.params.id}/file`, { method: 'PUT', body: { size } });
-    } else {
-      await osFetch(sess, 'image', `/v2/images/${req.params.id}/file`, { method: 'PUT', rawBody: req });
-    }
-    console.log(`[image] UPLOAD image=${req.params.id} by=${sess.user.name}`);
-    res.json({ ok: true });
+    const sess = { ...req.session.os, project: { ...req.session.os.project } };
+    const filename = decodeUploadHeader(req.get('x-image-filename'));
+    const name = decodeUploadHeader(req.get('x-image-name'));
+    const result = await uploadImage(sess, { filename, name,
+      minDisk: req.get('x-image-min-disk'), minRam: req.get('x-image-min-ram'),
+      source: req, contentLength: req.get('content-length') }, {
+      onStage(stage, details = {}) {
+        console.log(`[image] stage=${stage} request_id=${req.id} project=${sess.project.id} image=${details.imageId || '-'} format=${details.diskFormat || '-'} bytes=${details.bytes ?? '-'} status=${details.status ?? '-'}`);
+      },
+    });
+    res.status(result.processing ? 202 : 200).json(result);
   } catch (e) { next(e); }
 });
 

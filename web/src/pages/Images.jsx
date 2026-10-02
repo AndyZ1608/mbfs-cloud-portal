@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
-import { api, apiErrorMessage, fmtDate, fmtBytes } from '../api.js';
+import { api, fmtDate, fmtBytes } from '../api.js';
 import { Modal, Field, StatusBadge, toast, Empty, PageHead } from '../components/ui.jsx';
 import { useI18n } from '../i18n/react.jsx';
+import { imageUploadFormat, uploadImageFile } from '../imageUpload.js';
 
 export default function Images() {
   const { t } = useI18n();
@@ -58,90 +59,76 @@ export default function Images() {
 
 function UploadModal({ onClose, onDone }) {
   const { t } = useI18n();
-  const [f, setF] = useState({ name: '', disk_format: 'qcow2', min_disk: '', min_ram: '' });
+  const [f, setF] = useState({ name: '', min_disk: '', min_ram: '' });
   const [file, setFile] = useState(null);
-  const [progress, setProgress] = useState(null); // null | 0..100
+  const [progress, setProgress] = useState(0);
+  const [phase, setPhase] = useState('idle');
   const xhrRef = useRef(null);
+  const submitting = useRef(false);
 
   function pickFile(e) {
     const fl = e.target.files?.[0];
     if (!fl) return;
+    if (!imageUploadFormat(fl.name)) {
+      setFile(null);
+      e.target.value = '';
+      toast(t('images.unsupportedFormat'), 'error');
+      return;
+    }
     setFile(fl);
     if (!f.name) {
-      const base = fl.name.replace(/\.(qcow2|img|raw|iso|vmdk|vdi)$/i, '');
-      const ext = (fl.name.match(/\.(qcow2|raw|iso|vmdk|vdi)$/i) || [])[1];
-      setF((x) => ({ ...x, name: base, disk_format: ext ? ext.toLowerCase() : x.disk_format }));
+      setF((x) => ({ ...x, name: fl.name.replace(/\.(qcow2|iso)$/i, '') }));
     }
   }
 
   async function submit() {
+    if (submitting.current) return;
     if (!f.name.trim()) return toast(t('images.nameRequired'), 'error');
     if (!file) return toast(t('images.fileRequired'), 'error');
-    let imgId = null;
+    if (!imageUploadFormat(file.name)) return toast(t('images.unsupportedFormat'), 'error');
+    submitting.current = true;
+    setPhase('uploading');
+    setProgress(0);
     try {
-      // Bước 1: tạo metadata
-      const meta = await api('/images', {
-        method: 'POST',
-        body: { name: f.name.trim(), disk_format: f.disk_format, min_disk: f.min_disk || undefined, min_ram: f.min_ram || undefined },
+      const result = await uploadImageFile({ file, name: f.name.trim(), minDisk: f.min_disk, minRam: f.min_ram,
+        onRequest: (xhr) => { xhrRef.current = xhr; },
+        onProgress: (percent) => {
+          setProgress(percent);
+          if (percent === 100) setPhase('processing');
+        },
       });
-      imgId = meta.image?.id;
-      // Bước 2: upload nhị phân bằng XHR để có progress
-      setProgress(0);
-      await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhrRef.current = xhr;
-        xhr.open('PUT', `/api/images/${imgId}/file`);
-        xhr.setRequestHeader('X-CMP-Request', '1');
-        xhr.setRequestHeader('Content-Type', 'application/octet-stream');
-        xhr.upload.onprogress = (ev) => {
-          if (ev.lengthComputable) setProgress(Math.round((ev.loaded / ev.total) * 100));
-        };
-        xhr.onload = () => (xhr.status >= 200 && xhr.status < 300)
-          ? resolve()
-          : reject(new Error(safeErr(xhr) || t('images.uploadHttpError', { status: xhr.status })));
-        xhr.onerror = () => reject(new Error(t('images.uploadNetworkError')));
-        xhr.onabort = () => reject(new Error(t('images.uploadCancelled')));
-        xhr.send(file);
-      });
-      toast(t('images.uploaded', { name: f.name }), 'ok');
+      toast(t(result.processing ? 'images.processing' : 'images.uploaded'), result.processing ? 'info' : 'ok');
       onDone();
     } catch (e) {
       toast(e.message, 'error');
-      setProgress(null);
-      // dọn metadata mồ côi nếu upload fail
-      if (imgId) api(`/images/${imgId}`, { method: 'DELETE' }).catch(() => {});
+      setPhase('idle');
+    } finally {
+      submitting.current = false;
+      xhrRef.current = null;
     }
   }
 
-  function safeErr(xhr) {
-    try { return apiErrorMessage(JSON.parse(xhr.responseText), xhr.status); } catch { return null; }
-  }
-
   function close() {
-    if (progress !== null && progress < 100) {
+    if (submitting.current) {
       if (!window.confirm(t('images.cancelUploadConfirm'))) return;
       xhrRef.current?.abort();
     }
     onClose();
   }
 
-  const busy = progress !== null;
+  const busy = phase !== 'idle';
   return (
     <Modal title={t('images.upload')} onClose={close}
       footer={<>
         <button className="btn ghost" onClick={close}>{t('common.close')}</button>
-        <button className="btn primary" onClick={submit} disabled={busy}>{busy ? t('images.uploading', { progress }) : t('images.startUpload')}</button>
+        <button className="btn primary" onClick={submit} disabled={busy}>{phase === 'uploading'
+          ? t('images.uploading', { progress }) : phase === 'processing' ? t('images.sendingToOpenStack') : t('images.startUpload')}</button>
       </>}>
       <Field label={t('images.file')} hint={t('images.fileHint')}>
-        <input type="file" onChange={pickFile} disabled={busy} />
+        <input type="file" accept=".qcow2,.iso" onChange={pickFile} disabled={busy} />
       </Field>
       {file && <p className="dim">{t('images.selected')}: <b>{file.name}</b> ({fmtBytes(file.size)})</p>}
       <Field label={t('images.imageName')}><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} disabled={busy} /></Field>
-      <Field label={t('images.diskFormat')}>
-        <select value={f.disk_format} onChange={(e) => setF({ ...f, disk_format: e.target.value })} disabled={busy}>
-          {['qcow2', 'raw', 'iso', 'vmdk', 'vdi'].map((x) => <option key={x} value={x}>{x}</option>)}
-        </select>
-      </Field>
       <div className="row-inline">
         <Field label={t('images.minDisk')}><input type="number" min="0" value={f.min_disk} onChange={(e) => setF({ ...f, min_disk: e.target.value })} disabled={busy} /></Field>
         <Field label={t('images.minRam')}><input type="number" min="0" value={f.min_ram} onChange={(e) => setF({ ...f, min_ram: e.target.value })} disabled={busy} /></Field>

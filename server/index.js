@@ -18,6 +18,9 @@ const server = app.listen(config.port, () => {
   console.log(`MBFS Cloud Portal chạy tại http://0.0.0.0:${config.port}${MOCK ? '  (CHẾ ĐỘ MOCK — dữ liệu giả lập)' : ''}`);
   if (!MOCK) console.log(`OS_AUTH_URL=${process.env.OS_AUTH_URL || '(chưa cấu hình!)'}`);
 });
+// Node's default five-minute request-body deadline is too short for large image streams.
+// Keep a finite, configurable deadline aligned with the Glance upload timeout.
+server.requestTimeout = config.providerUploadTimeoutMs + 60_000;
 
 for (const signal of ['SIGTERM', 'SIGINT']) {
   process.on(signal, () => {
