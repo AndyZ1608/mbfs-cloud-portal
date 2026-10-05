@@ -10,6 +10,7 @@ import {
 } from '../src/console/autoType.js';
 import { getNovaConsoleUrl, novaConsoleToWebSocket } from '../src/console/novaConsole.js';
 import { createRfbSession } from '../src/console/rfbSession.js';
+import { canSendConsoleCtrlAltDel, sendConsoleCtrlAltDel } from '../src/console/ctrlAltDel.js';
 
 function mockRfb() {
   return {
@@ -224,6 +225,55 @@ test('RFB lifecycle owns one session, reconnects with a fresh URL, and cleans up
   assert.equal(created[1].listenerCount, 0);
   assert.equal(active, null);
   assert.equal(session.current, null);
+});
+
+test('Ctrl+Alt+Del uses the connected live RFB native method without reconnect or Nova actions', async () => {
+  const originalFetch = globalThis.fetch;
+  let httpCalls = 0;
+  globalThis.fetch = () => { httpCalls += 1; throw new Error('unexpected HTTP request'); };
+  try {
+    let consoleRequests = 0;
+    let creations = 0;
+    let sends = 0;
+    let status = 'idle';
+    const session = createRfbSession({
+      target: { replaceChildren() {} },
+      requestConsole: async () => { consoleRequests += 1; return { url: 'redacted' }; },
+      parseConsoleUrl: () => 'wss://novnc.example/websockify?token=redacted',
+      createRfb: () => {
+        creations += 1;
+        return { ...lifecycleRfb(), sendCtrlAltDel() { sends += 1; } };
+      },
+      onState: (state) => { status = state.status; },
+      onRfb() {},
+    });
+    await session.connect();
+    assert.equal(status, 'connecting');
+    assert.equal(canSendConsoleCtrlAltDel({ connected: false }), false);
+    assert.equal(sendConsoleCtrlAltDel(session.current, { connected: false }), false);
+    assert.equal(sends, 0);
+    session.current.emit('connect');
+    assert.equal(status, 'connected');
+    assert.equal(canSendConsoleCtrlAltDel({ connected: true }), true);
+    assert.equal(canSendConsoleCtrlAltDel({ connected: true, typing: true }), false);
+    assert.equal(canSendConsoleCtrlAltDel({ connected: true, coolingDown: true }), false);
+    assert.equal(sendConsoleCtrlAltDel(session.current, { connected: true, typing: true }), false);
+    assert.equal(sendConsoleCtrlAltDel(session.current, { connected: true, coolingDown: true }), false);
+    assert.equal(sendConsoleCtrlAltDel(session.current, { connected: true }), true);
+    assert.equal(sends, 1);
+    assert.equal(consoleRequests, 1);
+    assert.equal(creations, 1);
+    assert.equal(httpCalls, 0); // No Nova reboot/action or new console-token HTTP request.
+    assert.equal(session.current.disconnects, 0);
+    session.current.emit('disconnect');
+    assert.equal(status, 'disconnected');
+    assert.equal(sendConsoleCtrlAltDel(session.current, { connected: false }), false);
+    assert.equal(sends, 1);
+    assert.throws(() => sendConsoleCtrlAltDel(null, { connected: true }), /RFB session unavailable/);
+    session.dispose();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('disposing a pending console request prevents a late RFB session from being created', async () => {

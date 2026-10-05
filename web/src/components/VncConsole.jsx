@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import ConsoleInput from './ConsoleInput.jsx';
 import { getNovaConsoleUrl, novaConsoleToWebSocket } from '../console/novaConsole.js';
 import { createRfbSession } from '../console/rfbSession.js';
+import { canSendConsoleCtrlAltDel, sendConsoleCtrlAltDel } from '../console/ctrlAltDel.js';
 import { createConsoleDiagnostics, createObservedRfb } from '../console/diagnostics.js';
 import { useI18n } from '../i18n/react.jsx';
 
@@ -20,6 +21,17 @@ export default function VncConsole({ instanceId, name }) {
   const sessionRef = useRef(null);
   const [connection, setConnection] = useState(INITIAL_CONNECTION);
   const [sessionVersion, setSessionVersion] = useState(0);
+  const [typing, setTyping] = useState(false);
+  const [ctrlAltDelCooldown, setCtrlAltDelCooldown] = useState(false);
+  const [ctrlAltDelFeedback, setCtrlAltDelFeedback] = useState('');
+  const cooldownActiveRef = useRef(false);
+  const cooldownTimerRef = useRef(null);
+  const feedbackTimerRef = useRef(null);
+
+  useEffect(() => () => {
+    clearTimeout(cooldownTimerRef.current);
+    clearTimeout(feedbackTimerRef.current);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,18 +104,46 @@ export default function VncConsole({ instanceId, name }) {
 
   const reconnect = () => {
     setConnection(INITIAL_CONNECTION);
+    setCtrlAltDelFeedback('');
     setSessionVersion((value) => value + 1);
   };
   const connected = connection.status === 'connected';
   const waiting = ['idle', 'requesting_console', 'connecting'].includes(connection.status);
 
+  const handleCtrlAltDel = () => {
+    try {
+      if (!sendConsoleCtrlAltDel(rfbRef.current, { connected, typing,
+        coolingDown: ctrlAltDelCooldown || cooldownActiveRef.current })) return;
+      cooldownActiveRef.current = true;
+      setCtrlAltDelCooldown(true);
+      clearTimeout(cooldownTimerRef.current);
+      cooldownTimerRef.current = setTimeout(() => {
+        cooldownActiveRef.current = false;
+        setCtrlAltDelCooldown(false);
+      }, 750);
+      setCtrlAltDelFeedback('console.ctrlAltDelSent');
+    } catch {
+      setCtrlAltDelFeedback('console.ctrlAltDelFailed');
+    }
+    clearTimeout(feedbackTimerRef.current);
+    feedbackTimerRef.current = setTimeout(() => setCtrlAltDelFeedback(''), 2500);
+  };
+
   return (
     <main className="console-page">
       <header className="console-page-header">
         <h1>{t('console.title', { name })}</h1>
-        <button className="btn ghost sm" type="button" onClick={reconnect} disabled={waiting}>
-          <RefreshCw size={14} /> {t('console.reconnect')}
-        </button>
+        <div className="console-toolbar">
+          {ctrlAltDelFeedback && <span className={`console-control-feedback ${ctrlAltDelFeedback === 'console.ctrlAltDelFailed' ? 'err-text' : 'dim'}`} role="status">{t(ctrlAltDelFeedback)}</span>}
+          <button className="btn ghost sm" type="button" onClick={reconnect} disabled={waiting}>
+            <RefreshCw size={14} /> {t('console.reconnect')}
+          </button>
+          <button className="btn ghost sm" type="button" onClick={handleCtrlAltDel}
+            disabled={!canSendConsoleCtrlAltDel({ connected, typing, coolingDown: ctrlAltDelCooldown })}
+            title={t('console.ctrlAltDelTooltip')}>
+            {t('console.ctrlAltDel')}
+          </button>
+        </div>
       </header>
       <div className="vnc-console-shell">
         <div className="vnc-screen" ref={screenRef} tabIndex={0} onMouseDown={() => rfbRef.current?.focus()} />
@@ -114,7 +154,8 @@ export default function VncConsole({ instanceId, name }) {
           </button>}
         </div>}
       </div>
-      <ConsoleInput rfbRef={rfbRef} connected={connected} sessionKey={`${instanceId}:${sessionVersion}`} />
+      <ConsoleInput rfbRef={rfbRef} connected={connected} sessionKey={`${instanceId}:${sessionVersion}`}
+        onTypingChange={setTyping} />
     </main>
   );
 }

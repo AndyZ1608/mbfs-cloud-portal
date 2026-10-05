@@ -3,11 +3,13 @@ import { Eraser, Keyboard, Play, Square } from 'lucide-react';
 import useConsoleAutoType from '../console/useConsoleAutoType.js';
 import { useI18n } from '../i18n/react.jsx';
 
-export default function ConsoleInput({ rfbRef, connected, sessionKey, unavailableReason = '' }) {
+export default function ConsoleInput({ rfbRef, connected, sessionKey, unavailableReason = '', onTypingChange = () => {} }) {
   const { t } = useI18n();
   const [text, setText] = useState('');
   const { state, start, cancel, typing } = useConsoleAutoType({ rfbRef, connected, sessionKey });
   const canType = !unavailableReason && connected && !typing && text.length > 0;
+
+  React.useEffect(() => { onTypingChange(typing); }, [onTypingChange, typing]);
 
   return (
     <section className="console-input-panel" aria-labelledby="console-input-title">

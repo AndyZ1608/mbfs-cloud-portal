@@ -5,6 +5,16 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { matchRoutes } from 'react-router-dom';
 import { createServer } from 'vite';
 import { CONSOLE_ROUTE, openInstanceConsole } from '../src/console/navigation.js';
+import { translate } from '../src/i18n/index.js';
+
+test('Ctrl+Alt+Del toolbar labels and feedback are localized', () => {
+  for (const locale of ['vi', 'en']) {
+    for (const key of ['console.ctrlAltDel', 'console.ctrlAltDelTooltip',
+      'console.ctrlAltDelSent', 'console.ctrlAltDelFailed']) {
+      assert.notEqual(translate(locale, key), key);
+    }
+  }
+});
 
 test('Console action synchronously opens only an encoded CMP route with no opener', () => {
   const calls = [];
@@ -28,7 +38,7 @@ test('console route resolves an instance UUID directly without navigation state'
   assert.equal(matches[0].params.instanceId, id);
 });
 
-test('focused console renders a three-line input, only Clear / Type + Enter, and no Nova link or sidebar', async () => {
+test('focused console renders a disabled Ctrl+Alt+Del toolbar control and keeps the compact input', async () => {
   const vite = await createServer({ server: { middlewareMode: true, watch: null }, appType: 'custom' });
   try {
     const { default: VncConsole } = await vite.ssrLoadModule('/src/components/VncConsole.jsx');
@@ -37,9 +47,11 @@ test('focused console renders a three-line input, only Clear / Type + Enter, and
     assert.match(html, /rows="3"/);
     assert.match(html, /Xoá nội dung/);
     assert.match(html, /Type \+ Enter/);
+    assert.match(html, /title="Gửi tổ hợp Ctrl \+ Alt \+ Del tới máy ảo"/);
+    assert.match(html, /<button[^>]*disabled=""[^>]*title="Gửi tổ hợp Ctrl \+ Alt \+ Del tới máy ảo"[^>]*>Ctrl \+ Alt \+ Del<\/button>/);
     assert.doesNotMatch(html, /<select|Tốc độ|console-speed|>\s*Type\s*<|sidebar|console-modal|href=/);
     assert.equal((html.match(/class="vnc-screen"/g) || []).length, 1);
-    assert.equal((html.match(/<button/g) || []).length, 3); // Reconnect, Clear, Type + Enter.
+    assert.equal((html.match(/<button/g) || []).length, 4); // Reconnect, Ctrl+Alt+Del, Clear, Type + Enter.
     assert.equal((html.match(/<textarea/g) || []).length, 1);
   } finally {
     await vite.close();
