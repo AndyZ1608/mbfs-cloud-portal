@@ -21,7 +21,8 @@ const images = [
 
 const netInternal = { id: uid(), name: 'net-internal', project_id: 'p-demo', status: 'ACTIVE', 'router:external': false, shared: false, subnets: [] };
 const netDmz = { id: uid(), name: 'net-dmz', project_id: 'p-demo', status: 'ACTIVE', 'router:external': false, shared: false, subnets: [] };
-const netPublic = { id: uid(), name: 'public', project_id: 'p-infrastructure', status: 'ACTIVE', 'router:external': true, shared: true, subnets: [] };
+const netPublic = { id: uid(), name: 'public', project_id: 'p-infrastructure', status: 'ACTIVE',
+  admin_state_up: true, 'router:external': true, shared: true, subnets: [] };
 const networks = [netInternal, netDmz, netPublic];
 
 const subnets = [
@@ -415,7 +416,8 @@ function mockNetwork(m, path, q, body, projectId) {
     networks.splice(i, 1);
     return null;
   }
-  if (path === '/v2.0/subnets' && m === 'GET') return { subnets };
+  if (path === '/v2.0/subnets' && m === 'GET') return { subnets: q.get('network_id')
+    ? subnets.filter((subnet) => subnet.network_id === q.get('network_id')) : subnets };
   if (path === '/v2.0/subnets' && m === 'POST') {
     const s = { id: uid(), project_id: projectId, ip_version: 4, enable_dhcp: true, dns_nameservers: [], allocation_pools: [], revision_number: 1, ...body.subnet };
     if (!s.gateway_ip) s.gateway_ip = s.cidr.replace(/\.\d+\/\d+$/, '.1');

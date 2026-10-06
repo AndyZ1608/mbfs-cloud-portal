@@ -491,8 +491,7 @@ function FipModal({ server, onClose, onDone }) {
   async function allocateAndAssociate() {
     setBusy(true);
     try {
-      const d = await api('/floatingips', { method: 'POST' });
-      await api(`/floatingips/${d.floatingip.id}/associate`, { method: 'POST', body: { server_id: server.id } });
+      const d = await api('/floatingips', { method: 'POST', body: { server_id: server.id } });
       toast(t('instances.fipAllocated', { ip: d.floatingip.floating_ip_address, name: server.name }), 'ok');
       onDone();
     } catch (e) { toast(e.message, 'error'); setBusy(false); }

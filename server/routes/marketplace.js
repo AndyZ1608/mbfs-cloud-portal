@@ -5,7 +5,7 @@ import { Router } from 'express';
 import { osFetch, OSError } from '../openstack.js';
 import { publicTemplates, findTemplate, collectParams } from '../templates.js';
 import { fetchUsableImage, fetchUsableNetwork, owned } from '../projectScope.js';
-import { allocateConfiguredFloatingIp } from '../externalNetworking.js';
+import { allocateDiscoveredFloatingIp } from '../externalNetworking.js';
 
 const router = Router();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -90,7 +90,7 @@ router.post('/marketplace/deploy', async (req, res, next) => {
         warningCodes.push('portUnavailable');
       } else {
         try {
-          const fr = await allocateConfiguredFloatingIp(sess, { portId: port.id });
+          const fr = await allocateDiscoveredFloatingIp(sess, { portId: port.id });
           fipIp = fr.floatingip.floating_ip_address;
         } catch {
           warnings.push('Không thể cấp Floating IP; máy đã được tạo. Vui lòng gắn Floating IP sau.');

@@ -8,7 +8,7 @@ import { osFetch, OSError } from '../openstack.js';
 import { loadJson, saveJson } from '../store.js';
 import { seal, unseal, encryptionConfigured } from '../secrets.js';
 import { fetchOwned, fetchUsableImage, fetchUsableNetwork, owned } from '../projectScope.js';
-import { allocateConfiguredFloatingIp } from '../externalNetworking.js';
+import { allocateDiscoveredFloatingIp } from '../externalNetworking.js';
 
 const router = Router();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -158,7 +158,7 @@ router.post('/k8s/deploy', async (req, res, next) => {
     let fip = null;
     if (assign_fip) {
       try {
-        const fr = await allocateConfiguredFloatingIp(sess, { portId });
+        const fr = await allocateDiscoveredFloatingIp(sess, { portId });
         fip = fr.floatingip.floating_ip_address;
       } catch {
         warnings.push('Không thể cấp Floating IP; cluster đã được tạo. Vui lòng gắn Floating IP sau.');

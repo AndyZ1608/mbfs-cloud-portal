@@ -73,25 +73,26 @@ Nova trả HTTP 202 khi **nhận** yêu cầu; đây không phải xác nhận �
 
 ### External networking cho Router và Floating IP
 
-Trước khi cho phép tạo Router hoặc cấp Floating IP, quản trị viên điền **hai UUID Neutron**
-trong `server/config/application.yml` (Docker Compose mount file này vào container):
+CMP tự truy vấn Neutron `GET /v2.0/networks?router:external=true`; không cần UUID
+External Network/Subnet trong YAML và không hiển thị bộ chọn hạ tầng cho người dùng.
+Nếu file cấu hình cũ còn mục `networking`, hãy xóa mục đó; CMP không đọc các UUID này nữa.
+Chỉ Network external đang bật (`admin_state_up=true`) mới được xét. Với nhiều ứng viên,
+Network duy nhất có `is_default=true` được ưu tiên; nếu không có duy nhất một default,
+CMP chọn Network có UUID nhỏ nhất theo thứ tự chữ cái và ghi cảnh báo operator. Nếu
+không có ứng viên khả dụng, thao tác thất bại trước khi tạo Router.
 
-```yaml
-networking:
-  external_network_id: "<UUID của router:external Network>"
-  floating_ip_subnet_id: "<UUID của IPv4 Subnet chứa Allocation Pool cấp FIP>"
-```
+Router mới được tạo với gateway đến Network đã chọn và CMP xác minh gateway sau khi tạo.
+Floating IP chưa gắn vào máy dùng cùng quy tắc chọn Network. Nếu thao tác có VM/Port đích,
+CMP lấy External Network từ Router nối Subnet của Port đó; không chuyển sang Network khác
+khi cấp địa chỉ thất bại. Trong Network đã chọn, CMP ưu tiên IPv4 Subnet có service type
+`network:floatingip` và Allocation Pool hợp lệ; nếu còn nhiều ứng viên, chọn UUID nhỏ nhất.
+Neutron IPAM cấp địa chỉ; CMP kiểm tra IP trả về thuộc pool được chọn. Quota/policy Neutron
+vẫn áp dụng. Với admin, Network external thuộc project khác nhưng không shared chỉ được
+xét khi RBAC `access_as_external` cấp cho project hiện tại hoặc `*`.
 
-CMP kiểm tra Network là external và Subnet thuộc Network đó, có IPv4 Allocation Pool.
-Router mới được tạo với external gateway đến Network đã cấu hình; người dùng không chọn
-provider Network. Floating IP mới được Neutron IPAM cấp từ **Subnet đã cấu hình**, và CMP
-kiểm tra IP trả về nằm trong Allocation Pool. Nếu pool hết địa chỉ, CMP báo lỗi; không chuyển
-sang Network/Subnet khác. Nếu thiếu cấu hình, hai thao tác trên thất bại rõ ràng; các trang
-khác vẫn hoạt động. Neutron policy/quota của project vẫn áp dụng.
-
-Đổi cấu hình chỉ ảnh hưởng thao tác **mới**. CMP không tự sửa Router/FIP đã tồn tại;
-Router cũ chưa có gateway sẽ hiển thị “Chưa cấu hình” và cần xử lý riêng theo quy trình
-vận hành. Không đưa UUID hạ tầng vào request từ trình duyệt.
+Quy tắc tự động chỉ áp dụng cho thao tác **mới**. CMP không tự sửa Router/FIP đã tồn tại;
+Router cũ chưa có gateway sẽ hiển thị “Chưa cấu hình”. UUID hạ tầng không nằm trong
+request từ trình duyệt hay màn hình người dùng.
 
 ### Billing Integration
 

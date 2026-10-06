@@ -5,7 +5,8 @@ import { createNetwork } from '../networkCreation.js';
 import { editNetwork, loadNetworkEdit } from '../networkEdit.js';
 import { networkResources, createOnlySubnet } from '../networkTopology.js';
 import { listProjectNeutron } from '../projectResourceList.js';
-import { allocateConfiguredFloatingIp, assertPortExternalPath, createConfiguredRouter } from '../externalNetworking.js';
+import { allocateDiscoveredFloatingIp, assertPortExternalPath, createDiscoveredRouter,
+  portExternalPath } from '../externalNetworking.js';
 
 const router = Router();
 const publicRouter = ({ external_gateway_info, external_gateways, ...rest }) => ({
@@ -146,7 +147,7 @@ router.post('/routers', async (req, res, next) => {
       throw new OSError(400, 'External networking is managed by CMP.', 'external_network_not_selectable');
     }
     const sess = req.session.os;
-    const data = await createConfiguredRouter(sess, name.trim());
+    const data = await createDiscoveredRouter(sess, name.trim());
     res.locals.networkAudits = [{ action: 'router.create', resourceId: data.router.id,
       resourceName: data.router.name, details: { external_connectivity: true } }];
     console.log(`[network] CREATE router=${data.router.id} by=${sess.user.name}`);
@@ -227,10 +228,31 @@ router.post('/floatingips', async (req, res, next) => {
       throw new OSError(400, 'Floating IP source is managed by CMP.', 'external_network_not_selectable');
     }
     const sess = req.session.os;
-    const data = await allocateConfiguredFloatingIp(sess);
+    const { server_id, port_id } = req.body || {};
+    if (server_id && port_id) throw new OSError(400, 'Choose one Floating IP target.', 'floating_ip_multiple_ports');
+    let portId = port_id || null;
+    if (server_id) {
+      await fetchOwned(sess, 'compute', `/servers/${encodeURIComponent(server_id)}`, 'server');
+      const pr = await osFetch(sess, 'network', `/v2.0/ports?device_id=${encodeURIComponent(server_id)}`);
+      const candidates = owned(pr.ports, sess).filter((port) => (port.device_owner || '').startsWith('compute'));
+      const eligible = [];
+      for (const candidate of candidates) {
+        try { await portExternalPath(sess, candidate); eligible.push(candidate); }
+        catch (error) { if (error?.code !== 'floating_ip_no_route') throw error; }
+      }
+      if (!eligible.length) throw new OSError(409, 'The virtual machine network does not have external connectivity.', 'floating_ip_no_route');
+      if (eligible.length > 1) throw new OSError(409, 'Select a VM interface for this Floating IP.', 'floating_ip_multiple_ports');
+      portId = eligible[0].id;
+    }
+    const data = await allocateDiscoveredFloatingIp(sess, { portId });
     res.locals.networkAudits = [{ action: 'floating_ip.allocate', resourceId: data.floatingip.id,
       resourceName: data.floatingip.floating_ip_address,
-      details: { floating_ip: data.floatingip.floating_ip_address } }];
+      details: { floating_ip: data.floatingip.floating_ip_address } }, ...(portId ? [{
+      action: 'floating_ip.associate', resourceId: data.floatingip.id,
+      resourceName: data.floatingip.floating_ip_address,
+      details: { floating_ip: data.floatingip.floating_ip_address, port_id: portId,
+        instance_id: server_id || null },
+    }] : [])];
     console.log(`[network] ALLOCATE fip=${data.floatingip.floating_ip_address} by=${sess.user.name}`);
     res.json({ floatingip: publicFloatingIp(data.floatingip) });
   } catch (e) { next(e); }

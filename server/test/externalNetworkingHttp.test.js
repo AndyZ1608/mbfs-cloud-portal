@@ -1,8 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
@@ -10,21 +7,12 @@ process.env.OS_MOCK = 'true';
 process.env.DATA_DIR = fileURLToPath(new URL('../.test-data', import.meta.url));
 process.env.DATA_ENCRYPTION_KEY = 'test-only-encryption-material';
 
-test('HTTP Router/FIP policy uses configured infrastructure without exposing or accepting provider IDs', async (t) => {
+test('HTTP Router/FIP discovery works without networking YAML and keeps infrastructure IDs server-side', async (t) => {
   const { mockFetch } = await import('../mock.js');
   const external = mockFetch('network', 'GET', '/v2.0/networks?router:external=true').networks[0];
   const subnet = mockFetch('network', 'GET', '/v2.0/subnets').subnets.find((item) => item.network_id === external.id);
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'cmp-networking-config-test-'));
-  const configPath = path.join(tempDir, 'application.yml');
-  await writeFile(configPath, `networking:\n  external_network_id: "${external.id}"\n  floating_ip_subnet_id: "${subnet.id}"\n`);
-  const previousConfigPath = process.env.CMP_CONFIG_FILE;
-  process.env.CMP_CONFIG_FILE = configPath;
-  t.after(async () => {
-    if (previousConfigPath === undefined) delete process.env.CMP_CONFIG_FILE;
-    else process.env.CMP_CONFIG_FILE = previousConfigPath;
-    await rm(tempDir, { recursive: true, force: true });
-  });
-
+  const { config } = await import('../config.js');
+  assert.equal(config.networking, undefined);
   const { createApp } = await import('../app.js');
   const app = createApp({ sessionStore: null, sessionSecret: 'external-networking-http-test-secret' }).listen(0);
   await new Promise((resolve) => app.once('listening', resolve));
@@ -71,6 +59,13 @@ test('HTTP Router/FIP policy uses configured infrastructure without exposing or 
   assert.match(providerFip.floating_ip_address, /^203\.0\.113\./);
   const eligible = (await (await request(`/floatingips/${fip.id}/eligible-servers`)).json()).servers;
   assert.equal(eligible.find((item) => item.id === server.id)?.ports.length, 1);
+  const targetedResponse = await request('/floatingips', 'POST', { server_id: server.id });
+  assert.equal(targetedResponse.status, 200);
+  const targeted = (await targetedResponse.json()).floatingip;
+  assert.equal(mockFetch('network', 'GET', `/v2.0/floatingips/${targeted.id}`, null, 'p-demo').floatingip.floating_network_id, external.id);
+  assert.equal(mockFetch('network', 'GET', `/v2.0/floatingips/${targeted.id}`, null, 'p-demo').floatingip.port_id, ownPort.id);
+  assert.equal((await request(`/floatingips/${targeted.id}/disassociate`, 'POST')).status, 200);
+  assert.equal((await request(`/floatingips/${targeted.id}`, 'DELETE')).status, 200);
   const mockPorts = mockFetch('network', 'GET', '/v2.0/ports').ports;
   const lbPort = mockPorts.find((port) => port.project_id === 'p-demo' && port.device_owner === 'octavia');
   assert.ok(lbPort);

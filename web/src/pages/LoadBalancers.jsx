@@ -308,8 +308,7 @@ function LbFipModal({ lb, onClose, onDone }) {
   async function allocateAndAssociate() {
     setBusy(true);
     try {
-      const d = await api('/floatingips', { method: 'POST' });
-      await api(`/floatingips/${d.floatingip.id}/associate`, { method: 'POST', body: { port_id: lb.vip_port_id } });
+      const d = await api('/floatingips', { method: 'POST', body: { port_id: lb.vip_port_id } });
       toast(t('instances.fipAllocated', { ip: d.floatingip.floating_ip_address, name: lb.name }), 'ok');
       onDone();
     } catch (e) { toast(e.message, 'error'); setBusy(false); }
