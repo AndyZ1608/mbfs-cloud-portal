@@ -8,6 +8,7 @@ import { osFetch, OSError } from '../openstack.js';
 import { loadJson, saveJson } from '../store.js';
 import { seal, unseal, encryptionConfigured } from '../secrets.js';
 import { fetchOwned, fetchUsableImage, fetchUsableNetwork, owned } from '../projectScope.js';
+import { allocateConfiguredFloatingIp } from '../externalNetworking.js';
 
 const router = Router();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -156,13 +157,11 @@ router.post('/k8s/deploy', async (req, res, next) => {
     // 5) FIP cho server node
     let fip = null;
     if (assign_fip) {
-      const ext = (await osFetch(sess, 'network', '/v2.0/networks?router:external=true')).networks?.find((network) => network['router:external'] === true);
-      if (!ext) warnings.push('Không có mạng external — bỏ qua Floating IP.');
-      else {
-        const fr = await osFetch(sess, 'network', '/v2.0/floatingips', {
-          method: 'POST', body: { floatingip: { floating_network_id: ext.id, port_id: portId } },
-        });
+      try {
+        const fr = await allocateConfiguredFloatingIp(sess, { portId });
         fip = fr.floatingip.floating_ip_address;
+      } catch {
+        warnings.push('Không thể cấp Floating IP; cluster đã được tạo. Vui lòng gắn Floating IP sau.');
       }
     }
 

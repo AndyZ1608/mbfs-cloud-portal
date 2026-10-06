@@ -471,13 +471,11 @@ function ConsoleLogModal({ server, onClose }) {
 function FipModal({ server, onClose, onDone }) {
   const { t } = useI18n();
   const [fips, setFips] = useState(null);
-  const [extNets, setExtNets] = useState([]);
   const [busy, setBusy] = useState(false);
 
   async function load() {
-    const [f, e] = await Promise.all([api('/floatingips'), api('/external-networks')]);
+    const f = await api('/floatingips');
     setFips(f.floatingips.filter((x) => !x.port_id));
-    setExtNets(e.networks);
   }
   useEffect(() => { load().catch((e) => toast(e.message, 'error')); }, []);
 
@@ -491,10 +489,9 @@ function FipModal({ server, onClose, onDone }) {
   }
 
   async function allocateAndAssociate() {
-    if (!extNets.length) return toast(t('instances.noExternalNetwork'), 'error');
     setBusy(true);
     try {
-      const d = await api('/floatingips', { method: 'POST', body: { floating_network_id: extNets[0].id } });
+      const d = await api('/floatingips', { method: 'POST' });
       await api(`/floatingips/${d.floatingip.id}/associate`, { method: 'POST', body: { server_id: server.id } });
       toast(t('instances.fipAllocated', { ip: d.floatingip.floating_ip_address, name: server.name }), 'ok');
       onDone();

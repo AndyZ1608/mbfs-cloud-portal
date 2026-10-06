@@ -3,11 +3,15 @@ import { osFetch, OSError } from '../openstack.js';
 import { currentProjectId, fetchOwned, isOwned, isUsableNetwork, owned, projectQuery } from '../projectScope.js';
 import { createNetwork } from '../networkCreation.js';
 import { editNetwork, loadNetworkEdit } from '../networkEdit.js';
-import { setInstanceAudit } from '../audit.js';
 import { networkResources, createOnlySubnet } from '../networkTopology.js';
 import { listProjectNeutron } from '../projectResourceList.js';
+import { allocateConfiguredFloatingIp, assertPortExternalPath, createConfiguredRouter } from '../externalNetworking.js';
 
 const router = Router();
+const publicRouter = ({ external_gateway_info, external_gateways, ...rest }) => ({
+  ...rest, external_connectivity: !!external_gateway_info?.network_id,
+});
+const publicFloatingIp = ({ floating_network_id, subnet_id, ...rest }) => rest;
 
 // ---------- Networks + Subnets ----------
 
@@ -53,13 +57,6 @@ router.get('/available-networks', async (req, res, next) => {
       ...network,
       subnet_details: (network.subnets || []).map((id) => subMap[id]).filter(Boolean),
     })) });
-  } catch (e) { next(e); }
-});
-
-router.get('/external-networks', async (req, res, next) => {
-  try {
-    const data = await osFetch(req.session.os, 'network', '/v2.0/networks?router:external=true');
-    res.json({ networks: (data.networks || []).filter((network) => network['router:external'] === true) });
   } catch (e) { next(e); }
 });
 
@@ -132,29 +129,28 @@ router.get('/routers', async (req, res, next) => {
   try {
     const sess = req.session.os;
     const data = await osFetch(sess, 'network', projectQuery(sess, '/v2.0/routers'));
-    res.json({ routers: owned(data.routers, sess) });
+    res.json({ routers: owned(data.routers, sess).map(publicRouter) });
   } catch (e) { next(e); }
 });
 
 router.get('/routers/:id', async (req, res, next) => {
-  try { res.json({ router: await fetchOwned(req.session.os, 'network', `/v2.0/routers/${req.params.id}`, 'router') }); }
+  try { res.json({ router: publicRouter(await fetchOwned(req.session.os, 'network', `/v2.0/routers/${req.params.id}`, 'router')) }); }
   catch (error) { next(error); }
 });
 
 router.post('/routers', async (req, res, next) => {
   try {
-    const { name, external_network_id } = req.body || {};
-    if (!name) throw new OSError(400, 'Thiếu tên router');
-    const sess = req.session.os;
-    const body = { router: { name, project_id: currentProjectId(sess) } };
-    if (external_network_id) {
-      const external = (await osFetch(sess, 'network', `/v2.0/networks/${external_network_id}`)).network;
-      if (external?.['router:external'] !== true) throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
-      body.router.external_gateway_info = { network_id: external_network_id };
+    const { name } = req.body || {};
+    if (typeof name !== 'string' || !name.trim()) throw new OSError(400, 'Thiếu tên router');
+    if (['external_network_id', 'project_id', 'external_gateway_info'].some((key) => Object.hasOwn(req.body, key))) {
+      throw new OSError(400, 'External networking is managed by CMP.', 'external_network_not_selectable');
     }
-    const data = await osFetch(req.session.os, 'network', '/v2.0/routers', { method: 'POST', body });
-    console.log(`[network] CREATE router name=${name} by=${req.session.os.user.name}`);
-    res.json(data);
+    const sess = req.session.os;
+    const data = await createConfiguredRouter(sess, name.trim());
+    res.locals.networkAudits = [{ action: 'router.create', resourceId: data.router.id,
+      resourceName: data.router.name, details: { external_connectivity: true } }];
+    console.log(`[network] CREATE router=${data.router.id} by=${sess.user.name}`);
+    res.json({ router: publicRouter(data.router) });
   } catch (e) { next(e); }
 });
 
@@ -219,7 +215,7 @@ router.get('/floatingips', async (req, res, next) => {
     res.json({
       floatingips: fips.map((f) => {
         const p = f.port_id ? portMap[f.port_id] : null;
-        return { ...f, instance_name: p ? serverMap[p.device_id] || null : null };
+        return { ...publicFloatingIp(f), instance_name: p ? serverMap[p.device_id] || null : null };
       }),
     });
   } catch (e) { next(e); }
@@ -227,14 +223,48 @@ router.get('/floatingips', async (req, res, next) => {
 
 router.post('/floatingips', async (req, res, next) => {
   try {
-    const { floating_network_id } = req.body || {};
-    if (!floating_network_id) throw new OSError(400, 'Chưa chọn mạng external');
+    if (['floating_network_id', 'subnet_id', 'project_id', 'floating_ip_address'].some((key) => Object.hasOwn(req.body || {}, key))) {
+      throw new OSError(400, 'Floating IP source is managed by CMP.', 'external_network_not_selectable');
+    }
     const sess = req.session.os;
-    const external = (await osFetch(sess, 'network', `/v2.0/networks/${floating_network_id}`)).network;
-    if (external?.['router:external'] !== true) throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
-    const data = await osFetch(sess, 'network', '/v2.0/floatingips', { method: 'POST', body: { floatingip: { floating_network_id, project_id: currentProjectId(sess) } } });
-    console.log(`[network] ALLOCATE fip=${data.floatingip?.floating_ip_address} by=${req.session.os.user.name}`);
-    res.json(data);
+    const data = await allocateConfiguredFloatingIp(sess);
+    res.locals.networkAudits = [{ action: 'floating_ip.allocate', resourceId: data.floatingip.id,
+      resourceName: data.floatingip.floating_ip_address,
+      details: { floating_ip: data.floatingip.floating_ip_address } }];
+    console.log(`[network] ALLOCATE fip=${data.floatingip.floating_ip_address} by=${sess.user.name}`);
+    res.json({ floatingip: publicFloatingIp(data.floatingip) });
+  } catch (e) { next(e); }
+});
+
+router.get('/floatingips/:id/eligible-servers', async (req, res, next) => {
+  try {
+    const sess = req.session.os;
+    const fip = await fetchOwned(sess, 'network', `/v2.0/floatingips/${req.params.id}`, 'floatingip');
+    const [serverData, portData] = await Promise.all([
+      osFetch(sess, 'compute', '/servers/detail'),
+      osFetch(sess, 'network', projectQuery(sess, '/v2.0/ports')),
+    ]);
+    const servers = owned(serverData.servers, sess);
+    const portsByServer = new Map(servers.map((server) => [server.id, []]));
+    const candidates = owned(portData.ports, sess).filter((port) =>
+      (port.device_owner || '').startsWith('compute') && portsByServer.has(port.device_id));
+    const topologyRequests = new Map();
+    const cachedTopologyRequest = (session, service, path) => {
+      const key = `${service}:${path}`;
+      if (!topologyRequests.has(key)) topologyRequests.set(key, osFetch(session, service, path));
+      return topologyRequests.get(key);
+    };
+    for (const port of candidates) {
+      try {
+        await assertPortExternalPath(sess, port, fip.floating_network_id, cachedTopologyRequest);
+        portsByServer.get(port.device_id).push({ id: port.id,
+          fixed_ips: port.fixed_ips?.map(({ ip_address }) => ip_address) || [] });
+      } catch (error) {
+        if (error?.code !== 'floating_ip_no_route') throw error;
+      }
+    }
+    res.json({ servers: servers.filter((server) => portsByServer.get(server.id).length)
+      .map((server) => ({ id: server.id, name: server.name, ports: portsByServer.get(server.id) })) });
   } catch (e) { next(e); }
 });
 
@@ -249,12 +279,24 @@ router.post('/floatingips/:id/associate', async (req, res, next) => {
     if (!portId) {
       if (!server_id) throw new OSError(400, 'Chưa chọn máy ảo hoặc port');
       const pr = await osFetch(sess, 'network', `/v2.0/ports?device_id=${encodeURIComponent(server_id)}`);
-      const port = owned(pr.ports, sess)[0];
-      if (!port) throw new OSError(404, 'Máy ảo chưa có port mạng (có thể đang khởi tạo)');
-      portId = port.id;
+      const candidates = owned(pr.ports, sess).filter((port) => (port.device_owner || '').startsWith('compute'));
+      const eligible = [];
+      for (const candidate of candidates) {
+        try { await assertPortExternalPath(sess, candidate, fip.floating_network_id); eligible.push(candidate); }
+        catch (error) { if (error?.code !== 'floating_ip_no_route') throw error; }
+      }
+      if (!eligible.length) throw new OSError(409, 'The virtual machine network does not have external connectivity.', 'floating_ip_no_route');
+      if (eligible.length > 1) throw new OSError(409, 'Select a VM interface for this Floating IP.', 'floating_ip_multiple_ports');
+      portId = eligible[0].id;
     }
     const port = await fetchOwned(sess, 'network', `/v2.0/ports/${portId}`, 'port');
+    const computePort = (port.device_owner || '').startsWith('compute') && !!port.device_id;
+    const loadBalancerPort = port.device_owner === 'octavia';
+    if ((!computePort && !loadBalancerPort) || (server_id && !computePort)) {
+      throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
+    }
     if (server_id && port.device_id !== server_id) throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
+    await assertPortExternalPath(sess, port, fip.floating_network_id);
     if (!server && (port.device_owner || '').startsWith('compute') && port.device_id) {
       server = await fetchOwned(sess, 'compute', `/servers/${port.device_id}`, 'server').catch(() => null);
     }
@@ -262,13 +304,15 @@ router.post('/floatingips/:id/associate', async (req, res, next) => {
       resourceId: server.id, resourceName: server.name,
       details: { floating_ip: fip.floating_ip_address, port_id: port.id,
         fixed_ip: port.fixed_ips?.length === 1 ? port.fixed_ips[0].ip_address : null } } : null;
-    if (auditEvent) setInstanceAudit(res, auditEvent);
+    res.locals.networkAudits = [{ action: 'floating_ip.associate', resourceId: fip.id,
+      resourceName: fip.floating_ip_address, details: { floating_ip: fip.floating_ip_address,
+        port_id: port.id, instance_id: server?.id || null } }, ...(auditEvent ? [auditEvent] : [])];
     const data = await osFetch(sess, 'network', `/v2.0/floatingips/${req.params.id}`, { method: 'PUT', body: { floatingip: { port_id: portId } } });
     if (auditEvent && data?.floatingip?.fixed_ip_address) {
       auditEvent.details.fixed_ip = data.floatingip.fixed_ip_address;
     }
     console.log(`[network] ASSOCIATE fip=${req.params.id} -> ${server_id ? 'server=' + server_id : 'port=' + portId} by=${sess.user.name}`);
-    res.json(data);
+    res.json({ floatingip: publicFloatingIp(data.floatingip) });
   } catch (e) { next(e); }
 });
 
@@ -279,18 +323,24 @@ router.post('/floatingips/:id/disassociate', async (req, res, next) => {
     const port = fip.port_id ? await fetchOwned(sess, 'network', `/v2.0/ports/${fip.port_id}`, 'port').catch(() => null) : null;
     const server = port?.device_id && (port.device_owner || '').startsWith('compute')
       ? await fetchOwned(sess, 'compute', `/servers/${port.device_id}`, 'server').catch(() => null) : null;
-    if (server) setInstanceAudit(res, { action: 'instance.floating_ip.disassociate',
+    const auditEvent = server ? { action: 'instance.floating_ip.disassociate',
       resourceId: server.id, resourceName: server.name,
       details: { floating_ip: fip.floating_ip_address, fixed_ip: fip.fixed_ip_address || null,
-        port_id: fip.port_id } });
+        port_id: fip.port_id } } : null;
+    res.locals.networkAudits = [{ action: 'floating_ip.disassociate', resourceId: fip.id,
+      resourceName: fip.floating_ip_address, details: { floating_ip: fip.floating_ip_address,
+        port_id: fip.port_id } }, ...(auditEvent ? [auditEvent] : [])];
     const data = await osFetch(req.session.os, 'network', `/v2.0/floatingips/${req.params.id}`, { method: 'PUT', body: { floatingip: { port_id: null } } });
-    res.json(data);
+    res.json({ floatingip: publicFloatingIp(data.floatingip) });
   } catch (e) { next(e); }
 });
 
 router.delete('/floatingips/:id', async (req, res, next) => {
   try {
-    await fetchOwned(req.session.os, 'network', `/v2.0/floatingips/${req.params.id}`, 'floatingip');
+    const fip = await fetchOwned(req.session.os, 'network', `/v2.0/floatingips/${req.params.id}`, 'floatingip');
+    if (fip.port_id) throw new OSError(409, 'Disassociate the Floating IP before release.', 'floating_ip_still_associated');
+    res.locals.networkAudits = [{ action: 'floating_ip.release', resourceId: fip.id,
+      resourceName: fip.floating_ip_address, details: { floating_ip: fip.floating_ip_address } }];
     await osFetch(req.session.os, 'network', `/v2.0/floatingips/${req.params.id}`, { method: 'DELETE' });
     res.json({ ok: true });
   } catch (e) { next(e); }

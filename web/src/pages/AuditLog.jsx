@@ -57,6 +57,8 @@ const NETWORK_ACTIONS = new Set([
   'subnet.dns.update', 'subnet.allocation_pool.update',
   'network.routing.attach', 'network.routing.detach', 'network.routing.change',
 ]);
+const EXTERNAL_ACTIONS = new Set(['router.create', 'floating_ip.allocate', 'floating_ip.associate',
+  'floating_ip.disassociate', 'floating_ip.release']);
 
 export function networkAuditDetails(event) {
   if (event.resource_type !== 'network' || !NETWORK_ACTIONS.has(event.action)) return '';
@@ -75,6 +77,7 @@ export function networkAuditDetails(event) {
 
 export function actionLabel(e, t) {
   if (e.action === 'account.password.change') return t('account.auditAction');
+  if (EXTERNAL_ACTIONS.has(e.action)) return t(`audit.semantic.${e.action}`);
   if (e.resource_type === 'network' && NETWORK_ACTIONS.has(e.action)) return t(`network.audit.${e.action}`);
   const formatted = formatActivity(e, t);
   if (formatted.semantic) return formatted.action;

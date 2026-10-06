@@ -71,6 +71,28 @@ Hành động **Đổi mật khẩu** có sẵn cho VM trong project Keystone hi
 
 Nova trả HTTP 202 khi **nhận** yêu cầu; đây không phải xác nhận đồng bộ rằng mật khẩu trong guest đã đổi. Sau khi gửi, hãy xác minh bằng đăng nhập VM nếu cần.
 
+### External networking cho Router và Floating IP
+
+Trước khi cho phép tạo Router hoặc cấp Floating IP, quản trị viên điền **hai UUID Neutron**
+trong `server/config/application.yml` (Docker Compose mount file này vào container):
+
+```yaml
+networking:
+  external_network_id: "<UUID của router:external Network>"
+  floating_ip_subnet_id: "<UUID của IPv4 Subnet chứa Allocation Pool cấp FIP>"
+```
+
+CMP kiểm tra Network là external và Subnet thuộc Network đó, có IPv4 Allocation Pool.
+Router mới được tạo với external gateway đến Network đã cấu hình; người dùng không chọn
+provider Network. Floating IP mới được Neutron IPAM cấp từ **Subnet đã cấu hình**, và CMP
+kiểm tra IP trả về nằm trong Allocation Pool. Nếu pool hết địa chỉ, CMP báo lỗi; không chuyển
+sang Network/Subnet khác. Nếu thiếu cấu hình, hai thao tác trên thất bại rõ ràng; các trang
+khác vẫn hoạt động. Neutron policy/quota của project vẫn áp dụng.
+
+Đổi cấu hình chỉ ảnh hưởng thao tác **mới**. CMP không tự sửa Router/FIP đã tồn tại;
+Router cũ chưa có gateway sẽ hiển thị “Chưa cấu hình” và cần xử lý riêng theo quy trình
+vận hành. Không đưa UUID hạ tầng vào request từ trình duyệt.
+
 ### Billing Integration
 
 Billing chạy như dịch vụ độc lập. CMP không đọc database Billing và không tính giá.

@@ -49,6 +49,19 @@ export function normalizeBillingConfig(value = {}) {
   return { enabled, baseUrl, timeoutMs: timeoutSeconds * 1000, errors };
 }
 
+export function normalizeNetworkingConfig(value = {}) {
+  const externalNetworkId = String(value.external_network_id || '').trim();
+  const floatingIpSubnetId = String(value.floating_ip_subnet_id || '').trim();
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const errors = [];
+  if (externalNetworkId && !uuid.test(externalNetworkId)) errors.push('networking.external_network_id must be a UUID');
+  if (floatingIpSubnetId && !uuid.test(floatingIpSubnetId)) errors.push('networking.floating_ip_subnet_id must be a UUID');
+  if (!!externalNetworkId !== !!floatingIpSubnetId) {
+    errors.push('networking.external_network_id and networking.floating_ip_subnet_id must be configured together');
+  }
+  return { externalNetworkId, floatingIpSubnetId, errors };
+}
+
 export function loadApplicationConfig(filePath = process.env.CMP_CONFIG_FILE || path.join(__dirname, 'config', 'application.yml')) {
   let document;
   try {
@@ -57,7 +70,8 @@ export function loadApplicationConfig(filePath = process.env.CMP_CONFIG_FILE || 
     throw new Error(`Cannot load CMP application config ${filePath}: ${error.message}`);
   }
   const billing = normalizeBillingConfig(document.billing);
-  return Object.freeze({ filePath, billing: Object.freeze(billing) });
+  const networking = normalizeNetworkingConfig(document.networking);
+  return Object.freeze({ filePath, billing: Object.freeze(billing), networking: Object.freeze(networking) });
 }
 
 const application = loadApplicationConfig();
@@ -76,6 +90,7 @@ export const config = Object.freeze({
   imageUploadTempDir: process.env.IMAGE_UPLOAD_TEMP_DIR || path.join(os.tmpdir(), 'cmp-image-uploads'),
   applicationConfigFile: application.filePath,
   billing: application.billing,
+  networking: application.networking,
 });
 
 export function validateConfig() {
@@ -95,6 +110,7 @@ export function validateConfig() {
     warnings.push('TLS certificate verification is disabled for at least one integration');
   }
   errors.push(...config.billing.errors);
+  errors.push(...config.networking.errors);
   if (errors.length) throw new Error(`Invalid configuration:\n- ${errors.join('\n- ')}`);
   return warnings;
 }

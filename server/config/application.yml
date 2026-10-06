@@ -1,4 +1,10 @@
 # CMP application/service integrations.
+networking:
+  # Infrastructure-owned Neutron UUIDs. Configure both before using Router/FIP creation.
+  # Tenant users cannot select or override these values.
+  external_network_id: ""
+  floating_ip_subnet_id: ""
+
 billing:
   # Enable after replacing the placeholder address below.
   enabled: false
@@ -10,4 +16,3 @@ billing:
   base_url: "http://x.x.x.x:port"
 
   timeout_seconds: 10
-

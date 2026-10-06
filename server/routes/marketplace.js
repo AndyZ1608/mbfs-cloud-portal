@@ -5,6 +5,7 @@ import { Router } from 'express';
 import { osFetch, OSError } from '../openstack.js';
 import { publicTemplates, findTemplate, collectParams } from '../templates.js';
 import { fetchUsableImage, fetchUsableNetwork, owned } from '../projectScope.js';
+import { allocateConfiguredFloatingIp } from '../externalNetworking.js';
 
 const router = Router();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -88,17 +89,12 @@ router.post('/marketplace/deploy', async (req, res, next) => {
         warnings.push('Máy chưa có port mạng sau 30s — gắn Floating IP thủ công ở trang Máy ảo sau.');
         warningCodes.push('portUnavailable');
       } else {
-        const ext = (await osFetch(sess, 'network', '/v2.0/networks?router:external=true')).networks?.find((network) => network['router:external'] === true);
-        if (!ext) {
-          warnings.push('Không có mạng external nào để cấp Floating IP.');
-          warningCodes.push('externalNetworkUnavailable');
-        }
-        else {
-          const fr = await osFetch(sess, 'network', '/v2.0/floatingips', {
-            method: 'POST',
-            body: { floatingip: { floating_network_id: ext.id, port_id: port.id } },
-          });
+        try {
+          const fr = await allocateConfiguredFloatingIp(sess, { portId: port.id });
           fipIp = fr.floatingip.floating_ip_address;
+        } catch {
+          warnings.push('Không thể cấp Floating IP; máy đã được tạo. Vui lòng gắn Floating IP sau.');
+          warningCodes.push('floatingIpUnavailable');
         }
       }
     }

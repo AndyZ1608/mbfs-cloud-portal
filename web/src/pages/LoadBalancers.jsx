@@ -288,13 +288,11 @@ function LbDetailModal({ lb, onClose }) {
 function LbFipModal({ lb, onClose, onDone }) {
   const { t } = useI18n();
   const [fips, setFips] = useState(null);
-  const [extNets, setExtNets] = useState([]);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    Promise.all([api('/floatingips'), api('/external-networks')]).then(([f, e]) => {
+    api('/floatingips').then((f) => {
       setFips(f.floatingips.filter((x) => !x.port_id));
-      setExtNets(e.networks);
     }).catch((e) => toast(e.message, 'error'));
   }, []);
 
@@ -308,10 +306,9 @@ function LbFipModal({ lb, onClose, onDone }) {
   }
 
   async function allocateAndAssociate() {
-    if (!extNets.length) return toast(t('instances.noExternalNetwork'), 'error');
     setBusy(true);
     try {
-      const d = await api('/floatingips', { method: 'POST', body: { floating_network_id: extNets[0].id } });
+      const d = await api('/floatingips', { method: 'POST' });
       await api(`/floatingips/${d.floatingip.id}/associate`, { method: 'POST', body: { port_id: lb.vip_port_id } });
       toast(t('instances.fipAllocated', { ip: d.floatingip.floating_ip_address, name: lb.name }), 'ok');
       onDone();

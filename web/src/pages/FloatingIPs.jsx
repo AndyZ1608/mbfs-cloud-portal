@@ -68,20 +68,15 @@ export default function FloatingIPs() {
   );
 }
 
-function AllocateModal({ onClose, onDone }) {
+export function AllocateModal({ onClose, onDone }) {
   const { t } = useI18n();
-  const [nets, setNets] = useState([]);
-  const [netId, setNetId] = useState('');
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    api('/external-networks').then((d) => { setNets(d.networks); setNetId(d.networks[0]?.id || ''); }).catch((e) => toast(e.message, 'error'));
-  }, []);
-
   async function submit() {
+    if (busy) return;
     setBusy(true);
     try {
-      const d = await api('/floatingips', { method: 'POST', body: { floating_network_id: netId } });
+      const d = await api('/floatingips', { method: 'POST' });
       toast(t('floatingIps.allocated', { ip: d.floatingip.floating_ip_address }), 'ok');
       onDone();
     } catch (e) { toast(e.message, 'error'); setBusy(false); }
@@ -90,12 +85,8 @@ function AllocateModal({ onClose, onDone }) {
   return (
     <Modal title={t('floatingIps.allocateTitle')} onClose={onClose}
       footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
-        <button className="btn primary" onClick={submit} disabled={busy || !netId}>{t('floatingIps.allocateSubmit')}</button></>}>
-      <Field label={t('floatingIps.pool')}>
-        <select value={netId} onChange={(e) => setNetId(e.target.value)}>
-          {nets.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
-        </select>
-      </Field>
+        <button className="btn primary" onClick={submit} disabled={busy}>{t('floatingIps.allocateSubmit')}</button></>}>
+      <p className="dim">{t('floatingIps.automaticAllocation')}</p>
     </Modal>
   );
 }
@@ -104,16 +95,31 @@ function AssociateModal({ fip, onClose, onDone }) {
   const { t } = useI18n();
   const [servers, setServers] = useState([]);
   const [sid, setSid] = useState('');
+  const [portId, setPortId] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    api('/servers').then((d) => { setServers(d.servers); setSid(d.servers[0]?.id || ''); }).catch((e) => toast(e.message, 'error'));
-  }, []);
+    let active = true;
+    api(`/floatingips/${fip.id}/eligible-servers`).then((d) => {
+      if (!active) return;
+      setServers(d.servers);
+      setSid(d.servers[0]?.id || '');
+      setLoading(false);
+    }).catch((e) => { if (active) { setLoadError(e.message); setLoading(false); } });
+    return () => { active = false; };
+  }, [fip.id]);
+
+  const selectedServer = servers.find((server) => server.id === sid);
 
   async function submit() {
+    if (busy || !sid || (selectedServer?.ports.length > 1 && !portId)) return;
     setBusy(true);
     try {
-      await api(`/floatingips/${fip.id}/associate`, { method: 'POST', body: { server_id: sid } });
+      await api(`/floatingips/${fip.id}/associate`, { method: 'POST', body: {
+        server_id: sid, ...(selectedServer?.ports.length > 1 ? { port_id: portId } : {}),
+      } });
       toast(t('floatingIps.associated'), 'ok');
       onDone();
     } catch (e) { toast(e.message, 'error'); setBusy(false); }
@@ -122,13 +128,22 @@ function AssociateModal({ fip, onClose, onDone }) {
   return (
     <Modal title={t('floatingIps.associateTitle', { ip: fip.floating_ip_address })} onClose={onClose}
       footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
-        <button className="btn primary" onClick={submit} disabled={busy || !sid}>{t('floatingIps.associateSubmit')}</button></>}>
-      <Field label={t('floatingIps.selectInstance')}>
-        <select value={sid} onChange={(e) => setSid(e.target.value)}>
-          {servers.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.status})</option>)}
-        </select>
-      </Field>
-      <p className="dim">{t('floatingIps.routerHint')}</p>
+        <button className="btn primary" onClick={submit} disabled={busy || loading || !sid || (selectedServer?.ports.length > 1 && !portId)}>{t('floatingIps.associateSubmit')}</button></>}>
+      {loading ? <Empty>{t('common.loading')}</Empty> : loadError ? <Empty>{loadError}</Empty> : !servers.length ? (
+        <Empty>{t('floatingIps.noEligibleInstances')}</Empty>
+      ) : <>
+        <Field label={t('floatingIps.selectInstance')}>
+          <select value={sid} onChange={(e) => { setSid(e.target.value); setPortId(''); }}>
+            {servers.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.ports.map((port) => port.fixed_ips.join(', ')).join('; ')})</option>)}
+          </select>
+        </Field>
+        {selectedServer?.ports.length > 1 && <Field label={t('floatingIps.selectInterface')}>
+          <select value={portId} onChange={(e) => setPortId(e.target.value)}>
+            <option value="">{t('floatingIps.selectInterface')}</option>
+            {selectedServer.ports.map((port) => <option key={port.id} value={port.id}>{port.fixed_ips.join(', ') || '—'}</option>)}
+          </select>
+        </Field>}
+      </>}
     </Modal>
   );
 }

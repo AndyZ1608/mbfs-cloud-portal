@@ -177,6 +177,11 @@ export function auditMiddleware(req, res, next) {
             resource_type: 'network', resource_id: event.resourceId || null,
             resource_name: event.resourceName || null, details: event.details || {},
           } : {}),
+          ...(event?.action?.startsWith('router.') || event?.action?.startsWith('floating_ip.') ? {
+            resource_type: event.action.startsWith('router.') ? 'router' : 'floating_ip',
+            resource_id: event.resourceId || null, resource_name: event.resourceName || null,
+            details: event.details || {},
+          } : {}),
           ...(event?.action?.startsWith('volume.') ? {
             resource_type: 'volume', resource_id: event.resourceId || null,
             resource_name: event.resourceName || null, details: event.details || {},

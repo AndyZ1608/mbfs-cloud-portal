@@ -27,7 +27,7 @@ const networks = [netInternal, netDmz, netPublic];
 const subnets = [
   { id: uid(), name: 'subnet-internal', project_id: 'p-demo', network_id: netInternal.id, cidr: '10.10.10.0/24', gateway_ip: '10.10.10.1', ip_version: 4, enable_dhcp: true, dns_nameservers: ['8.8.8.8'] },
   { id: uid(), name: 'subnet-dmz', project_id: 'p-demo', network_id: netDmz.id, cidr: '10.20.0.0/24', gateway_ip: '10.20.0.1', ip_version: 4, enable_dhcp: true, dns_nameservers: [] },
-  { id: uid(), name: 'subnet-public', project_id: 'p-infrastructure', network_id: netPublic.id, cidr: '203.0.113.0/24', gateway_ip: '203.0.113.1', ip_version: 4, enable_dhcp: false, dns_nameservers: [] },
+  { id: uid(), name: 'subnet-public', project_id: 'p-infrastructure', network_id: netPublic.id, cidr: '203.0.113.0/24', gateway_ip: '203.0.113.1', ip_version: 4, enable_dhcp: false, dns_nameservers: [], allocation_pools: [{ start: '203.0.113.20', end: '203.0.113.250' }] },
 ];
 subnets.forEach((s) => networks.find((n) => n.id === s.network_id).subnets.push(s.id));
 
@@ -69,8 +69,8 @@ sv1.security_groups = [{ name: 'default' }, { name: 'web-server' }];
 const routers = [{ id: uid(), project_id: 'p-demo', name: 'rt-main', status: 'ACTIVE', external_gateway_info: { network_id: netPublic.id } }];
 ports.push({ id: uid(), project_id: 'p-demo', network_id: netInternal.id, device_id: routers[0].id, device_owner: 'network:router_interface', fixed_ips: [{ ip_address: '10.10.10.1', subnet_id: subnets[0].id }], status: 'ACTIVE' });
 
-const fip1 = { id: uid(), project_id: 'p-demo', floating_ip_address: '203.0.113.15', floating_network_id: netPublic.id, port_id: ports[0].id, fixed_ip_address: '10.10.10.11', status: 'ACTIVE' };
-const fip2 = { id: uid(), project_id: 'p-demo', floating_ip_address: '203.0.113.16', floating_network_id: netPublic.id, port_id: null, fixed_ip_address: null, status: 'DOWN' };
+const fip1 = { id: uid(), project_id: 'p-demo', floating_ip_address: '203.0.113.15', floating_network_id: netPublic.id, subnet_id: subnets[2].id, port_id: ports[0].id, fixed_ip_address: '10.10.10.11', status: 'ACTIVE' };
+const fip2 = { id: uid(), project_id: 'p-demo', floating_ip_address: '203.0.113.16', floating_network_id: netPublic.id, subnet_id: subnets[2].id, port_id: null, fixed_ip_address: null, status: 'DOWN' };
 const floatingips = [fip1, fip2];
 sv1.addresses['net-internal'].push({ addr: fip1.floating_ip_address, 'OS-EXT-IPS:type': 'floating' });
 
@@ -525,7 +525,14 @@ function mockNetwork(m, path, q, body, projectId) {
   }
   if (path === '/v2.0/floatingips' && m === 'GET') return { floatingips };
   if (path === '/v2.0/floatingips' && m === 'POST') {
-    const f = { id: uid(), project_id: projectId, floating_ip_address: '203.0.113.' + (20 + floatingips.length), floating_network_id: body.floatingip.floating_network_id, port_id: null, fixed_ip_address: null, status: 'DOWN' };
+    const external = networks.find((network) => network.id === body.floatingip.floating_network_id);
+    const subnet = subnets.find((item) => item.id === body.floatingip.subnet_id);
+    if (!external?.['router:external'] || !subnet || subnet.network_id !== external.id
+      || body.floatingip.project_id !== projectId) throw notFound();
+    const address = '203.0.113.' + (20 + floatingips.length);
+    if (Number(address.split('.').at(-1)) > 250) throw conflict('No available IP addresses');
+    const f = { id: uid(), project_id: projectId, floating_ip_address: address,
+      floating_network_id: external.id, subnet_id: subnet.id, port_id: null, fixed_ip_address: null, status: 'DOWN' };
     const pid = body.floatingip.port_id;
     if (pid) {
       const port = ports.find((p) => p.id === pid);

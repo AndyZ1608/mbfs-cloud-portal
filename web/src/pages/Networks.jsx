@@ -38,7 +38,6 @@ export default function Networks() {
     catch (e) { toast(e.message, 'error'); }
   }
 
-  const extName = (id) => nets?.find((n) => n.id === id)?.name || id?.slice(0, 8);
   const shown = nets?.filter((network) => matchesResourceName(network, nameQuery));
 
   return (
@@ -90,7 +89,7 @@ export default function Networks() {
                 <tr key={r.id}>
                   <td><b>{r.name}</b></td>
                   <td><StatusBadge status={r.status} /></td>
-                  <td className="dim">{r.external_gateway_info ? extName(r.external_gateway_info.network_id) : '—'}</td>
+                  <td className="dim">{t(r.external_connectivity ? 'networks.externalEnabled' : 'networks.externalNotConfigured')}</td>
                   <td>
                     <ActionsMenu items={[
                       { label: t('networks.manageInterfaces'), onClick: () => setIfaceFor(r) },
@@ -108,7 +107,7 @@ export default function Networks() {
       {creating && <CreateNetwork routers={routers} onClose={() => setCreating(false)} onDone={() => { setCreating(false); load(); }} />}
       {editNetworkId && <NetworkEditModal networkId={editNetworkId} onClose={() => setEditNetworkId(null)}
         onDone={() => { setEditNetworkId(null); load(); }} />}
-      {creatingRouter && <CreateRouter nets={nets || []} onClose={() => setCreatingRouter(false)} onDone={() => { setCreatingRouter(false); load(); }} />}
+      {creatingRouter && <CreateRouter onClose={() => setCreatingRouter(false)} onDone={() => { setCreatingRouter(false); load(); }} />}
       {ifaceFor && <IfaceModal router={ifaceFor} nets={nets || []} onClose={() => setIfaceFor(null)} />}
     </>
   );
@@ -189,18 +188,18 @@ export function CreateNetwork({ routers = [], onClose, onDone, initialMode = 'is
   );
 }
 
-function CreateRouter({ nets, onClose, onDone }) {
+export function CreateRouter({ onClose, onDone }) {
   const { t } = useI18n();
-  const ext = nets.filter((n) => n['router:external']);
-  const [f, setF] = useState({ name: '', external_network_id: ext[0]?.id || '' });
+  const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
 
   async function submit() {
-    if (!f.name.trim()) return toast(t('networks.routerNameRequired'), 'error');
+    if (busy) return;
+    if (!name.trim()) return toast(t('networks.routerNameRequired'), 'error');
     setBusy(true);
     try {
-      await api('/routers', { method: 'POST', body: { name: f.name, external_network_id: f.external_network_id || undefined } });
-      toast(t('networks.routerCreated', { name: f.name }), 'ok');
+      await api('/routers', { method: 'POST', body: { name: name.trim() } });
+      toast(t('networks.routerCreated', { name: name.trim() }), 'ok');
       onDone();
     } catch (e) { toast(e.message, 'error'); setBusy(false); }
   }
@@ -209,13 +208,7 @@ function CreateRouter({ nets, onClose, onDone }) {
     <Modal title={t('networks.createRouter')} onClose={onClose}
       footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
         <button className="btn primary" onClick={submit} disabled={busy}>{t(busy ? 'instances.creating' : 'networks.createRouter')}</button></>}>
-      <Field label={t('networks.routerName')}><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} autoFocus /></Field>
-      <Field label={t('networks.externalGateway')} hint={t('networks.externalGatewayHint')}>
-        <select value={f.external_network_id} onChange={(e) => setF({ ...f, external_network_id: e.target.value })}>
-          <option value="">— {t('networks.notSet')} —</option>
-          {ext.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
-        </select>
-      </Field>
+      <Field label={t('networks.routerName')}><input value={name} onChange={(e) => setName(e.target.value)} autoFocus /></Field>
     </Modal>
   );
 }
