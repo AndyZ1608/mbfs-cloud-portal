@@ -47,7 +47,24 @@ export function normalizeBillingConfig(value = {}) {
 }
 
 export function normalizeMonitoringConfig(value = {}) {
-  return { enabled: value.enabled === true };
+  const enabled = value.enabled === true;
+  const baseUrl = String(value.base_url || '').trim().replace(/\/+$/, '');
+  const timeoutSeconds = Number(value.timeout_seconds ?? 15);
+  const errors = [];
+  if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 120) {
+    errors.push('monitoring.timeout_seconds must be between 1 and 120');
+  }
+  if (enabled && baseUrl) {
+    try {
+      const parsed = new URL(baseUrl);
+      if (!['http:', 'https:'].includes(parsed.protocol)) errors.push('monitoring.base_url must use http:// or https://');
+      if (parsed.username || parsed.password) errors.push('monitoring.base_url must not contain credentials');
+      if (parsed.search || parsed.hash) errors.push('monitoring.base_url must not contain a query string or fragment');
+    } catch {
+      errors.push('monitoring.base_url must be an absolute URL including http:// or https://');
+    }
+  }
+  return { enabled, baseUrl, timeoutMs: timeoutSeconds * 1000, errors };
 }
 
 export function loadApplicationConfig(filePath = process.env.CMP_CONFIG_FILE || path.join(__dirname, 'config', 'application.yml')) {
@@ -102,6 +119,7 @@ export function validateConfig() {
     errors.push('OS_INSECURE cannot be used with SSO because it disables process-wide TLS verification');
   }
   errors.push(...config.billing.errors);
+  errors.push(...config.monitoring.errors);
   if (errors.length) throw new Error(`Invalid configuration:\n- ${errors.join('\n- ')}`);
   return warnings;
 }

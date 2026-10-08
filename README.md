@@ -41,6 +41,7 @@ The portal supports Vietnamese (`vi`) and English (`en`). Vietnamese is the defa
 - [Architecture and module boundaries](./docs/ARCHITECTURE.md)
 - [Security model and operational requirements](./docs/SECURITY.md)
 - [External Billing integration](./docs/BILLING.md)
+- [Per-VM Monitoring integration](./docs/MONITORING.md)
 
 The API is intentionally a modular monolith. Route modules orchestrate use cases while `server/openstack.js` is the provider boundary. A second provider should be introduced behind a use-case/provider interface only when its behavior and capability differences are known.
 

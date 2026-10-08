@@ -12,15 +12,31 @@ import { loadVmMonitoring } from '../src/monitoring/provider.js';
 
 const source = (relative) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8');
 
-test('placeholder model has unavailable values, no invented metrics, and no provider calls', async () => {
+test('provider calls only the CMP-owned route for each range and never sends project ID or an admin key', async () => {
   const oldFetch = globalThis.fetch;
-  globalThis.fetch = () => { throw new Error('Monitoring must not call an admin API'); };
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify(emptyVmMonitoring()), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
   try {
-    const data = await loadVmMonitoring({ projectId: 'project-a', instanceId: 'vm-a', range: '1h' });
+    const signal = new AbortController().signal;
+    const data = await loadVmMonitoring({ projectId: 'project-a', instanceId: 'vm-a', range: '1h', signal });
     assert.deepEqual(data, emptyVmMonitoring());
     assert.ok(Object.values(data.summary).every((value) => value === null));
     assert.ok(Object.values(data.series).every((value) => Array.isArray(value) && value.length === 0));
     assert.equal(hasMonitoringData(data), false);
+    for (const range of MONITORING_RANGES.slice(1)) {
+      await loadVmMonitoring({ projectId: 'project-b', instanceId: 'vm-b', range });
+    }
+    assert.deepEqual(calls.map(({ url }) => url), [
+      '/api/servers/vm-a/monitoring?range=1h',
+      '/api/servers/vm-b/monitoring?range=6h',
+      '/api/servers/vm-b/monitoring?range=24h',
+      '/api/servers/vm-b/monitoring?range=7d',
+    ]);
+    assert.equal(calls[0].options.signal, signal);
+    assert.ok(calls.every(({ url, options }) => !url.includes('project_id') && !Object.hasOwn(options.headers, 'X-API-Key')));
   } finally { globalThis.fetch = oldFetch; }
   assert.notEqual(monitoringScopeKey('project-a', 'vm-a', '1h'), monitoringScopeKey('project-b', 'vm-a', '1h'));
   assert.notEqual(monitoringScopeKey('project-a', 'vm-a', '1h'), monitoringScopeKey('project-a', 'vm-b', '1h'));
@@ -93,6 +109,10 @@ test('loading and error are distinct from the no-data state', async () => {
     assert.match(error, /Unable to load monitoring data/);
     assert.match(error, /Retry/);
     assert.doesNotMatch(error, /monitoring-summary-card|No monitoring data is available/);
+    const unavailable = renderToStaticMarkup(React.createElement(LocaleProvider, null,
+      React.createElement(MonitoringView, { status: 'error', error: { code: 'monitoring_unavailable' }, data: null,
+        range: '1h', onRangeChange() {}, onRefresh() {} })));
+    assert.match(unavailable, /Monitoring service is currently unavailable/);
   } finally {
     if (priorStorage === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = priorStorage;
@@ -100,7 +120,7 @@ test('loading and error are distinct from the no-data state', async () => {
   }
 });
 
-test('range and refresh controls update locally without a provider request', async () => {
+test('range and refresh controls update the selected range and refresh callback', async () => {
   const vite = await createServer({ server: { middlewareMode: true, watch: null }, appType: 'custom' });
   try {
     const { TimeRangeSelector, MonitoringToolbar } = await vite.ssrLoadModule('/src/components/VmMonitoringTab.jsx');
@@ -147,6 +167,18 @@ test('future normalized points render without fabricating missing sections, and 
     const unknownHtml = renderToStaticMarkup(React.createElement(LocaleProvider, null,
       React.createElement(MonitoringView, { status: 'ready', data, range: '1h', onRangeChange() {}, onRefresh() {} })));
     assert.match(unknownHtml, /Unknown/);
+    data.series.cpuPercent = [
+      { timestamp: 1760000000000, value: 0 }, { timestamp: 1760000060000, value: 37.2 },
+      { timestamp: 1760000120000, value: null },
+      { timestamp: 1760000180000, value: 20 }, { timestamp: 1760000240000, value: 21 },
+    ];
+    const withGap = renderToStaticMarkup(React.createElement(LocaleProvider, null,
+      React.createElement(MonitoringView, { status: 'ready', data, range: '1h', onRangeChange() {}, onRefresh() {} })));
+    assert.equal((withGap.match(/<polyline/g) || []).length, 3, 'null history sample must split the CPU line');
+    data.historyUnsupported = true;
+    assert.match(renderToStaticMarkup(React.createElement(LocaleProvider, null,
+      React.createElement(MonitoringView, { status: 'ready', data, range: '7d', onRangeChange() {}, onRefresh() {} }))),
+    /Seven-day history is not available/);
     const long = Array.from({ length: 10_080 }, (_unused, index) => ({ timestamp: index * 60_000, value: index % 100 }));
     const sampled = chartPoints(long);
     assert.ok(sampled.length <= 600);
@@ -159,12 +191,13 @@ test('future normalized points render without fabricating missing sections, and 
   }
 });
 
-test('placeholder boundary does not expose the admin Monitoring API, PromQL, or credentials', () => {
+test('browser boundary does not expose admin Monitoring API, PromQL, or credentials', () => {
   const code = [
     source('../src/monitoring/provider.js'), source('../src/monitoring/useVmMonitoring.js'),
     source('../src/components/VmMonitoringTab.jsx'),
   ].join('\n');
-  assert.doesNotMatch(code, /X-API-Key|api\/v1\/(?:query|query_range|status|targets|alerts)|100\.64\.64\.181|9090|3000|fetch\(|api\(/);
+  assert.doesNotMatch(code, /X-API-Key|api\/v1\/|100\.64\.64\.181|9090|3000|MONITORING_API_KEY/);
+  assert.match(code, /api\(`\/servers\/\$\{encodeURIComponent\(instanceId\)\}\/monitoring/);
   assert.doesNotMatch(source('../src/pages/Instances.jsx'), /VmMonitoringTab|loadVmMonitoring/);
   const css = source('../src/styles.css');
   assert.match(css, /\.monitoring-summary-grid \{ display: grid; grid-template-columns: repeat\(5, minmax\(0, 1fr\)\)/);

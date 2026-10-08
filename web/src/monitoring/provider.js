@@ -1,7 +1,7 @@
-import { emptyVmMonitoring } from './model.js';
+import { api } from '../api.js';
+import { MONITORING_RANGES } from './model.js';
 
-// TODO: Replace this no-data boundary only after a tenant-safe Monitoring API
-// exposes metrics by Nova instance UUID and validates the current project.
-export async function loadVmMonitoring(_scope) {
-  return emptyVmMonitoring();
+export async function loadVmMonitoring({ instanceId, range, signal }) {
+  if (!MONITORING_RANGES.includes(range)) throw new Error('Invalid Monitoring range');
+  return api(`/servers/${encodeURIComponent(instanceId)}/monitoring?range=${encodeURIComponent(range)}`, { signal });
 }

@@ -36,13 +36,23 @@ function MetricSummaryCard({ title, Icon, value, detail, pairs }) {
 }
 
 function MetricChart({ title, series, locale, t }) {
-  const lines = series.map((item) => ({ ...item, points: chartPoints(item.points) })).filter((item) => item.points.length);
+  const segments = (items) => {
+    const groups = [];
+    let current = [];
+    for (const point of Array.isArray(items) ? items : []) {
+      if (Number.isFinite(point?.timestamp) && Number.isFinite(point?.value)) current.push(point);
+      else if (current.length) { groups.push(chartPoints(current)); current = []; }
+    }
+    if (current.length) groups.push(chartPoints(current));
+    return groups;
+  };
+  const lines = series.map((item) => ({ ...item, segments: segments(item.points) })).filter((item) => item.segments.length);
   if (!lines.length) return <section className="monitoring-chart-card" aria-label={title}>
     <h4>{title}</h4><div className="monitoring-chart-empty"><Activity size={22} aria-hidden="true" />
       <span>{t('monitoring.chartEmpty')}</span></div>
   </section>;
 
-  const points = lines.flatMap((line) => line.points);
+  const points = lines.flatMap((line) => line.segments.flat());
   const first = Math.min(...points.map((point) => point.timestamp));
   const last = Math.max(...points.map((point) => point.timestamp));
   const maximum = Math.max(1, ...points.map((point) => point.value));
@@ -58,9 +68,11 @@ function MetricChart({ title, series, locale, t }) {
     <svg className="monitoring-chart" viewBox="0 0 660 186" role="img" aria-label={title} preserveAspectRatio="none">
       {[30, 86, 142].map((level) => <line key={level} x1="38" x2="622" y1={level} y2={level} className="monitoring-chart-grid" />)}
       {lines.map((line) => <g key={line.key}>
-        <polyline fill="none" stroke={line.color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"
-          points={line.points.map((point) => `${x(point.timestamp)},${y(point.value)}`).join(' ')} />
-        {line.points.length === 1 && <circle cx={x(line.points[0].timestamp)} cy={y(line.points[0].value)} r="4" fill={line.color} />}
+        {line.segments.map((segment, index) => <g key={index}>
+          {segment.length > 1 && <polyline fill="none" stroke={line.color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"
+            points={segment.map((point) => `${x(point.timestamp)},${y(point.value)}`).join(' ')} />}
+          {segment.length === 1 && <circle cx={x(segment[0].timestamp)} cy={y(segment[0].value)} r="4" fill={line.color} />}
+        </g>)}
       </g>)}
       <text x="38" y="174" className="monitoring-chart-axis">{time(first)}</text>
       <text x="622" y="174" textAnchor="end" className="monitoring-chart-axis">{time(last)}</text>
@@ -68,7 +80,7 @@ function MetricChart({ title, series, locale, t }) {
   </section>;
 }
 
-export function MonitoringView({ status, data, range, onRangeChange, onRefresh }) {
+export function MonitoringView({ status, data, error, range, onRangeChange, onRefresh }) {
   const { t, locale } = useI18n();
   const numberLocale = intlLocale(locale);
   const toolbar = <MonitoringToolbar range={range} onRangeChange={onRangeChange}
@@ -77,7 +89,8 @@ export function MonitoringView({ status, data, range, onRangeChange, onRefresh }
   if (status === 'loading') return <div className="vm-monitoring">{toolbar}
     <div className="monitoring-loading" role="status">{t('monitoring.loading')}</div></div>;
   if (status === 'error') return <div className="vm-monitoring">{toolbar}
-    <div className="vm-detail-error" role="alert">{t('monitoring.loadError')}
+    <div className="vm-detail-error" role="alert">{['monitoring_unavailable', 'monitoring_timeout'].includes(error?.code)
+      ? t('monitoring.serviceUnavailable') : t('monitoring.loadError')}
       <button className="btn ghost sm" type="button" onClick={onRefresh}>{t('common.retry')}</button></div></div>;
 
   const metrics = data || emptyVmMonitoring();
@@ -110,6 +123,8 @@ export function MonitoringView({ status, data, range, onRangeChange, onRefresh }
 
   return <div className="vm-monitoring">{toolbar}
     {noData && <p className="monitoring-notice" role="status">{t('monitoring.noData')}</p>}
+    {metrics.historyUnsupported && <p className="monitoring-notice" role="status">{t('monitoring.historyUnsupported')}</p>}
+    {metrics.partial && <p className="monitoring-notice" role="status">{t('monitoring.historyPartial')}</p>}
     <div className="monitoring-summary-grid">
       <MetricSummaryCard title={t('monitoring.cpuUsage')} Icon={Cpu} value={formatPercent(summary.cpuPercent, numberLocale)} />
       <MetricSummaryCard title={t('monitoring.memoryUsage')} Icon={MemoryStick}
@@ -133,6 +148,6 @@ export function MonitoringView({ status, data, range, onRangeChange, onRefresh }
 export default function VmMonitoringTab({ projectId, instanceId }) {
   const [range, setRange] = useState('1h');
   const monitoring = useVmMonitoring({ projectId, instanceId, range });
-  return <MonitoringView status={monitoring.status} data={monitoring.data} range={range}
+  return <MonitoringView status={monitoring.status} data={monitoring.data} error={monitoring.error} range={range}
     onRangeChange={setRange} onRefresh={monitoring.refresh} />;
 }

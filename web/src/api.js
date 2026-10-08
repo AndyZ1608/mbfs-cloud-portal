@@ -46,8 +46,8 @@ export function apiErrorMessage(data, status) {
     : text('errors.requestFailed');
 }
 
-export async function api(path, { method = 'GET', body } = {}) {
-  const opts = { method, credentials: 'same-origin', headers: {} };
+export async function api(path, { method = 'GET', body, signal } = {}) {
+  const opts = { method, credentials: 'same-origin', headers: {}, signal };
   if (!['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase())) opts.headers['X-CMP-Request'] = '1';
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';

@@ -13,6 +13,7 @@ import networkRoutes from './routes/network.js';
 import vipRoutes from './routes/vip.js';
 import storageRoutes from './routes/storage.js';
 import billingRoutes from './routes/billing.js';
+import vmMonitoringRoutes from './routes/vmMonitoring.js';
 import lbRoutes from './routes/lb.js';
 import backupRoutes from './routes/backup.js';
 import marketplaceRoutes from './routes/marketplace.js';
@@ -35,7 +36,7 @@ import { MOCK } from './openstack.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const protectedRoutes = [
-  accountRoutes, classificationRoutes, computeRoutes, networkRoutes, vipRoutes, storageRoutes, billingRoutes, lbRoutes,
+  accountRoutes, classificationRoutes, computeRoutes, networkRoutes, vipRoutes, storageRoutes, billingRoutes, vmMonitoringRoutes, lbRoutes,
   backupRoutes, marketplaceRoutes, powerRoutes, optimizeRoutes, monitorRoutes,
   objectRoutes, iacRoutes, notifyRoutes, k8sRoutes, adminRoutes,
 ];

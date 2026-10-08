@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import { config, normalizeMonitoringConfig } from '../config.js';
 
 test('Monitoring capability is independent of external metric availability', () => {
-  assert.deepEqual(normalizeMonitoringConfig({ enabled: true }), { enabled: true });
-  assert.deepEqual(normalizeMonitoringConfig({ enabled: false }), { enabled: false });
-  assert.deepEqual(normalizeMonitoringConfig({}), { enabled: false });
+  assert.equal(normalizeMonitoringConfig({ enabled: true }).enabled, true);
+  assert.equal(normalizeMonitoringConfig({ enabled: false }).enabled, false);
+  assert.equal(normalizeMonitoringConfig({}).enabled, false);
   assert.equal(config.monitoring.enabled, true);
+  assert.equal(config.monitoring.baseUrl, 'http://100.64.64.181:8080');
+  assert.equal(config.monitoring.timeoutMs, 15000);
 });
 
 test('public capability exposes only Monitoring enabled state, not infrastructure details', async () => {

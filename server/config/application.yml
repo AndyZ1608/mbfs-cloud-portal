@@ -10,7 +10,9 @@ billing:
 
   timeout_seconds: 10
 
-# UI capability only. Per-VM data remains unavailable until a tenant-safe
-# external Monitoring API is implemented; no admin API is configured here.
+# Read-only, CMP-backend-only Monitoring integration. The admin API key is
+# supplied separately through MONITORING_API_KEY; never put it in this file.
 monitoring:
   enabled: true
+  base_url: "http://100.64.64.181:8080"
+  timeout_seconds: 15
