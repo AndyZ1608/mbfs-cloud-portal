@@ -670,6 +670,17 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 
 /* ===== SSO ===== */
 .sso-btn { text-decoration: none; justify-content: center; margin-bottom: 4px; }
+.sso-onboarding-page { min-height: 100vh; padding: 24px; display: flex; flex-direction: column; align-items: center; background: var(--bg, #f4f7fb); }
+.sso-onboarding-top { width: min(100%, 560px); display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-bottom: 28px; }
+.sso-onboarding-card { width: min(100%, 560px); padding: clamp(24px, 5vw, 42px); border-radius: 20px; background: var(--surface, #fff); box-shadow: 0 20px 55px rgba(15, 36, 68, .12); }
+.sso-onboarding-logo { display: block; max-width: 185px; max-height: 58px; object-fit: contain; margin-bottom: 24px; }
+.sso-onboarding-card h1 { font-size: clamp(1.35rem, 3vw, 1.8rem); line-height: 1.25; margin: 0 0 16px; }
+.sso-onboarding-profile { font-size: 1.08rem; font-weight: 650; margin: 0 0 4px; overflow-wrap: anywhere; }
+.sso-onboarding-muted { color: var(--muted, #64748b); line-height: 1.5; overflow-wrap: anywhere; }
+.sso-onboarding-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.sso-onboarding-form { display: grid; gap: 12px; margin-top: 20px; }
+.sso-onboarding-form .field { min-width: 0; }
+@media (max-width: 480px) { .sso-onboarding-page { padding: 16px; } .sso-onboarding-actions .btn { width: 100%; } }
 .login-or { display: flex; align-items: center; gap: 10px; margin: 16px 0 12px; color: var(--dim); font-size: 12px; }
 .login-or::before, .login-or::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 .sso-tag {

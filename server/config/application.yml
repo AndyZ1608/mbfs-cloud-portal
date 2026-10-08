@@ -1,12 +1,11 @@
 # CMP application/service integrations.
 billing:
-  # Enable after replacing the placeholder address below.
-  enabled: false
+  # Billing is a first-class portal feature. Disable explicitly to hide it.
+  enabled: true
 
   # Billing service internal REST API.
-  # Replace x.x.x.x:port with the Billing VM IP and API port.
-  # Example:
-  # base_url: "http://100.64.64.150:8080"
-  base_url: "http://x.x.x.x:port"
+  # Set to the real Billing service URL before using Billing data.
+  # An empty URL keeps the menu visible and shows an unavailable state.
+  base_url: ""
 
   timeout_seconds: 10

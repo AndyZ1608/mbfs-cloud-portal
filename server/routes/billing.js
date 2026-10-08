@@ -3,29 +3,33 @@ import { config } from '../config.js';
 import { createBillingService } from '../billing/service.js';
 import { BillingError } from '../billing/errors.js';
 
-const router = Router();
-const billing = createBillingService();
-
-function service() {
-  if (!config.billing.enabled || !billing) {
-    throw new BillingError(503, 'billing_disabled', 'Tích hợp Billing chưa được bật');
+export function createBillingRouter({ billingConfig = config.billing, billingService = createBillingService(billingConfig) } = {}) {
+  const router = Router();
+  function service() {
+    if (!billingConfig.enabled) {
+      throw new BillingError(503, 'billing_disabled', 'Tích hợp Billing chưa được bật');
+    }
+    if (!billingService) {
+      throw new BillingError(503, 'billing_unavailable', 'Dịch vụ Billing hiện không khả dụng');
+    }
+    return billingService;
   }
-  return billing;
+
+  router.get('/billing', async (req, res, next) => {
+    try { res.json(await service().summary(req.session.os, req.id)); }
+    catch (error) { next(error); }
+  });
+
+  router.get('/billing/instances', async (req, res, next) => {
+    try { res.json(await service().instances(req.session.os, req.id)); }
+    catch (error) { next(error); }
+  });
+
+  router.get('/billing/instances/:instanceId', async (req, res, next) => {
+    try { res.json(await service().instance(req.session.os, req.params.instanceId, req.id)); }
+    catch (error) { next(error); }
+  });
+  return router;
 }
 
-router.get('/billing', async (req, res, next) => {
-  try { res.json(await service().summary(req.session.os, req.id)); }
-  catch (error) { next(error); }
-});
-
-router.get('/billing/instances', async (req, res, next) => {
-  try { res.json(await service().instances(req.session.os, req.id)); }
-  catch (error) { next(error); }
-});
-
-router.get('/billing/instances/:instanceId', async (req, res, next) => {
-  try { res.json(await service().instance(req.session.os, req.params.instanceId, req.id)); }
-  catch (error) { next(error); }
-});
-
-export default router;
+export default createBillingRouter();

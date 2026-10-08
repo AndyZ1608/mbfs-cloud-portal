@@ -10,20 +10,13 @@ Edit `server/config/application.yml`:
 billing:
   enabled: true
 
-  # Billing internal REST API.
-  # Format:
-  #   http://x.x.x.x:port
-  #
-  # Example:
-  #   http://100.64.64.150:8080
-  #
-  # Replace the example IP with the actual Billing VM address.
-  base_url: "http://x.x.x.x:port"
+  # Billing internal REST API; set the actual URL reachable by CMP.
+  base_url: ""
 
   timeout_seconds: 10
 ```
 
-The committed configuration keeps `enabled: false` so a fresh installation does not call a placeholder host. Set a real absolute HTTP or HTTPS URL, then enable the integration. Trailing slashes are normalized. URLs without a protocol, URLs containing credentials, and timeouts outside 1–120 seconds are rejected at startup.
+The committed configuration enables Billing as a standalone menu item. With an empty `base_url`, `/billing` shows a controlled unavailable state without contacting a placeholder host. Set a real absolute HTTP or HTTPS URL to load data; set `enabled: false` to hide the feature intentionally. Trailing slashes are normalized. Non-empty URLs without a protocol, URLs containing credentials, and timeouts outside 1–120 seconds are rejected at startup.
 
 Set `CMP_CONFIG_FILE` to use a different YAML file. Docker Compose mounts `server/config/application.yml` read-only at `/app/config/application.yml`, so the endpoint can be changed without modifying application source code.
 
@@ -42,7 +35,7 @@ Browser
 
 CMP never sends a browser-controlled or server-calculated `project_id` to select Billing scope. It does not fall back to an admin, service-account, unscoped, or another user's token.
 
-Local Keystone login and Keystone WebSSO provide a user project-scoped token and support Billing. The legacy Keycloak bridge mode uses an OpenStack service-account token internally; CMP therefore rejects Billing access in that mode instead of forwarding privileged credentials. Use Keystone WebSSO federation for SSO users who need Billing.
+Local Keystone login and Keystone WebSSO provide a user project-scoped token and support Billing. Phase 1 Keycloak OIDC binding does not issue a Keystone end-user token, so its onboarding/ready session cannot access Billing or other OpenStack resource APIs. Persisted legacy bridge sessions with service tokens are rejected. Use local Keystone login until Phase 2 federation is available.
 
 ## Endpoints
 

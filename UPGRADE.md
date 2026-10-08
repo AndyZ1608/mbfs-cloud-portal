@@ -6,7 +6,7 @@
 - Configure the separately deployed Billing service in `server/config/application.yml`; Docker Compose mounts this file read-only.
 - The old `/usage` page redirects to `/billing`. External clients should use `GET /api/billing`, `/api/billing/instances`, and `/api/billing/instances/:instanceId`.
 - CMP forwards only the current project-scoped Keystone token. Billing validates it and determines `project.id`.
-- Legacy Keycloak bridge-SSO sessions cannot access Billing because they hold a service-account token; migrate those users to Keystone WebSSO federation.
+- Current Phase 1 Keycloak OIDC sessions stop at verified identity binding and cannot access Billing or other OpenStack resources without a real Keystone user session. Persisted legacy bridge-SSO service-token sessions are rejected. Local Keystone login remains available until federation is configured.
 
 ## v2.4 security/architecture refactor
 

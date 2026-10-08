@@ -1,118 +1,186 @@
-// sso.js — Luồng đăng nhập SSO Keycloak (chế độ cầu nối)
-// Keycloak xác thực NGƯỜI DÙNG; quyền gọi OpenStack dùng tài khoản dịch vụ
-// OS_TASK_* (Keystone chưa federation). Project khả dụng = nhóm Keycloak
-// (os-<project>) giao với project mà tài khoản dịch vụ nhìn thấy.
 import { Router } from 'express';
+import { createHash } from 'node:crypto';
 import { OSError } from '../openstack.js';
-import { SSO, ssoConfigError, newPkce, authorizeUrl, exchangeCode, verifyIdToken, logoutUrl, groupsFrom, projectNamesFrom } from '../oidc.js';
-import { getServiceSession, getServiceProjects, svcConfigured } from '../svcauth.js';
+import { SSO, ssoConfigError, beginOidcLogin, completeOidcLogin } from '../oidc.js';
+import { findBySsoIdentity, findByKeystoneUserId, createBinding,
+  updateProfileSnapshot, claimOnboarding, releaseOnboarding } from '../ssoBindings.js';
+import { accountServiceConfigured, provisioningEnabled, getKeystoneUserById,
+  proveKeystoneOwnership, createKeystoneUser, deleteNewKeystoneUser } from '../keystoneSsoAccounts.js';
+import { destroyCmpSession } from './auth.js';
 import { record } from '../audit.js';
 
 const router = Router();
-
-const enabled = () => SSO.enabled && !ssoConfigError();
-
-router.get('/auth/sso/config', (req, res) => {
-  res.json({
-    enabled: enabled(),
-    label: SSO.buttonLabel,
-    allowLocal: SSO.allowLocal,
-    error: SSO.enabled ? ssoConfigError() : null,
-  });
+const enabled = () => SSO.enabled && !ssoConfigError() && accountServiceConfigured();
+const regenerate = (req) => new Promise((resolve, reject) => req.session.regenerate((error) => error ? reject(error) : resolve()));
+const subjectHash = (identity) => createHash('sha256').update(`${identity.issuer}|${identity.subject}`).digest('hex').slice(0, 16);
+const audit = (req, action, identity, result, userId = null) => record({
+  action, result, provider: 'keycloak', source: 'cmp', request_id: req.id,
+  subject_hash: identity ? subjectHash(identity) : null,
+  keystone_user_id: userId, user: null, project: null,
 });
 
+function safeSession(sso) {
+  return {
+    auth_mode: 'sso', auth_state: sso.state, ssoVerified: true,
+    bindingStatus: sso.state === 'SSO_VERIFIED_UNBOUND' ? 'unbound'
+      : sso.state === 'SSO_VERIFIED_BOUND' ? 'bound'
+        : sso.state === 'SSO_BOUND_USER_MISSING' ? 'missing' : 'disabled',
+    profile: { displayName: sso.identity.displayName, username: sso.identity.username,
+      email: sso.identity.email, emailVerified: sso.identity.emailVerified },
+    ...(sso.cloudUser ? { cloudUser: { name: sso.cloudUser.name, enabled: sso.cloudUser.enabled } } : {}),
+    provisioningEnabled,
+  };
+}
+export { safeSession };
+
+async function boundState(identity) {
+  const binding = findBySsoIdentity(identity);
+  if (!binding) return { state: 'SSO_VERIFIED_UNBOUND', identity };
+  updateProfileSnapshot(identity);
+  const user = await getKeystoneUserById(binding.keystone_user_id);
+  if (!user) return { state: 'SSO_BOUND_USER_MISSING', identity };
+  if (user.enabled === false) return { state: 'SSO_BOUND_USER_DISABLED', identity,
+    cloudUser: { name: user.name, enabled: false } };
+  return { state: 'SSO_VERIFIED_BOUND', identity,
+    cloudUser: { name: user.name, enabled: true } };
+}
+
+router.get('/auth/sso/config', (_req, res) => res.json({
+  enabled: enabled(), label: SSO.buttonLabel, allowLocal: true,
+  provisioningEnabled,
+  error: SSO.enabled ? ssoConfigError() || (!accountServiceConfigured() ? 'Missing SSO_KEYSTONE_USERNAME, SSO_KEYSTONE_PASSWORD' : null) : null,
+}));
+
 router.get('/auth/sso/login', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Referrer-Policy', 'no-referrer');
   try {
-    if (!enabled()) throw new Error(ssoConfigError() || 'SSO chưa được bật');
-    if (!svcConfigured()) throw new Error('SSO cần tài khoản dịch vụ OS_TASK_USERNAME/OS_TASK_PASSWORD để gọi OpenStack');
-    const pk = newPkce();
-    req.session.pkce = { verifier: pk.verifier, state: pk.state, nonce: pk.nonce, at: Date.now() };
-    res.redirect(await authorizeUrl(pk));
-  } catch (e) {
-    res.redirect('/login?sso_error=' + encodeURIComponent(e.message));
+    if (!enabled()) return res.redirect('/login?sso_error=unavailable');
+    await regenerate(req);
+    const { url, transaction } = await beginOidcLogin();
+    req.session.oidcTransaction = transaction;
+    res.redirect(url);
+  } catch {
+    audit(req, 'auth.sso.login.failed', null, 'failure');
+    res.redirect('/login?sso_error=unavailable');
   }
 });
 
 router.get('/auth/sso/callback', async (req, res) => {
-  const fail = (msg, user = null) => {
-    record({ user, project: null, method: 'GET', path: '/auth/sso/callback', status: 403, ms: 0 });
-    res.redirect('/login?sso_error=' + encodeURIComponent(msg));
-  };
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  let identity;
   try {
-    if (!enabled()) return fail('SSO chưa được bật');
-    const { code, state, error, error_description } = req.query;
-    if (error) return fail(`Keycloak trả lỗi: ${error_description || error}`);
-    const pk = req.session.pkce;
-    if (!pk || !state || state !== pk.state) return fail('State không khớp — thử đăng nhập lại');
-    if (Date.now() - pk.at > 10 * 60000) return fail('Phiên đăng nhập SSO quá hạn — thử lại');
-    delete req.session.pkce;
-    if (!code) return fail('Thiếu authorization code');
-
-    const tok = await exchangeCode(code, pk.verifier);
-    const claims = await verifyIdToken(tok.id_token, pk.nonce);
-    const username = claims.preferred_username || claims.email || claims.sub;
-
-    // Ánh xạ nhóm Keycloak → project OpenStack
-    const groups = groupsFrom(claims);
-    const wanted = projectNamesFrom(groups);
-    if (!wanted.length) {
-      return fail(`Tài khoản "${username}" chưa thuộc nhóm project nào trên Keycloak (cần nhóm dạng ${SSO.projectPrefix}<tên-project>)`, username);
+    if (!enabled()) throw new Error('SSO unavailable');
+    const transaction = req.session.oidcTransaction;
+    delete req.session.oidcTransaction; // one-time even for invalid responses
+    if (!transaction || typeof req.query.code !== 'string' || typeof req.query.state !== 'string' || req.query.error) {
+      throw new Error('Invalid authorization response');
     }
-    const all = await getServiceProjects();
-    const allowed = all.filter((p) => wanted.includes(p.name));
-    if (!allowed.length) {
-      return fail(`Không có project nào khớp nhóm Keycloak (${wanted.join(', ')}). Kiểm tra tài khoản dịch vụ đã được gán vào các project đó chưa.`, username);
+    identity = await completeOidcLogin(new URL(req.originalUrl, 'http://localhost').search, transaction);
+    const sso = await boundState(identity);
+    await regenerate(req); // rotate anonymous pre-auth session ID
+    req.session.sso = sso; // no Keycloak or Keystone tokens retained
+    audit(req, 'auth.sso.login.success', identity, 'success', findBySsoIdentity(identity)?.keystone_user_id);
+    if (sso.state === 'SSO_BOUND_USER_MISSING' || sso.state === 'SSO_BOUND_USER_DISABLED') {
+      audit(req, 'auth.sso.bound_user.invalid', identity, 'failure');
     }
-
-    const target = allowed[0];
-    const svc = await getServiceSession(target.id);
-    const isAdmin = SSO.adminGroup && groups.includes(SSO.adminGroup);
-
-    await new Promise((resolve, reject) => req.session.regenerate((error) => error ? reject(error) : resolve()));
-    req.session.os = {
-      token: svc.token,
-      expiresAt: null,
-      user: { id: claims.sub, name: username, domain: { name: 'keycloak' } },
-      project: svc.project,
-      projects: allowed.map((p) => ({ id: p.id, name: p.name })),
-      catalog: svc.catalog,
-      // Quyền admin portal do nhóm Keycloak quyết định; API admin vẫn cần tài
-      // khoản dịch vụ có role admin thật trong Keystone.
-      roles: isAdmin ? ['admin', 'member'] : ['member'],
-      auth_mode: 'sso',
-      token_source: 'service',
-      sso: { idToken: tok.id_token, groups, email: claims.email || null, name: claims.name || null },
-    };
-    record({ user: username, project: { id: svc.project.id, name: svc.project.name }, method: 'POST', path: '/auth/sso/login', status: 200, ms: 0 });
-    console.log(`[sso] LOGIN user=${username} groups=[${groups.join(',')}] project=${svc.project.name} admin=${!!isAdmin}`);
-    res.redirect('/');
-  } catch (e) {
-    console.warn('[sso] callback lỗi:', e.message);
-    fail(e.message);
+    res.redirect('/sso/onboarding');
+  } catch {
+    audit(req, 'auth.sso.login.failed', identity, 'failure');
+    res.redirect('/login?sso_error=failed');
   }
 });
 
-// Đăng xuất khỏi cả Keycloak (RP-initiated logout)
-router.post('/auth/sso/logout', async (req, res) => {
-  const idToken = req.session?.os?.sso?.idToken;
-  const url = idToken ? await logoutUrl(idToken) : null;
-  req.session.destroy(() => res.json({ ok: true, redirect: url }));
+function requireUnbound(req, _res, next) {
+  if (!req.session.sso?.identity) return next(new OSError(401, 'SSO sign-in required', 'authentication_required'));
+  if (req.session.sso.state !== 'SSO_VERIFIED_UNBOUND') {
+    return next(new OSError(409, 'SSO identity is not awaiting onboarding', 'sso_not_unbound'));
+  }
+  next();
+}
+
+router.post('/auth/sso/link-existing', requireUnbound, async (req, res, next) => {
+  const identity = req.session.sso.identity;
+  try {
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) ||
+      Object.keys(req.body).some((field) => !['username', 'password', 'domain'].includes(field))) {
+      throw new OSError(400, 'Invalid onboarding input', 'sso_invalid_input');
+    }
+    const { username, password, domain } = req.body || {};
+    if (typeof username !== 'string' || !username.trim() || username.length > 128 ||
+      typeof password !== 'string' || !password || password.length > 1024 ||
+      (domain !== undefined && (typeof domain !== 'string' || domain.length > 128))) {
+      throw new OSError(400, 'Cloud username and password are required', 'sso_ownership_failed');
+    }
+    const userId = await proveKeystoneOwnership(username.trim(), password,
+      typeof domain === 'string' && domain.trim() ? domain.trim() : process.env.OS_DEFAULT_DOMAIN || 'Default');
+    const existing = findBySsoIdentity(identity);
+    if (existing) throw new OSError(409, 'SSO identity is already linked', 'sso_already_bound');
+    if (findByKeystoneUserId(userId)) throw new OSError(409, 'Cloud account is already linked', 'sso_binding_collision');
+    const user = await getKeystoneUserById(userId);
+    if (!user) throw new OSError(404, 'Cloud account no longer exists', 'sso_bound_user_missing');
+    if (user.enabled === false) throw new OSError(403, 'Cloud account is disabled', 'sso_bound_user_disabled');
+    if (!createBinding(identity, userId)) throw new OSError(409, 'Cloud account is already linked', 'sso_binding_collision');
+    req.session.sso = { state: 'SSO_VERIFIED_BOUND', identity, cloudUser: { name: user.name, enabled: true } };
+    audit(req, 'identity.sso.binding.linked', identity, 'success', userId);
+    res.json(safeSession(req.session.sso));
+  } catch (error) {
+    audit(req, 'identity.sso.binding.linked', identity, 'failure');
+    next(error);
+  }
 });
 
-// Đổi project cho phiên SSO (không có unscoped token của người dùng)
-router.post('/auth/sso/switch-project', async (req, res, next) => {
+router.post('/auth/sso/create-cloud-account', requireUnbound, async (req, res, next) => {
+  const identity = req.session.sso.identity;
+  if (!provisioningEnabled) return next(new OSError(403, 'Cloud account creation is disabled', 'sso_provision_disabled'));
+  let attempt;
+  let createdUser = null;
+  let releaseClaim = true;
   try {
-    const sess = req.session.os;
-    if (!sess || sess.auth_mode !== 'sso') throw new OSError(400, 'Phiên không phải SSO');
-    const target = sess.projects.find((p) => p.id === req.body?.projectId);
-    if (!target) throw new OSError(403, 'Project không nằm trong nhóm Keycloak của bạn');
-    const svc = await getServiceSession(target.id);
-    sess.token = svc.token;
-    sess.project = svc.project;
-    sess.catalog = svc.catalog;
-    console.log(`[sso] SWITCH user=${sess.user.name} -> project=${svc.project.name}`);
-    res.json({ project: svc.project });
-  } catch (e) { next(e); }
+    if (req.body && (typeof req.body !== 'object' || Array.isArray(req.body) || Object.keys(req.body).length)) {
+      throw new OSError(400, 'Invalid onboarding input', 'sso_invalid_input');
+    }
+    attempt = claimOnboarding(identity);
+    if (!attempt) throw new OSError(409, 'Cloud account creation is already in progress', 'sso_onboarding_in_progress');
+    if (findBySsoIdentity(identity)) throw new OSError(409, 'SSO identity is already linked', 'sso_already_bound');
+    createdUser = await createKeystoneUser(identity.username, identity.emailVerified ? identity.email : null);
+    if (!createBinding(identity, createdUser.id)) throw new OSError(409, 'SSO identity is already linked', 'sso_binding_collision');
+    req.session.sso = { state: 'SSO_VERIFIED_BOUND', identity,
+      cloudUser: { name: createdUser.name, enabled: true } };
+    audit(req, 'identity.sso.provision.created', identity, 'success', createdUser.id);
+    res.json(safeSession(req.session.sso));
+  } catch (error) {
+    if (error.provisioningOutcomeUnknown) {
+      releaseClaim = false;
+      console.error(`[sso] provisioning outcome unknown request_id=${req.id}; operator reconciliation required`);
+    }
+    if (createdUser) {
+      try {
+        // Never delete a newly created user if the DB cannot establish whether
+        // it became bound. Retain the claim for operator reconciliation.
+        if (!findByKeystoneUserId(createdUser.id)) await deleteNewKeystoneUser(createdUser.id);
+      } catch {
+        releaseClaim = false;
+        console.error(`[sso] provisioning cleanup uncertain request_id=${req.id} keystone_user_id=${createdUser.id}`);
+      }
+    }
+    audit(req, 'identity.sso.provision.created', identity, 'failure', createdUser?.id);
+    next(error);
+  } finally {
+    if (attempt && releaseClaim) {
+      try { releaseOnboarding(identity, attempt); }
+      catch { console.error(`[sso] onboarding claim release failed request_id=${req.id}`); }
+    }
+  }
+});
+
+router.post('/auth/sso/logout', async (req, res, next) => {
+  try {
+    if (req.session.sso?.identity) audit(req, 'auth.sso.logout', req.session.sso.identity, 'success');
+    await destroyCmpSession(req, res);
+    res.json({ ok: true });
+  } catch (error) { next(error); }
 });
 
 export default router;

@@ -97,16 +97,15 @@ request từ trình duyệt hay màn hình người dùng.
 ### Billing Integration
 
 Billing chạy như dịch vụ độc lập. CMP không đọc database Billing và không tính giá.
-Sửa `server/config/application.yml`, thay địa chỉ mẫu bằng địa chỉ Billing VM:
+Menu Billing được bật sẵn; cấu hình `base_url` trong `server/config/application.yml`
+bằng địa chỉ thực của Billing service để tải dữ liệu:
 
 ```yaml
 billing:
   enabled: true
 
-  # Billing internal REST API.
-  # Example:
-  # base_url: "http://100.64.64.150:8080"
-  base_url: "http://x.x.x.x:port"
+  # Billing internal REST API; replace with the actual reachable URL.
+  base_url: ""
 
   timeout_seconds: 10
 ```
@@ -114,6 +113,8 @@ billing:
 CMP chuyển tiếp Keystone token đang scope theo project qua `X-Auth-Token`.
 Billing xác thực token với Keystone và tự lấy `project.id`; CMP không gửi
 `project_id` để chọn dữ liệu. Xem [docs/BILLING.md](docs/BILLING.md).
+Khi `base_url` chưa được cấu hình, menu vẫn hiển thị và trang báo dịch vụ chưa khả dụng.
+Đặt `enabled: false` chỉ khi muốn tắt hẳn tính năng.
 
 ## 3. Reverse proxy HTTPS (khuyến nghị: cloud.mbfs.vn)
 
@@ -285,24 +286,13 @@ yêu cầu flavor ≥ 2 vCPU / 4 GB và Ubuntu cloud image.
 Role đọc từ token Keystone của chính người đăng nhập — không cần cấu hình thêm.
 Đổi role trên project nào thì phải đăng nhập/switch lại project đó mới nhận.
 
-## SSO Keycloak (chế độ cầu nối)
+## SSO Keycloak — Phase 1 identity binding
 
-Người dùng bấm "Đăng nhập bằng SSO", xác thực trên Keycloak (Authorization Code
-+ PKCE, ID token RS256 verify qua JWKS), portal ánh xạ **nhóm Keycloak → project
-OpenStack** và nhóm quản trị → menu Quản trị cụm. Đăng xuất kết thúc cả phiên
-Keycloak. Nhật ký hoạt động ghi **tên người thật** từ Keycloak.
-
-### ⚠️ Giới hạn cần biết trước khi bật
-Keystone chưa federation, nên mọi lệnh gửi OpenStack thực hiện bằng **tài khoản
-dịch vụ OS_TASK_***. Phía OpenStack (chủ sở hữu VM trong Nova, audit Keystone)
-chỉ thấy tài khoản dịch vụ, KHÔNG thấy từng nhân viên — truy vết theo người thật
-nằm ở Nhật ký hoạt động của portal. Hệ quả:
-- Tài khoản dịch vụ phải được gán `member` vào **mọi project** dùng qua SSO
-  (thêm `admin` nếu muốn dùng Quản trị cụm).
-- Ai truy cập được máy chủ portal / file `.env` là chạm được quyền của tài khoản
-  đó → siết SSH và quyền file (`chmod 600 .env`).
-- Khi chuyển sang federation thật (Keystone OIDC), cấu hình Keycloak dưới đây
-  giữ nguyên, chỉ đổi cách portal lấy token.
+CMP uses OIDC Authorization Code + PKCE via the backend, then binds verified
+`iss + sub` to a Keystone User UUID. A bound SSO identity is **not** an OpenStack
+resource session until Keystone federation is implemented in Phase 2. Local
+Keystone login remains available and is still required for resource APIs.
+No Keycloak group is mapped to a Keystone project or role in Phase 1.
 
 ### Cấu hình phía Keycloak
 1. **Clients → Create client**: Client ID `mbfs-cloud-portal`,
@@ -311,49 +301,50 @@ nằm ở Nhật ký hoạt động của portal. Hệ quả:
    - Valid redirect URIs: `https://cloud.mbfs.vn/api/auth/sso/callback`
    - Valid post logout redirect URIs: `https://cloud.mbfs.vn/login`
    - Web origins: `https://cloud.mbfs.vn`
-3. **Client scopes → mbfs-cloud-portal-dedicated → Add mapper → By configuration
-   → Group Membership**: Token Claim Name `groups`, Full group path **Off**,
-   Add to ID token **On**, Add to access token **On**.
-4. **Groups**: tạo mỗi project OpenStack một nhóm — `os-devops-team`,
-   `os-demo-project`… và `cloud-admins` cho quản trị viên. Gán user vào nhóm.
-5. **Credentials** → copy Client secret.
+3. Include standard `openid profile email` scopes and the stable Keycloak `sub`.
+4. **Credentials** → copy Client secret. Do not configure Horizon for this flow.
 
 ### Cấu hình phía portal (.env)
 ```bash
 SSO_ENABLED=true
-SSO_ISSUER=https://keycloak.mbfs.vn/realms/mbfs
-SSO_CLIENT_ID=mbfs-cloud-portal
-SSO_CLIENT_SECRET=<client secret vừa copy>
-PUBLIC_URL=https://cloud.mbfs.vn          # phải trùng URL người dùng gõ
-SSO_ADMIN_GROUP=cloud-admins
-SSO_ALLOW_LOCAL_LOGIN=true                # giữ true để có đường dự phòng
+OIDC_ISSUER_URL=https://keycloak.mbfs.vn/realms/mbfs
+OIDC_CLIENT_ID=mbfs-cloud-portal
+OIDC_CLIENT_SECRET=<Keycloak client secret>
+OIDC_REDIRECT_URI=https://cloud.mbfs.vn/api/auth/sso/callback
+OIDC_SCOPES=openid profile email
+SECURE_COOKIES=true
 
-# Bắt buộc — tài khoản dịch vụ gọi OpenStack:
-OS_TASK_USERNAME=portal-task
-OS_TASK_PASSWORD=<mật khẩu>
+# Dedicated system-scoped Keystone identity, restricted by Keystone policy to
+# reading users and, only if provisioning is enabled, creating/deleting users.
+SSO_KEYSTONE_USERNAME=portal-sso-identity
+SSO_KEYSTONE_PASSWORD=<service password>
+SSO_KEYSTONE_DOMAIN=Default
+SSO_PROVISIONING_ENABLED=false
 ```
 
 ```bash
-# Trên controller: tạo tài khoản dịch vụ và gán vào từng project
-openstack user create --domain Default --password '<mật khẩu>' portal-task
-openstack role add --project devops-team --user portal-task member
-openstack role add --project demo-project --user portal-task member
-# (thêm role admin nếu muốn dùng menu Quản trị cụm qua SSO)
+# On the controller, create a dedicated service account and grant only the
+# required Keystone system-scope user-read policy. If enabling provisioning,
+# additionally grant user create/delete in the onboarding domain. Do not grant
+# this identity Nova/Neutron/Cinder project roles. Exact role names depend on
+# the deployment's Keystone policy and must be reviewed by its administrator.
 ```
 
-Bật xong: trang đăng nhập hiện nút SSO phía trên, form Keystone vẫn còn bên dưới
-làm đường dự phòng. Đặt `SSO_ALLOW_LOCAL_LOGIN=false` nếu muốn ép chỉ dùng SSO.
+After sign-in, unbound users may prove ownership with their existing Keystone
+password. If provisioning is enabled, CMP creates a passwordless Keystone user
+without projects or roles. The SQLite binding DB must be persisted and backed
+up along with `DATA_DIR`; a crashed provisioning claim needs operator
+reconciliation before retrying. The local Keystone login form remains visible.
 
 ### Xử lý sự cố SSO
 
 | Triệu chứng | Cách xử lý |
 |---|---|
-| "chưa thuộc nhóm project nào" | User thiếu nhóm `os-<project>`, hoặc mapper groups chưa bật Add to ID token |
-| "Không có project nào khớp" | Tài khoản dịch vụ chưa được gán vào project tương ứng |
-| Keycloak báo invalid redirect_uri | `PUBLIC_URL` khác Valid redirect URIs khai trong client |
-| "Issuer không khớp" | `SSO_ISSUER` phải đúng dạng `https://kc/realms/<realm>`, không có `/` cuối |
-| "Cấu hình SSO chưa đủ" trên trang login | Thiếu SSO_CLIENT_ID hoặc PUBLIC_URL — nút SSO tự ẩn, login Keystone vẫn dùng được |
-| Keycloak dùng cert tự ký | `SSO_INSECURE=true` |
+| Keycloak reports invalid redirect_uri | `OIDC_REDIRECT_URI` must exactly match the Keycloak client redirect URI |
+| SSO button hidden | Check `OIDC_*` and `SSO_KEYSTONE_*`; local login remains available |
+| Linked account missing/disabled | Restore or enable the original Keystone UUID; CMP never auto-rebinds |
+| Username collision on create | Link the existing user with its password; CMP never claims matching names |
+| Self-signed Keycloak certificate | Import the private CA into the container trust store; do not disable TLS verification |
 
 ## 7. Xử lý sự cố bổ sung (v1.3)
 

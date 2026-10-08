@@ -27,6 +27,7 @@ import { useI18n } from './i18n/react.jsx';
 const InstanceDetailRoute = lazy(() => import('./pages/InstanceDetail.jsx'));
 const NetworkDetailRoute = lazy(() => import('./pages/NetworkDetail.jsx'));
 const Login = lazy(() => import('./pages/Login.jsx'));
+const SsoOnboarding = lazy(() => import('./pages/SsoOnboarding.jsx'));
 
 function LegacySubnetRedirect() {
   const { networkId } = useParams();
@@ -43,6 +44,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Suspense fallback={<PageRouteFallback />}><Login /></Suspense>} />
+        <Route path="/sso/onboarding" element={<Suspense fallback={<PageRouteFallback />}><SsoOnboarding /></Suspense>} />
         <Route path={CONSOLE_ROUTE} element={<ConsolePage />} />
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />

@@ -943,11 +943,24 @@ function mockIdentity(m, path, q, body) {
     mockProjectList.push(p);
     return { project: p };
   }
-  if (m === 'GET' && path === '/v3/users') return { users: mockUsers };
+  if (m === 'GET' && path === '/v3/domains') return { domains: [{ id: 'default', name: 'Default' }] };
+  if (m === 'GET' && path === '/v3/users') return { users: mockUsers.filter((u) =>
+    (!q.get('name') || u.name === q.get('name')) && (!q.get('domain_id') || (u.domain_id || 'default') === q.get('domain_id'))) };
+  if ((mt = path.match(/^\/v3\/users\/([^/]+)$/)) && m === 'GET') {
+    const u = mockUsers.find((x) => x.id === mt[1]);
+    if (!u) throw notFound();
+    return { user: u };
+  }
   if (m === 'POST' && path === '/v3/users') {
-    const u = { id: 'u-' + uid().slice(0, 8), name: body.user.name, enabled: true, email: null };
+    const u = { id: 'u-' + uid().slice(0, 8), name: body.user.name, domain_id: body.user.domain_id || 'default', enabled: true, email: body.user.email || null };
     mockUsers.push(u);
     return { user: u };
+  }
+  if ((mt = path.match(/^\/v3\/users\/([^/]+)$/)) && m === 'DELETE') {
+    const index = mockUsers.findIndex((x) => x.id === mt[1]);
+    if (index < 0) throw notFound();
+    mockUsers.splice(index, 1);
+    return null;
   }
   if ((mt = path.match(/^\/v3\/users\/([^/]+)$/)) && m === 'PATCH') {
     const u = mockUsers.find((x) => x.id === mt[1]);

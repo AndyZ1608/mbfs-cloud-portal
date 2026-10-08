@@ -33,7 +33,7 @@ export class BillingService {
 }
 
 export function createBillingService(billingConfig = config.billing, options = {}) {
-  if (!billingConfig.enabled) return null;
+  if (!billingConfig.enabled || !billingConfig.baseUrl) return null;
   return new BillingService(new BillingClient({
     baseUrl: billingConfig.baseUrl,
     timeoutMs: billingConfig.timeoutMs,

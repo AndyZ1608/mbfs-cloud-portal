@@ -5,7 +5,7 @@
 - Set `NODE_ENV=production` and a random `SESSION_SECRET` of at least 32 characters. Startup fails if this is missing or weak.
 - Set `SECURE_COOKIES=true` behind HTTPS. Set `TRUST_PROXY=true` only when traffic always arrives through a trusted reverse proxy.
 - Serve CMP over HTTPS in production before enabling self-service account password changes. The browser sends current/new passwords only to the CMP backend; CMP sends them to Keystone's self-service Identity API. Plain HTTP between browser and CMP would expose those credentials in transit. Use a trusted HTTPS Keystone endpoint or a protected internal connection as appropriate for the deployment.
-- Keep `OS_INSECURE=false` and `SSO_INSECURE=false`. Import the private CA into the container trust store instead of disabling TLS verification.
+- Keep `OS_INSECURE=false`. Phase 1 OIDC enforces HTTPS outside loopback development and never disables certificate verification. Import private CAs into the container trust store.
 - Use `DATA_ENCRYPTION_KEY` if infrastructure secrets need a key independent from session signing. Keep the key stable and in a secret manager; changing it makes previously encrypted Kubernetes join tokens unreadable.
 - Use Redis sessions for multiple replicas. Memory and file sessions are single-instance options.
 - Restrict the service account to the minimum projects and roles needed by enabled background features.
@@ -15,6 +15,8 @@
 Sessions are HTTP-only, `SameSite=Lax`, and optionally Secure. State-changing API calls require `X-CMP-Request: 1`, cross-site Fetch Metadata is rejected, request bodies are capped, and login/API rate limits are separate. Security headers include CSP, frame restrictions, MIME sniffing prevention, and HSTS when secure cookies are enabled.
 
 Every request receives an `X-Request-Id`. Mutation audit records include request ID, user, project, provider, cloud, region, action, result, source address, status, and duration. Passwords, cookies, bearer tokens, and request bodies are not written to the audit log.
+
+Phase 1 Keycloak sign-in uses backend-held authorization-code state, nonce and PKCE verifier, then rotates the CMP session. `openid-client` validates the issuer, audience, nonce, expiry and ID-token signature. Binding authority is the exact issuer and subject, never email or username. A bound SSO session has no Keystone user token and cannot call protected OpenStack APIs; persisted legacy service-token bridge sessions are rejected. Ownership-link passwords and proof tokens are discarded after one Keystone authentication request. The dedicated SSO Keystone service identity must have only the system-scope user operations permitted by deployment policy. Account creation uses a durable SQLite claim so uncertain provider outcomes require operator reconciliation instead of blind retry.
 
 VM password changes use the current Keystone project token, a portal-side `member`/`admin` gate, and a fresh Nova server lookup to confirm the VM belongs to the current project. Nova decides whether the password-change operation is supported; CMP does not inspect image metadata or guest configuration. The audit entry records only actor, project, VM, action, result, and timing. The submitted password is neither returned nor persisted; provider errors from this operation are mapped to messages that cannot echo it.
 

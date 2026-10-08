@@ -37,11 +37,11 @@ setInterval(() => {
 
 const ipOf = (req) => req.ip || req.socket?.remoteAddress || 'unknown';
 
-export function rateLimit({ windowSec, max, keyPrefix = '', message = 'Quá nhiều yêu cầu, thử lại sau ít phút' }) {
+export function rateLimit({ windowSec, max, keyPrefix = '', keyFor, message = 'Quá nhiều yêu cầu, thử lại sau ít phút' }) {
   const windowMs = windowSec * 1000;
   return (req, res, next) => {
     if (max <= 0) return next();
-    const key = keyPrefix + ':' + ipOf(req);
+    const key = keyPrefix + ':' + (keyFor?.(req) || ipOf(req));
     const now = Date.now();
     const arr = (buckets.get(key) || []).filter((t) => now - t < windowMs);
     if (arr.length >= max) {

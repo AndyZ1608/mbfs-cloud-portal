@@ -26,7 +26,12 @@ export function csrfProtection(req, res, next) {
 }
 
 export function requireAuth(req, res, next) {
-  if (!req.session?.os) return next(new OSError(401, 'Chưa đăng nhập', 'authentication_required'));
+  const session = req.session?.os;
+  // Reject persisted pre-Phase-1 SSO bridge sessions that carried a service
+  // token. Only a genuine Keystone end-user token may authorize resource APIs.
+  if (!session || session.auth_mode === 'sso' || session.token_source === 'service') {
+    return next(new OSError(401, 'Chưa đăng nhập', 'authentication_required'));
+  }
   next();
 }
 

@@ -27,7 +27,7 @@ import objectRoutes from './routes/objectstore.js';
 import iacRoutes from './routes/iac.js';
 import notifyRoutes from './routes/notify.js';
 import { auditMiddleware, auditLogin } from './audit.js';
-import { securityHeaders, loginLimiter, apiLimiter } from './security.js';
+import { securityHeaders, loginLimiter, apiLimiter, rateLimit } from './security.js';
 import { buildSessionStore } from './sessionstore.js';
 import { config } from './config.js';
 import { requestContext, csrfProtection, requireAuth, errorHandler } from './middleware.js';
@@ -60,8 +60,9 @@ export function createApp({ sessionStore, sessionSecret } = {}) {
     const started = Date.now();
     res.on('finish', () => {
       const user = req.session?.os?.user?.name || '-';
-      const requestPath = req.originalUrl.startsWith('/api/account/change-password')
-        ? '/api/account/change-password' : req.originalUrl;
+      // Never log query parameters: OIDC callbacks carry one-time codes and
+      // callers could accidentally append other sensitive values to any API.
+      const requestPath = req.originalUrl.split('?')[0];
       console.log(`${new Date().toISOString()} [api] request_id=${req.id} ${user} ${req.method} ${requestPath} ${res.statusCode} ${Date.now() - started}ms`);
     });
     next();
@@ -70,7 +71,13 @@ export function createApp({ sessionStore, sessionSecret } = {}) {
   app.get('/healthz', (_req, res) => res.json({ ok: true, mock: MOCK }));
   app.use('/api', apiLimiter());
   app.use('/api/auth/login', loginLimiter());
-  app.use('/api/auth/sso/login', loginLimiter());
+  app.use('/api/auth/sso/login', rateLimit({ windowSec: 300, max: 30, keyPrefix: 'sso-start' }));
+  app.use('/api/auth/sso/callback', rateLimit({ windowSec: 300, max: 30, keyPrefix: 'sso-callback' }));
+  const ssoActor = (req) => req.session?.sso?.identity
+    ? crypto.createHash('sha256').update(`${req.session.sso.identity.issuer}|${req.session.sso.identity.subject}`).digest('hex')
+    : null;
+  app.use('/api/auth/sso/link-existing', rateLimit({ windowSec: 300, max: 8, keyPrefix: 'sso-link', keyFor: ssoActor }));
+  app.use('/api/auth/sso/create-cloud-account', rateLimit({ windowSec: 300, max: 5, keyPrefix: 'sso-create', keyFor: ssoActor }));
   app.use('/api', csrfProtection);
   app.use('/api', auditMiddleware);
   app.use('/api', ssoRoutes);

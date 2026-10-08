@@ -27,10 +27,10 @@ export default function Login() {
 
   useEffect(() => {
     const q = new URLSearchParams(window.location.search).get('sso_error');
-    if (q) setErr({ message: q, code: q, fromQuery: true });
+    if (q) setErr({ code: 'sso_failed', fromQuery: true });
     api('/auth/config').then((c) => { setCfg(c); setForm((f) => ({ ...f, domain: c.defaultDomain })); }).catch(() => {});
-    api('/auth/session').then(() => nav('/', { replace: true })).catch(() => {});
-  }, [nav]);
+    api('/auth/session').then((session) => nav(session?.auth_mode === 'sso' ? '/sso/onboarding' : '/', { replace: true })).catch(() => {});
+  }, [nav, t]);
 
   async function submit(e) {
     e.preventDefault();
@@ -94,25 +94,25 @@ export default function Login() {
             {location.state?.notice === 'passwordChanged' && <div className="login-success" role="status">
               {t('account.passwordChangeSuccess')} {t('account.signInAgain')}
             </div>}
-            {err && <div className="login-err">{err.code && resources.vi[`errors.${err.code}`]
+            {err && <div className="login-err">{err.fromQuery ? t('auth.ssoFailed') : err.code && resources.vi[`errors.${err.code}`]
               ? t(`errors.${err.code}`)
-              : locale === 'en' && (err.fromQuery || /[À-ỹ]/u.test(err.message || '')) ? t('auth.signInFailed') : err.message}</div>}
+              : locale === 'en' && /[À-ỹ]/u.test(err.message || '') ? t('auth.signInFailed') : err.message}</div>}
             {cfg.ssoError && <div className="login-err">{t('auth.ssoConfigError', { message: locale === 'vi' ? cfg.ssoError : configFields(cfg.ssoError) })}</div>}
             {cfg.webssoError && <div className="login-err">{t('auth.webssoConfigError', { message: locale === 'vi' ? cfg.webssoError : configFields(cfg.webssoError) })}</div>}
 
             {cfg.websso && (
               <>
-                <a className="btn primary block sso-btn" href="/api/auth/websso/login">{locale === 'en' && /[À-ỹ]/u.test(cfg.webssoLabel || '') ? t('auth.ssoLogin') : cfg.webssoLabel || t('auth.ssoLogin')}</a>
-                {cfg.allowLocal && <div className="login-or"><span>{t('auth.localOption')}</span></div>}
+                <a className="btn primary block sso-btn" href="/api/auth/websso/login">{cfg.sso ? t('auth.webssoLogin') : locale === 'en' && /[À-ỹ]/u.test(cfg.webssoLabel || '') ? t('auth.ssoLogin') : cfg.webssoLabel || t('auth.ssoLogin')}</a>
               </>
             )}
 
-            {cfg.sso && !cfg.websso && (
+            {cfg.sso && (
               <>
-                <a className="btn primary block sso-btn" href="/api/auth/sso/login">{locale === 'en' && /[À-ỹ]/u.test(cfg.ssoLabel || '') ? t('auth.ssoLogin') : cfg.ssoLabel || t('auth.ssoLogin')}</a>
-                {cfg.allowLocal && <div className="login-or"><span>{t('auth.localOption')}</span></div>}
+                <a className="btn primary block sso-btn" href="/api/auth/sso/login">{t('auth.ssoLogin')}</a>
               </>
             )}
+
+            {(cfg.sso || cfg.websso) && cfg.allowLocal && <div className="login-or"><span>{t('auth.localOption')}</span></div>}
 
             {((!cfg.sso && !cfg.websso) || cfg.allowLocal) && <>
               <label className="field">

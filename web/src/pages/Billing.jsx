@@ -28,7 +28,7 @@ const TECHNICAL_FIELDS = [
 
 const KNOWN_SUMMARY_KEYS = new Set(Object.values(BILLING_FIELDS).flat().map((key) => key.split('.').at(-1)));
 
-function errorMessage(error, t) {
+export function errorMessage(error, t) {
   if (error?.status === 403) return t('billing.noAccess');
   if (['billing_unavailable', 'billing_timeout', 'billing_invalid_response'].includes(error?.code) || [502, 503, 504].includes(error?.status)) {
     return t('billing.unavailable');

@@ -32,17 +32,14 @@ export function normalizeBillingConfig(value = {}) {
   }
 
   const baseUrl = rawBaseUrl.replace(/\/+$/, '');
-  if (enabled) {
-    if (!baseUrl) errors.push('billing.base_url is required when billing.enabled=true');
-    else {
-      try {
-        const parsed = new URL(baseUrl);
-        if (!['http:', 'https:'].includes(parsed.protocol)) errors.push('billing.base_url must use http:// or https://');
-        if (parsed.username || parsed.password) errors.push('billing.base_url must not contain credentials');
-        if (parsed.search || parsed.hash) errors.push('billing.base_url must not contain a query string or fragment');
-      } catch {
-        errors.push('billing.base_url must be an absolute URL including http:// or https://');
-      }
+  if (enabled && baseUrl) {
+    try {
+      const parsed = new URL(baseUrl);
+      if (!['http:', 'https:'].includes(parsed.protocol)) errors.push('billing.base_url must use http:// or https://');
+      if (parsed.username || parsed.password) errors.push('billing.base_url must not contain credentials');
+      if (parsed.search || parsed.hash) errors.push('billing.base_url must not contain a query string or fragment');
+    } catch {
+      errors.push('billing.base_url must be an absolute URL including http:// or https://');
     }
   }
 
@@ -91,8 +88,12 @@ export function validateConfig() {
   if (config.env === 'production' && !(process.env.DATA_ENCRYPTION_KEY || config.sessionSecret)) {
     errors.push('DATA_ENCRYPTION_KEY or SESSION_SECRET is required to encrypt stored infrastructure secrets');
   }
-  if (process.env.OS_INSECURE === 'true' || process.env.SSO_INSECURE === 'true') {
-    warnings.push('TLS certificate verification is disabled for at least one integration');
+  if (process.env.OS_INSECURE === 'true') warnings.push('OpenStack TLS certificate verification is disabled');
+  if (process.env.SSO_ENABLED === 'true' && process.env.SSO_INSECURE === 'true') {
+    errors.push('SSO_INSECURE is no longer supported; trust the Keycloak CA instead');
+  }
+  if (process.env.SSO_ENABLED === 'true' && process.env.OS_INSECURE === 'true') {
+    errors.push('OS_INSECURE cannot be used with SSO because it disables process-wide TLS verification');
   }
   errors.push(...config.billing.errors);
   if (errors.length) throw new Error(`Invalid configuration:\n- ${errors.join('\n- ')}`);

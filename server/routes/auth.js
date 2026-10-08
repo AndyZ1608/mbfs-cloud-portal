@@ -3,6 +3,8 @@ import { SSO, ssoConfigError } from '../oidc.js';
 import { W as WEBSSO, webssoOn, webssoError } from './websso.js';
 import { passwordAuth, listProjects, scopeToken, OSError, MOCK } from '../openstack.js';
 import { config } from '../config.js';
+import { accountServiceConfigured } from '../keystoneSsoAccounts.js';
+import { safeSession } from './sso.js';
 
 const router = Router();
 
@@ -14,17 +16,19 @@ router.get('/config', (req, res) => {
     websso: webssoOn(),
     webssoLabel: WEBSSO.label,
     webssoError: WEBSSO.enabled ? webssoError() : null,
-    sso: SSO.enabled && !ssoConfigError(),
+    sso: SSO.enabled && !ssoConfigError() && accountServiceConfigured(),
     ssoLabel: SSO.buttonLabel,
-    ssoError: SSO.enabled ? ssoConfigError() : null,
-    allowLocal: SSO.allowLocal,
+    ssoError: SSO.enabled ? ssoConfigError() || (!accountServiceConfigured() ? 'Missing SSO_KEYSTONE_USERNAME, SSO_KEYSTONE_PASSWORD' : null) : null,
+    allowLocal: SSO.enabled || SSO.allowLocal,
     billingEnabled: config.billing.enabled,
   });
 });
 
 router.post('/login', async (req, res, next) => {
   try {
-    if ((SSO.enabled || WEBSSO.enabled) && !SSO.allowLocal && !(ssoConfigError() && webssoError())) {
+    // The Phase 1 Keycloak flow cannot replace an end-user Keystone token.
+    // Preserve the pre-existing WebSSO-only local-login policy when SSO is off.
+    if (!SSO.enabled && WEBSSO.enabled && !SSO.allowLocal) {
       throw new OSError(403, 'Hệ thống chỉ cho phép đăng nhập bằng SSO');
     }
     const { username, password, domain, project } = req.body || {};
@@ -87,6 +91,11 @@ router.post('/switch-project', async (req, res, next) => {
 
 router.get('/session', (req, res) => {
   const sess = req.session.os;
+  if (sess?.auth_mode === 'sso' || sess?.token_source === 'service') {
+    delete req.session.os;
+    return res.status(401).json({ error: 'Chưa đăng nhập', code: 'authentication_required' });
+  }
+  if (!sess && req.session.sso) return res.json(safeSession(req.session.sso));
   if (!sess) return res.status(401).json({ error: 'Chưa đăng nhập' });
   res.json({ user: sess.user, project: sess.project, projects: sess.projects, roles: sess.roles || [], auth_mode: sess.auth_mode || 'keystone', expiresAt: sess.expiresAt });
 });

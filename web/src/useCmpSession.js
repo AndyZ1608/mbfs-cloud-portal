@@ -9,7 +9,11 @@ export default function useCmpSession() {
   useEffect(() => {
     let active = true;
     api('/auth/session')
-      .then((value) => { if (active) setSession(value); })
+      .then((value) => {
+        if (!active) return;
+        if (value?.auth_mode === 'sso') navigate('/sso/onboarding', { replace: true });
+        else setSession(value);
+      })
       .catch(() => { if (active) navigate('/login', { replace: true }); });
     return () => { active = false; };
   }, [navigate]);

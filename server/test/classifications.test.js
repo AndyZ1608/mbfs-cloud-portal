@@ -49,7 +49,7 @@ test('SQLite migration persists customer definitions across reopen without seedi
   const reopened = openClassificationDb(location);
   assert.equal(catalog('A', reopened).tags[0].name, 'Customer Facing');
   assert.deepEqual(catalog('B', reopened), { labels: [], tags: [] });
-  assert.equal(reopened.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get().n, 1);
+  assert.equal(reopened.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get().n, 2);
   reopened.close();
 });
 

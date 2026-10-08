@@ -19,12 +19,14 @@ test('navigation maps only existing routes, with Dashboard and feature-gated Bil
     assert.deepEqual(NAVIGATION.filter((entry) => entry.children).map((group) => group.key), ['compute', 'storage', 'network', 'platform', 'operations']);
     assert.equal(NAVIGATION[4].to, '/billing');
     assert.ok(!NAVIGATION[4].children);
+    assert.equal(NAVIGATION.filter((entry) => entry.to === '/billing').length, 1);
     assert.deepEqual(NAVIGATION[5].children.map((item) => item.to), ['/kubernetes', '/marketplace']);
     const all = NAVIGATION.flatMap((entry) => entry.children || [entry]).map((item) => item.to);
     assert.equal(new Set(all).size, all.length);
     const appSource = readFileSync(fileURLToPath(new URL('../src/App.jsx', import.meta.url)), 'utf8');
+    assert.match(appSource, /<Route path="\/billing" element={<Billing \/>} \/>/);
     const routedPages = [...appSource.matchAll(/<Route path="(\/[^\"]+)" element={<(?!Navigate)(\w+)/g)]
-      .map((match) => match[1]).filter((path) => path !== '/login' && !path.includes('/:'));
+      .map((match) => match[1]).filter((path) => !['/login', '/sso/onboarding'].includes(path) && !path.includes('/:'));
     assert.deepEqual(all.slice().sort(), ['/', ...routedPages].sort());
     for (const nonRoute of ['/flavors', '/snapshots', '/routers', '/monitoring']) assert.ok(!all.includes(nonRoute));
     const member = visibleNavigation({ config: { billingEnabled: false }, roles: ['member'] });
@@ -75,6 +77,7 @@ test('rendered sidebar uses accessible accordion controls and active child links
     const billingLink = (markup) => markup.match(/<a[^>]*href="\/billing"[^>]*>/)?.[0] || '';
     assert.match(billingLink(network), /aria-label="Billing"/);
     assert.match(billingLink(network), /class="nav-item nav-standalone"/);
+    assert.equal((network.match(/href="\/billing"/g) || []).length, 1);
     assert.match(network, /aria-label="Network" aria-expanded="true"/);
     assert.match(network, /aria-label="Compute" aria-expanded="false"/);
     assert.match(network, /aria-current="page"[^>]*href="\/networks"/);
