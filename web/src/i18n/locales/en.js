@@ -225,6 +225,7 @@ export default {
   'monitoring.historyPartial': 'Some monitoring history could not be loaded.',
   'monitoring.noData': 'No monitoring data is available for this virtual machine yet.',
   'monitoring.chartEmpty': 'No monitoring data available.',
+  'monitoring.chartKeyboardHint': 'Use Left and Right arrow keys to inspect recorded points.',
   'monitoring.rangeLabel': 'Time range',
   'monitoring.range.1h': '1h',
   'monitoring.range.6h': '6h',

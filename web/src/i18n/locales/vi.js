@@ -225,6 +225,7 @@ export default {
   'monitoring.historyPartial': 'Không thể tải một phần lịch sử Monitoring.',
   'monitoring.noData': 'Chưa có dữ liệu Monitoring cho máy ảo này.',
   'monitoring.chartEmpty': 'Không có dữ liệu Monitoring.',
+  'monitoring.chartKeyboardHint': 'Dùng phím mũi tên trái và phải để xem các điểm dữ liệu.',
   'monitoring.rangeLabel': 'Khoảng thời gian',
   'monitoring.range.1h': '1 giờ',
   'monitoring.range.6h': '6 giờ',
