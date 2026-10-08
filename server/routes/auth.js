@@ -21,6 +21,7 @@ router.get('/config', (req, res) => {
     ssoError: SSO.enabled ? ssoConfigError() || (!accountServiceConfigured() ? 'Missing SSO_KEYSTONE_USERNAME, SSO_KEYSTONE_PASSWORD' : null) : null,
     allowLocal: SSO.enabled || SSO.allowLocal,
     billingEnabled: config.billing.enabled,
+    monitoringEnabled: config.monitoring.enabled,
   });
 });
 

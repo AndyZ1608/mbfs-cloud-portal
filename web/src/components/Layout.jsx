@@ -94,7 +94,7 @@ export default function Layout() {
           </div>
         </header>
         <main className="content">
-          {switchingProject ? <div className="boot">{t('common.loading')}</div> : <Outlet context={{ sess }} />}
+          {switchingProject ? <div className="boot">{t('common.loading')}</div> : <Outlet context={{ sess, config: cfg }} />}
         </main>
       </div>
       <Toasts />

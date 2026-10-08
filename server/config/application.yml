@@ -9,3 +9,8 @@ billing:
   base_url: ""
 
   timeout_seconds: 10
+
+# UI capability only. Per-VM data remains unavailable until a tenant-safe
+# external Monitoring API is implemented; no admin API is configured here.
+monitoring:
+  enabled: true

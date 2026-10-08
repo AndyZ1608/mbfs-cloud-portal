@@ -46,6 +46,10 @@ export function normalizeBillingConfig(value = {}) {
   return { enabled, baseUrl, timeoutMs: timeoutSeconds * 1000, errors };
 }
 
+export function normalizeMonitoringConfig(value = {}) {
+  return { enabled: value.enabled === true };
+}
+
 export function loadApplicationConfig(filePath = process.env.CMP_CONFIG_FILE || path.join(__dirname, 'config', 'application.yml')) {
   let document;
   try {
@@ -54,7 +58,8 @@ export function loadApplicationConfig(filePath = process.env.CMP_CONFIG_FILE || 
     throw new Error(`Cannot load CMP application config ${filePath}: ${error.message}`);
   }
   const billing = normalizeBillingConfig(document.billing);
-  return Object.freeze({ filePath, billing: Object.freeze(billing) });
+  const monitoring = normalizeMonitoringConfig(document.monitoring);
+  return Object.freeze({ filePath, billing: Object.freeze(billing), monitoring: Object.freeze(monitoring) });
 }
 
 const application = loadApplicationConfig();
@@ -73,6 +78,7 @@ export const config = Object.freeze({
   imageUploadTempDir: process.env.IMAGE_UPLOAD_TEMP_DIR || path.join(os.tmpdir(), 'cmp-image-uploads'),
   applicationConfigFile: application.filePath,
   billing: application.billing,
+  monitoring: application.monitoring,
 });
 
 export function validateConfig() {

@@ -17,7 +17,10 @@ import { canExtendVolume } from '../../../shared/volumeExtend.mjs';
 import useVolumeExtend from '../useVolumeExtend.js';
 import { PortVipsModal } from '../components/VipModals.jsx';
 
-const TABS = ['overview', 'networking', 'storage', 'security', 'activity'];
+const VmMonitoringTab = React.lazy(() => import('../components/VmMonitoringTab.jsx'));
+const BASE_TABS = ['overview', 'networking', 'storage', 'security', 'activity'];
+export const detailTabs = (monitoringEnabled) => monitoringEnabled
+  ? ['overview', 'networking', 'storage', 'security', 'monitoring', 'activity'] : BASE_TABS;
 const value = (item) => item === undefined || item === null || item === '' ? '—' : item;
 
 function DetailFields({ rows }) {
@@ -52,23 +55,25 @@ class DetailErrorBoundary extends React.Component {
 export default function InstanceDetailRoute() {
   const { instanceId } = useParams();
   const { t } = useI18n();
-  const { sess } = useOutletContext() || {};
+  const { sess, config } = useOutletContext() || {};
   const currentProjectId = sess?.project?.id ?? null;
   if (!sess) return <Empty>{t('common.loading')}</Empty>;
   if (!currentProjectId) return <Empty>{t('common.loading')}</Empty>;
   // The key discards every instance-scoped state value on route or project change.
   return <DetailErrorBoundary key={`${instanceId}:${currentProjectId}`}>
-    <InstanceDetail instanceId={instanceId} project={sess.project} roles={sess.roles} />
+    <InstanceDetail instanceId={instanceId} project={sess.project} roles={sess.roles}
+      monitoringEnabled={config?.monitoringEnabled === true} />
   </DetailErrorBoundary>;
 }
 
-function InstanceDetail({ instanceId, project, roles }) {
+function InstanceDetail({ instanceId, project, roles, monitoringEnabled }) {
   const { t } = useI18n();
   const currentProjectId = project.id;
   const canAssign = roles?.some((role) => ['member', 'admin'].includes(role));
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const tab = TABS.includes(params.get('tab')) ? params.get('tab') : 'overview';
+  const tabs = detailTabs(monitoringEnabled);
+  const tab = tabs.includes(params.get('tab')) ? params.get('tab') : 'overview';
   const [server, setServer] = useState(null);
   const [serverError, setServerError] = useState(null);
   const [failure, setFailure] = useState({ loading: false, error: null, data: null });
@@ -158,7 +163,7 @@ function InstanceDetail({ instanceId, project, roles }) {
   }, [server?.id, server?.image?.id, server?.flavor?.id, currentProjectId]);
 
   useEffect(() => {
-    if (!server || !currentProjectId || tab === 'overview') return;
+    if (!server || !currentProjectId || tab === 'overview' || tab === 'monitoring') return;
     let live = true;
     setTabStates((states) => ({ ...states, [tab]: { ...states[tab], loading: true, error: null } }));
     const loaders = {
@@ -310,7 +315,7 @@ function InstanceDetail({ instanceId, project, roles }) {
       </div>}
     </div>
     <nav className="vm-detail-tabs" aria-label={t('instance.detail.tabs')}>
-      {TABS.map((key) => <button key={key} className={tab === key ? 'active' : ''} aria-current={tab === key ? 'page' : undefined}
+      {tabs.map((key) => <button key={key} className={tab === key ? 'active' : ''} aria-current={tab === key ? 'page' : undefined}
         onClick={() => setParams(key === 'overview' ? {} : { tab: key })}>{t(`instance.detail.${key}`)}</button>)}
     </nav>
     <section className="card vm-detail-content">
@@ -396,6 +401,9 @@ function InstanceDetail({ instanceId, project, roles }) {
             {(tabData || []).map((group) => <tr key={group.id}><td>{group.name}</td><td>{value(group.description)}</td><td>{group.security_group_rules?.length ?? 0}</td></tr>)}
           </tbody></table></div>
         </TabState></>}
+      {tab === 'monitoring' && <React.Suspense fallback={<Empty>{t('monitoring.loading')}</Empty>}>
+        <VmMonitoringTab projectId={currentProjectId} instanceId={instanceId} />
+      </React.Suspense>}
       {tab === 'activity' && <><h3>{t('instance.detail.activity')}</h3><TabState state={current} t={t} empty={tabData?.entries?.length === 0 && 'instance.detail.noActivity'} errorKey="instance.detail.activityError">
         <div className="vm-detail-table"><table className="tbl"><thead><tr>{['time', 'action', 'user', 'result', 'details'].map((key) => <th key={key}>{t(`instance.detail.${key}`)}</th>)}</tr></thead><tbody>
           {(tabData?.entries || []).map((event, index) => {
