@@ -67,7 +67,7 @@ test('VM Detail exposes Monitoring only when enabled, in the requested order', a
   } finally { await vite.close(); }
 });
 
-test('Monitoring renders five N/A summaries and four localized no-data charts', async () => {
+test('Monitoring defaults to Compute with three localized internal sections', async () => {
   const vite = await createServer({ server: { middlewareMode: true, watch: null }, appType: 'custom' });
   const priorStorage = globalThis.localStorage;
   try {
@@ -78,9 +78,13 @@ test('Monitoring renders five N/A summaries and four localized no-data charts', 
       const html = renderToStaticMarkup(React.createElement(LocaleProvider, null,
         React.createElement(MonitoringView, { status: 'ready', data: emptyVmMonitoring(), range: '1h',
           onRangeChange() {}, onRefresh() {} })));
-      assert.equal((html.match(/class="monitoring-summary-card"/g) || []).length, 8);
-      assert.equal((html.match(/class="monitoring-chart-empty"/g) || []).length, 7);
-      assert.ok((html.match(/N\/A/g) || []).length >= 7);
+      assert.equal((html.match(/role="tab"/g) || []).length, 3);
+      assert.equal((html.match(/class="monitoring-summary-card"/g) || []).length, 2);
+      assert.equal((html.match(/class="monitoring-chart-empty"/g) || []).length, 2);
+      assert.ok((html.match(/N\/A/g) || []).length >= 2);
+      assert.ok(html.includes(translate(locale, 'monitoring.section.compute')));
+      assert.ok(!html.includes(translate(locale, 'monitoring.networkThroughput')));
+      assert.ok(!html.includes(translate(locale, 'monitoring.diskThroughput')));
       assert.ok(html.includes(translate(locale, 'monitoring.noData')));
       assert.ok(html.includes(translate(locale, 'monitoring.chartEmpty')));
       assert.doesNotMatch(html, /<polyline/);
@@ -142,6 +146,50 @@ test('range and refresh controls update the selected range and refresh callback'
   } finally { await vite.close(); }
 });
 
+test('category selector switches Compute, Network and Storage without changing range or requesting data', async () => {
+  const vite = await createServer({ server: { middlewareMode: true, watch: null }, appType: 'custom' });
+  const priorStorage = globalThis.localStorage;
+  const priorFetch = globalThis.fetch;
+  try {
+    const { MonitoringCategorySelector, MonitoringView, MONITORING_CATEGORIES } =
+      await vite.ssrLoadModule('/src/components/VmMonitoringTab.jsx');
+    const { LocaleProvider } = await vite.ssrLoadModule('/src/i18n/react.jsx');
+    globalThis.localStorage = { getItem: () => 'en' };
+    globalThis.fetch = () => { throw new Error('category selection must not fetch'); };
+    const selected = [];
+    const selector = MonitoringCategorySelector({ category: 'compute', onChange: (item) => selected.push(item),
+      t: (key) => translate('en', key) });
+    const tabs = React.Children.toArray(selector.props.children);
+    assert.deepEqual(MONITORING_CATEGORIES, ['compute', 'network', 'storage']);
+    assert.equal(tabs[0].props['aria-selected'], true);
+    tabs[1].props.onClick();
+    tabs[2].props.onClick();
+    tabs[0].props.onKeyDown({ key: 'ArrowRight', preventDefault() {},
+      currentTarget: { parentElement: { querySelectorAll: () => [{ focus() {} }, { focus() {} }, { focus() {} }] } } });
+    assert.deepEqual(selected, ['network', 'storage', 'network']);
+    for (const category of MONITORING_CATEGORIES) {
+      const html = renderToStaticMarkup(React.createElement(LocaleProvider, null,
+        React.createElement(MonitoringView, { status: 'ready', data: emptyVmMonitoring(), range: '6h',
+          category, onCategoryChange() {}, onRangeChange() {}, onRefresh() {} })));
+      assert.match(html, /aria-pressed="true" class="selected">6h/);
+      assert.ok(html.includes(translate('en', `monitoring.section.${category}`)));
+      assert.equal((html.match(/role="tabpanel"/g) || []).length, 1);
+      assert.equal((html.match(/class="monitoring-chart-empty"/g) || []).length,
+        category === 'network' ? 3 : 2);
+    }
+    assert.doesNotMatch(source('../src/monitoring/useVmMonitoring.js'), /category/,
+      'switching display category is not a data-fetch dependency');
+    const componentSource = source('../src/components/VmMonitoringTab.jsx');
+    assert.match(componentSource, /const \[category, setCategory\] = useState\('compute'\)/);
+    assert.match(componentSource, /useVmMonitoring\(\{ projectId, instanceId, range \}\)/);
+  } finally {
+    globalThis.fetch = priorFetch;
+    if (priorStorage === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = priorStorage;
+    await vite.close();
+  }
+});
+
 test('future normalized points render without fabricating missing sections, and long series are bounded', async () => {
   const vite = await createServer({ server: { middlewareMode: true, watch: null }, appType: 'custom' });
   const priorStorage = globalThis.localStorage;
@@ -159,10 +207,16 @@ test('future normalized points render without fabricating missing sections, and 
     const html = renderToStaticMarkup(React.createElement(LocaleProvider, null,
       React.createElement(MonitoringView, { status: 'ready', data, range: '1h', onRangeChange() {}, onRefresh() {} })));
     assert.match(html, />0%<|>0%<!-- -->/);
-    assert.match(html, /0 B\/s/);
     assert.match(html, /Unreachable/);
-    assert.equal((html.match(/<polyline/g) || []).length, 2);
-    assert.equal((html.match(/class="monitoring-chart-empty"/g) || []).length, 5);
+    assert.equal((html.match(/<polyline/g) || []).length, 1);
+    assert.equal((html.match(/class="monitoring-chart-empty"/g) || []).length, 1);
+    assert.doesNotMatch(html, /0 B\/s/);
+    const networkHtml = renderToStaticMarkup(React.createElement(LocaleProvider, null,
+      React.createElement(MonitoringView, { status: 'ready', data, range: '1h', category: 'network',
+        onRangeChange() {}, onRefresh() {} })));
+    assert.match(networkHtml, /0 B\/s/);
+    assert.equal((networkHtml.match(/<polyline/g) || []).length, 1);
+    assert.equal((networkHtml.match(/class="monitoring-chart-empty"/g) || []).length, 2);
     data.summary.reachable = 'unknown';
     const unknownHtml = renderToStaticMarkup(React.createElement(LocaleProvider, null,
       React.createElement(MonitoringView, { status: 'ready', data, range: '1h', onRangeChange() {}, onRefresh() {} })));
@@ -174,7 +228,7 @@ test('future normalized points render without fabricating missing sections, and 
     ];
     const withGap = renderToStaticMarkup(React.createElement(LocaleProvider, null,
       React.createElement(MonitoringView, { status: 'ready', data, range: '1h', onRangeChange() {}, onRefresh() {} })));
-    assert.equal((withGap.match(/<polyline/g) || []).length, 3, 'null history sample must split the CPU line');
+    assert.equal((withGap.match(/<polyline/g) || []).length, 2, 'null history sample must split the CPU line');
     data.historyUnsupported = true;
     assert.match(renderToStaticMarkup(React.createElement(LocaleProvider, null,
       React.createElement(MonitoringView, { status: 'ready', data, range: '7d', onRangeChange() {}, onRefresh() {} }))),
@@ -191,7 +245,7 @@ test('future normalized points render without fabricating missing sections, and 
   }
 });
 
-test('new Monitoring cards and charts remain independent of missing upstream metrics', async () => {
+test('Network and Storage categories keep optional metrics independent and retain N/A or zero', async () => {
   const vite = await createServer({ server: { middlewareMode: true, watch: null }, appType: 'custom' });
   const priorStorage = globalThis.localStorage;
   try {
@@ -205,16 +259,27 @@ test('new Monitoring cards and charts remain independent of missing upstream met
     data.summary.diskReadLatencyMs = 1.82;
     data.series.networkRxPps = [{ timestamp: 1791446500000, value: 0 },
       { timestamp: 1791446560000, value: 1245 }];
-    const html = renderToStaticMarkup(React.createElement(LocaleProvider, null,
+    const compute = renderToStaticMarkup(React.createElement(LocaleProvider, null,
       React.createElement(MonitoringView, { status: 'ready', data, range: '1h',
         onRangeChange() {}, onRefresh() {} })));
-    assert.match(html, /42\.7%/);
-    assert.match(html, /0 pps/);
-    assert.match(html, /1,245 pps/);
-    assert.match(html, /1\.82 ms\/op/);
-    assert.match(html, /Packet Drops/);
-    assert.equal((html.match(/class="monitoring-chart-empty"/g) || []).length, 6);
-    assert.ok((html.match(/N\/A/g) || []).length >= 3);
+    assert.match(compute, /42\.7%/);
+    assert.doesNotMatch(compute, /1,245 pps|1\.82 ms\/op/);
+    const network = renderToStaticMarkup(React.createElement(LocaleProvider, null,
+      React.createElement(MonitoringView, { status: 'ready', data, range: '1h', category: 'network',
+        onRangeChange() {}, onRefresh() {} })));
+    assert.match(network, /0 pps/);
+    assert.match(network, /1,245 pps/);
+    assert.match(network, /Packet Drops/);
+    assert.equal((network.match(/class="monitoring-chart-empty"/g) || []).length, 2);
+    assert.ok((network.match(/N\/A/g) || []).length >= 3);
+    assert.doesNotMatch(network, /42\.7%|1\.82 ms\/op/);
+    const storage = renderToStaticMarkup(React.createElement(LocaleProvider, null,
+      React.createElement(MonitoringView, { status: 'ready', data, range: '1h', category: 'storage',
+        onRangeChange() {}, onRefresh() {} })));
+    assert.match(storage, /1\.82 ms\/op/);
+    assert.match(storage, /Read Performance|Write Performance/);
+    assert.equal((storage.match(/class="monitoring-chart-empty"/g) || []).length, 2);
+    assert.doesNotMatch(storage, /IOPS|1,245 pps|42\.7%/);
   } finally {
     if (priorStorage === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = priorStorage;
@@ -231,6 +296,7 @@ test('browser boundary does not expose admin Monitoring API, PromQL, or credenti
   assert.match(code, /api\(`\/servers\/\$\{encodeURIComponent\(instanceId\)\}\/monitoring/);
   assert.doesNotMatch(source('../src/pages/Instances.jsx'), /VmMonitoringTab|loadVmMonitoring/);
   const css = source('../src/styles.css');
-  assert.match(css, /\.monitoring-summary-grid \{ display: grid; grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
-  assert.match(css, /@media \(max-width: 420px\) \{ \.monitoring-summary-grid \{ grid-template-columns: 1fr/);
+  assert.match(css, /\.monitoring-summary-grid \{ display: grid; grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 220px\), 1fr\)\)/);
+  assert.match(css, /\.monitoring-chart-grid-layout \{ display: grid; grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 450px\), 1fr\)\)/);
+  assert.match(css, /\.monitoring-section \{ display: grid; gap: 12px; min-width: 0/);
 });

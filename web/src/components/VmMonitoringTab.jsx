@@ -28,6 +28,29 @@ export function MonitoringToolbar({ range, onRangeChange, onRefresh, status, t }
   </div>;
 }
 
+export const MONITORING_CATEGORIES = Object.freeze(['compute', 'network', 'storage']);
+
+export function MonitoringCategorySelector({ category, onChange, t, panelId = 'monitoring-category-panel' }) {
+  function onKeyDown(event, current) {
+    const index = MONITORING_CATEGORIES.indexOf(current);
+    const next = event.key === 'ArrowRight' ? (index + 1) % MONITORING_CATEGORIES.length
+      : event.key === 'ArrowLeft' ? (index + MONITORING_CATEGORIES.length - 1) % MONITORING_CATEGORIES.length
+        : event.key === 'Home' ? 0 : event.key === 'End' ? MONITORING_CATEGORIES.length - 1 : -1;
+    if (next < 0) return;
+    event.preventDefault();
+    onChange(MONITORING_CATEGORIES[next]);
+    event.currentTarget.parentElement?.querySelectorAll('[role="tab"]')[next]?.focus();
+  }
+  return <div className="monitoring-category-tabs" role="tablist" aria-label={t('monitoring.categoryLabel')}>
+    {MONITORING_CATEGORIES.map((item) => <button key={item} type="button" role="tab"
+      id={`${panelId}-${item}`} aria-controls={panelId} aria-selected={category === item}
+      tabIndex={category === item ? 0 : -1} className={category === item ? 'selected' : ''}
+      onClick={() => onChange(item)} onKeyDown={(event) => onKeyDown(event, item)}>
+      {t(`monitoring.category.${item}`)}
+    </button>)}
+  </div>;
+}
+
 function MetricSummaryCard({ title, Icon, value, detail, pairs }) {
   return <div className="monitoring-summary-card">
     <div className="monitoring-summary-label"><Icon size={17} aria-hidden="true" /><span>{title}</span></div>
@@ -184,11 +207,16 @@ export function MetricChart({ title, series, unit, range, locale, t }) {
   </section>;
 }
 
-export function MonitoringView({ status, data, error, range, onRangeChange, onRefresh }) {
+export function MonitoringView({ status, data, error, range, onRangeChange, onRefresh,
+  category = 'compute', onCategoryChange = () => {} }) {
   const { t, locale } = useI18n();
   const numberLocale = intlLocale(locale);
+  const panelId = useId();
+  const selectedCategory = MONITORING_CATEGORIES.includes(category) ? category : 'compute';
   const toolbar = <MonitoringToolbar range={range} onRangeChange={onRangeChange}
     onRefresh={onRefresh} status={status} t={t} />;
+  const selector = <MonitoringCategorySelector category={selectedCategory} onChange={onCategoryChange}
+    panelId={panelId} t={t} />;
 
   if (status === 'loading') return <div className="vm-monitoring">{toolbar}
     <div className="monitoring-loading" role="status">{t('monitoring.loading')}</div></div>;
@@ -201,81 +229,94 @@ export function MonitoringView({ status, data, error, range, onRangeChange, onRe
   const summary = metrics.summary || {};
   const series = metrics.series || {};
   const noData = !hasMonitoringData(metrics);
-  const bothMissing = (a, b) => !Number.isFinite(a) && !Number.isFinite(b);
-  const diskRead = formatBytesPerSecond(summary.diskReadBps, numberLocale);
-  const diskWrite = formatBytesPerSecond(summary.diskWriteBps, numberLocale);
-  const networkRx = formatBytesPerSecond(summary.networkRxBps, numberLocale);
-  const networkTx = formatBytesPerSecond(summary.networkTxBps, numberLocale);
   const memoryDetail = Number.isFinite(summary.memoryUsedBytes) && Number.isFinite(summary.memoryTotalBytes)
     ? `${formatBytes(summary.memoryUsedBytes, numberLocale)} / ${formatBytes(summary.memoryTotalBytes, numberLocale)}` : null;
-  const charts = [
-    { key: 'cpu', title: t('monitoring.cpuUsage'), unit: 'percent', lines: [
-      { key: 'cpuPercent', label: t('monitoring.cpu'), color: 'var(--accent)', points: series.cpuPercent },
-    ] },
-    { key: 'memory', title: t('monitoring.memoryUsage'), unit: 'percent', lines: [
-      { key: 'memoryPercent', label: t('monitoring.memory'), color: 'var(--info)', points: series.memoryPercent },
-    ] },
-    { key: 'disk', title: t('monitoring.diskIo'), unit: 'throughput', lines: [
-      { key: 'diskReadBps', label: t('monitoring.read'), color: 'var(--accent)', points: series.diskReadBps },
-      { key: 'diskWriteBps', label: t('monitoring.write'), color: 'var(--warn)', points: series.diskWriteBps },
-    ] },
-    { key: 'network', title: t('monitoring.networkTraffic'), unit: 'throughput', lines: [
-      { key: 'networkRxBps', label: t('monitoring.receive'), color: 'var(--accent)', points: series.networkRxBps },
-      { key: 'networkTxBps', label: t('monitoring.transmit'), color: 'var(--ok)', points: series.networkTxBps },
-    ] },
-    { key: 'packets', title: t('monitoring.networkPacketRate'), unit: 'pps', lines: [
-      { key: 'networkRxPps', label: t('monitoring.rxPps'), color: 'var(--accent)', points: series.networkRxPps },
-      { key: 'networkTxPps', label: t('monitoring.txPps'), color: 'var(--ok)', points: series.networkTxPps },
-    ] },
-    { key: 'drops', title: t('monitoring.packetDrops'), unit: 'drops/s', lines: [
-      { key: 'networkRxDropsPerSec', label: t('monitoring.rxDrops'), color: 'var(--accent)', points: series.networkRxDropsPerSec },
-      { key: 'networkTxDropsPerSec', label: t('monitoring.txDrops'), color: 'var(--warn)', points: series.networkTxDropsPerSec },
-    ] },
-    { key: 'latency', title: t('monitoring.storageLatency'), unit: 'ms/op', lines: [
-      { key: 'diskReadLatencyMs', label: t('monitoring.readLatency'), color: 'var(--accent)', points: series.diskReadLatencyMs },
-      { key: 'diskWriteLatencyMs', label: t('monitoring.writeLatency'), color: 'var(--warn)', points: series.diskWriteLatencyMs },
-    ] },
-  ];
+  const reachability = summary.reachable === true ? t('monitoring.reachable')
+    : summary.reachable === false ? t('monitoring.unreachable')
+      : summary.reachable === 'unknown' ? t('monitoring.unknown') : null;
+  const charts = {
+    compute: [
+      { key: 'cpu', title: t('monitoring.cpuUtilization'), unit: 'percent', lines: [
+        { key: 'cpuPercent', label: t('monitoring.cpu'), color: 'var(--accent)', points: series.cpuPercent },
+      ] },
+      { key: 'memory', title: t('monitoring.memoryUtilization'), unit: 'percent', lines: [
+        { key: 'memoryPercent', label: t('monitoring.memory'), color: 'var(--info)', points: series.memoryPercent },
+      ] },
+    ],
+    network: [
+      { key: 'network', title: t('monitoring.networkThroughput'), unit: 'throughput', lines: [
+        { key: 'networkRxBps', label: t('monitoring.receive'), color: 'var(--accent)', points: series.networkRxBps },
+        { key: 'networkTxBps', label: t('monitoring.transmit'), color: 'var(--ok)', points: series.networkTxBps },
+      ] },
+      { key: 'packets', title: t('monitoring.networkPacketRate'), unit: 'pps', lines: [
+        { key: 'networkRxPps', label: t('monitoring.rxPps'), color: 'var(--accent)', points: series.networkRxPps },
+        { key: 'networkTxPps', label: t('monitoring.txPps'), color: 'var(--ok)', points: series.networkTxPps },
+      ] },
+      { key: 'drops', title: t('monitoring.packetDrops'), unit: 'drops/s', lines: [
+        { key: 'networkRxDropsPerSec', label: t('monitoring.rxDrops'), color: 'var(--accent)', points: series.networkRxDropsPerSec },
+        { key: 'networkTxDropsPerSec', label: t('monitoring.txDrops'), color: 'var(--warn)', points: series.networkTxDropsPerSec },
+      ] },
+    ],
+    storage: [
+      { key: 'disk', title: t('monitoring.diskThroughput'), unit: 'throughput', lines: [
+        { key: 'diskReadBps', label: t('monitoring.read'), color: 'var(--accent)', points: series.diskReadBps },
+        { key: 'diskWriteBps', label: t('monitoring.write'), color: 'var(--warn)', points: series.diskWriteBps },
+      ] },
+      { key: 'latency', title: t('monitoring.storageLatency'), unit: 'ms/op', lines: [
+        { key: 'diskReadLatencyMs', label: t('monitoring.readLatency'), color: 'var(--accent)', points: series.diskReadLatencyMs },
+        { key: 'diskWriteLatencyMs', label: t('monitoring.writeLatency'), color: 'var(--warn)', points: series.diskWriteLatencyMs },
+      ] },
+    ],
+  };
 
-  return <div className="vm-monitoring">{toolbar}
+  return <div className="vm-monitoring">{toolbar}{selector}
     {noData && <p className="monitoring-notice" role="status">{t('monitoring.noData')}</p>}
     {metrics.historyUnsupported && <p className="monitoring-notice" role="status">{t('monitoring.historyUnsupported')}</p>}
     {metrics.partial && <p className="monitoring-notice" role="status">{t('monitoring.historyPartial')}</p>}
-    <div className="monitoring-summary-grid">
-      <MetricSummaryCard title={t('monitoring.cpuUsage')} Icon={Cpu} value={formatPercent(summary.cpuPercent, numberLocale)} />
-      <MetricSummaryCard title={t('monitoring.memoryUsage')} Icon={MemoryStick}
-        value={formatPercent(summary.memoryPercent, numberLocale)} detail={memoryDetail} />
-      <MetricSummaryCard title={t('monitoring.diskIo')} Icon={HardDrive}
-        value={bothMissing(summary.diskReadBps, summary.diskWriteBps) ? 'N/A' : null}
-        pairs={[[t('monitoring.read'), diskRead], [t('monitoring.write'), diskWrite]]} />
-      <MetricSummaryCard title={t('monitoring.network')} Icon={Network}
-        value={bothMissing(summary.networkRxBps, summary.networkTxBps) ? 'N/A' : null}
-        pairs={[[t('monitoring.receive'), networkRx], [t('monitoring.transmit'), networkTx]]} />
-      <MetricSummaryCard title={t('monitoring.networkPacketRate')} Icon={Network}
-        value={bothMissing(summary.networkRxPps, summary.networkTxPps) ? 'N/A' : null}
-        pairs={[[t('monitoring.rxPps'), formatMonitoringRate(summary.networkRxPps, 'pps', numberLocale)],
-          [t('monitoring.txPps'), formatMonitoringRate(summary.networkTxPps, 'pps', numberLocale)]]} />
-      <MetricSummaryCard title={t('monitoring.packetDrops')} Icon={Activity}
-        value={bothMissing(summary.networkRxDropsPerSec, summary.networkTxDropsPerSec) ? 'N/A' : null}
-        pairs={[[t('monitoring.rxDrops'), formatMonitoringRate(summary.networkRxDropsPerSec, 'drops/s', numberLocale)],
-          [t('monitoring.txDrops'), formatMonitoringRate(summary.networkTxDropsPerSec, 'drops/s', numberLocale)]]} />
-      <MetricSummaryCard title={t('monitoring.storageLatency')} Icon={HardDrive}
-        value={bothMissing(summary.diskReadLatencyMs, summary.diskWriteLatencyMs) ? 'N/A' : null}
-        pairs={[[t('monitoring.readLatency'), formatMonitoringRate(summary.diskReadLatencyMs, 'ms/op', numberLocale)],
-          [t('monitoring.writeLatency'), formatMonitoringRate(summary.diskWriteLatencyMs, 'ms/op', numberLocale)]]} />
-      <MetricSummaryCard title={t('monitoring.reachability')} Icon={Wifi}
-        value={summary.reachable === true ? t('monitoring.reachable')
-          : summary.reachable === false ? t('monitoring.unreachable')
-            : summary.reachable === 'unknown' ? t('monitoring.unknown') : 'N/A'} />
-    </div>
-    <div className="monitoring-chart-grid-layout">{charts.map((chart) => <MetricChart key={chart.key}
-      title={chart.title} series={chart.lines} unit={chart.unit} range={range} locale={numberLocale} t={t} />)}</div>
+    <section className="monitoring-section" data-category={selectedCategory} id={panelId} role="tabpanel"
+      aria-labelledby={`${panelId}-${selectedCategory}`} tabIndex={0}>
+      <div className="monitoring-section-heading">
+        <h4>{t(`monitoring.section.${selectedCategory}`)}</h4>
+        {selectedCategory === 'compute' && reachability && <span className="monitoring-availability">
+          <Wifi size={14} aria-hidden="true" />{t('monitoring.reachability')}: <strong>{reachability}</strong>
+        </span>}
+      </div>
+      {selectedCategory === 'compute' && <div className="monitoring-summary-grid">
+        <MetricSummaryCard title={t('monitoring.cpuUsage')} Icon={Cpu}
+          value={formatPercent(summary.cpuPercent, numberLocale)} />
+        <MetricSummaryCard title={t('monitoring.memoryUsage')} Icon={MemoryStick}
+          value={formatPercent(summary.memoryPercent, numberLocale)} detail={memoryDetail} />
+      </div>}
+      {selectedCategory === 'network' && <div className="monitoring-summary-grid">
+        <MetricSummaryCard title={t('monitoring.networkThroughput')} Icon={Network}
+          pairs={[[t('monitoring.receive'), formatBytesPerSecond(summary.networkRxBps, numberLocale)],
+            [t('monitoring.transmit'), formatBytesPerSecond(summary.networkTxBps, numberLocale)]]} />
+        <MetricSummaryCard title={t('monitoring.networkPacketRate')} Icon={Network}
+          pairs={[[t('monitoring.rxPps'), formatMonitoringRate(summary.networkRxPps, 'pps', numberLocale)],
+            [t('monitoring.txPps'), formatMonitoringRate(summary.networkTxPps, 'pps', numberLocale)]]} />
+        <MetricSummaryCard title={t('monitoring.packetDrops')} Icon={Activity}
+          pairs={[[t('monitoring.rxDrops'), formatMonitoringRate(summary.networkRxDropsPerSec, 'drops/s', numberLocale)],
+            [t('monitoring.txDrops'), formatMonitoringRate(summary.networkTxDropsPerSec, 'drops/s', numberLocale)]]} />
+      </div>}
+      {selectedCategory === 'storage' && <div className="monitoring-summary-grid">
+        <MetricSummaryCard title={t('monitoring.readPerformance')} Icon={HardDrive}
+          pairs={[[t('monitoring.throughput'), formatBytesPerSecond(summary.diskReadBps, numberLocale)],
+            [t('monitoring.latency'), formatMonitoringRate(summary.diskReadLatencyMs, 'ms/op', numberLocale)]]} />
+        <MetricSummaryCard title={t('monitoring.writePerformance')} Icon={HardDrive}
+          pairs={[[t('monitoring.throughput'), formatBytesPerSecond(summary.diskWriteBps, numberLocale)],
+            [t('monitoring.latency'), formatMonitoringRate(summary.diskWriteLatencyMs, 'ms/op', numberLocale)]]} />
+      </div>}
+      <div className="monitoring-chart-grid-layout">{charts[selectedCategory].map((chart) => <MetricChart key={chart.key}
+        title={chart.title} series={chart.lines} unit={chart.unit} range={range} locale={numberLocale} t={t} />)}</div>
+    </section>
   </div>;
 }
 
 export default function VmMonitoringTab({ projectId, instanceId }) {
   const [range, setRange] = useState('1h');
+  const [category, setCategory] = useState('compute');
   const monitoring = useVmMonitoring({ projectId, instanceId, range });
   return <MonitoringView status={monitoring.status} data={monitoring.data} error={monitoring.error} range={range}
-    onRangeChange={setRange} onRefresh={monitoring.refresh} />;
+    onRangeChange={setRange} onRefresh={monitoring.refresh}
+    category={category} onCategoryChange={setCategory} />;
 }
