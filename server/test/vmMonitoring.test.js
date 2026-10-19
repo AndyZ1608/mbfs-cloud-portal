@@ -62,8 +62,10 @@ test('client only calls allowlisted VM endpoints with a backend key and request 
     fetchImpl: async (url, options) => { calls.push({ url, options }); return response(snapshot()); } });
   await client.snapshot(VM, 'req-1');
   await client.history(VM, 'cpuPercent', { hours: 6, stepSeconds: 60 }, 'req-2');
+  await client.history(VM, 'networkRxPps', { hours: 1, stepSeconds: 60 }, 'req-3');
   assert.equal(calls[0].url, `http://monitoring.internal/api/v1/admin/instances/${VM}`);
   assert.equal(calls[1].url, `http://monitoring.internal/api/v1/admin/instances/${VM}/history?metric=cpu_percent&hours=6&step_seconds=60`);
+  assert.equal(calls[2].url, `http://monitoring.internal/api/v1/admin/instances/${VM}/history?metric=network_rx_pps&hours=1&step_seconds=60`);
   assert.equal(calls[0].options.headers['X-API-Key'], API_KEY);
   assert.equal(calls[0].options.headers['X-Request-Id'], 'req-1');
   assert.equal(calls[0].options.method, 'GET');
@@ -128,8 +130,8 @@ test('service maps 1h/6h/24h history, bounds concurrency, and leaves 7d unsuppor
 test('optional packet and latency values are passed through only when rated by Monitoring', async () => {
   const withOptional = snapshot();
   Object.assign(withOptional.metrics, {
-    network_rx_packets_per_second: 1245, network_tx_packets_per_second: 0,
-    network_rx_drops_per_second: null, network_tx_drops_per_second: 2.4,
+    network_rx_pps: 1245, network_tx_pps: 0,
+    network_rx_drops_per_sec: null, network_tx_drops_per_sec: 2.4,
     disk_read_latency_ms: 1.82, disk_write_latency_ms: -1,
   });
   const normalized = normalizeSnapshot(withOptional, VM, PROJECT_A);

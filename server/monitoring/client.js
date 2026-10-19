@@ -10,10 +10,10 @@ export const HISTORY_METRICS = Object.freeze({
   networkTxBps: { metric: 'network_tx_bytes_per_second', unit: 'B/s' },
   // Proposed additive Monitoring API keys, not exporter/Prometheus metric names.
   // Queried only when the instance snapshot advertises each key.
-  networkRxPps: { metric: 'network_rx_packets_per_second', unit: 'pps', optional: true },
-  networkTxPps: { metric: 'network_tx_packets_per_second', unit: 'pps', optional: true },
-  networkRxDropsPerSec: { metric: 'network_rx_drops_per_second', unit: 'drops/s', optional: true },
-  networkTxDropsPerSec: { metric: 'network_tx_drops_per_second', unit: 'drops/s', optional: true },
+  networkRxPps: { metric: 'network_rx_pps', unit: 'pps', optional: true },
+  networkTxPps: { metric: 'network_tx_pps', unit: 'pps', optional: true },
+  networkRxDropsPerSec: { metric: 'network_rx_drops_per_sec', unit: 'drops/s', optional: true },
+  networkTxDropsPerSec: { metric: 'network_tx_drops_per_sec', unit: 'drops/s', optional: true },
   diskReadLatencyMs: { metric: 'disk_read_latency_ms', unit: 'ms/op', optional: true },
   diskWriteLatencyMs: { metric: 'disk_write_latency_ms', unit: 'ms/op', optional: true },
 });
