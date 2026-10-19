@@ -159,6 +159,29 @@ test('optional packet and latency values are passed through only when rated by M
     (error) => error.code === 'monitoring_identity_mismatch');
 });
 
+test('optional metric histories are requested independently and preserve missing intervals', async () => {
+  const partialSnapshot = snapshot();
+  partialSnapshot.metrics.network_rx_pps = 0;
+  partialSnapshot.metrics.disk_read_latency_ms = null;
+  const requested = [];
+  const service = new MonitoringService({ snapshot: async () => partialSnapshot,
+    history: async (_id, key) => {
+      requested.push(key);
+      return history(key, key === 'networkRxPps' ? 0 : 1.82);
+    } });
+  const data = await service.metrics(VM, PROJECT_A, '24h');
+  assert.equal(requested.length, 8, 'six existing histories plus only two advertised optional histories');
+  assert.ok(requested.includes('networkRxPps'));
+  assert.ok(requested.includes('diskReadLatencyMs'));
+  assert.ok(!requested.includes('networkTxPps'));
+  assert.deepEqual(data.series.networkRxPps.map(({ value }) => value), [null, 0]);
+  assert.deepEqual(data.series.diskReadLatencyMs.map(({ value }) => value), [null, 1.82]);
+  assert.deepEqual(data.series.networkTxPps, []);
+  assert.equal(data.summary.networkRxPps, 0);
+  assert.equal(data.summary.diskReadLatencyMs, null);
+  assert.equal(data.partial, false);
+});
+
 test('missing snapshot and partial history retain safe N/A/No Data semantics', async () => {
   const missing = new MonitoringService({ snapshot: async () => null, history: async () => { throw new Error('should not load'); } });
   assert.deepEqual(await missing.metrics(VM, PROJECT_A, '1h', 'req'), emptyMonitoringData());
