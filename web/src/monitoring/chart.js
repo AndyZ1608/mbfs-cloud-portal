@@ -1,4 +1,4 @@
-import { formatBytesPerSecond, formatPercent } from './model.js';
+import { formatBytesPerSecond, formatMonitoringRate, formatPercent } from './model.js';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -6,7 +6,9 @@ const DAY = 24 * HOUR;
 const BASE_STEPS = { '1h': 10 * MINUTE, '6h': HOUR, '24h': 4 * HOUR, '7d': DAY };
 
 export function formatChartValue(value, unit, locale = 'en-US') {
-  return unit === 'percent' ? formatPercent(value, locale) : formatBytesPerSecond(value, locale);
+  if (unit === 'percent') return formatPercent(value, locale);
+  if (unit === 'throughput') return formatBytesPerSecond(value, locale);
+  return formatMonitoringRate(value, unit, locale);
 }
 
 export function formatFullTimestamp(timestamp, locale = 'en-US') {

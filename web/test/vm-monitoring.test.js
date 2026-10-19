@@ -78,8 +78,8 @@ test('Monitoring renders five N/A summaries and four localized no-data charts', 
       const html = renderToStaticMarkup(React.createElement(LocaleProvider, null,
         React.createElement(MonitoringView, { status: 'ready', data: emptyVmMonitoring(), range: '1h',
           onRangeChange() {}, onRefresh() {} })));
-      assert.equal((html.match(/class="monitoring-summary-card"/g) || []).length, 5);
-      assert.equal((html.match(/class="monitoring-chart-empty"/g) || []).length, 4);
+      assert.equal((html.match(/class="monitoring-summary-card"/g) || []).length, 8);
+      assert.equal((html.match(/class="monitoring-chart-empty"/g) || []).length, 7);
       assert.ok((html.match(/N\/A/g) || []).length >= 7);
       assert.ok(html.includes(translate(locale, 'monitoring.noData')));
       assert.ok(html.includes(translate(locale, 'monitoring.chartEmpty')));
@@ -162,7 +162,7 @@ test('future normalized points render without fabricating missing sections, and 
     assert.match(html, /0 B\/s/);
     assert.match(html, /Unreachable/);
     assert.equal((html.match(/<polyline/g) || []).length, 2);
-    assert.equal((html.match(/class="monitoring-chart-empty"/g) || []).length, 2);
+    assert.equal((html.match(/class="monitoring-chart-empty"/g) || []).length, 5);
     data.summary.reachable = 'unknown';
     const unknownHtml = renderToStaticMarkup(React.createElement(LocaleProvider, null,
       React.createElement(MonitoringView, { status: 'ready', data, range: '1h', onRangeChange() {}, onRefresh() {} })));
@@ -191,6 +191,37 @@ test('future normalized points render without fabricating missing sections, and 
   }
 });
 
+test('new Monitoring cards and charts remain independent of missing upstream metrics', async () => {
+  const vite = await createServer({ server: { middlewareMode: true, watch: null }, appType: 'custom' });
+  const priorStorage = globalThis.localStorage;
+  try {
+    const { MonitoringView } = await vite.ssrLoadModule('/src/components/VmMonitoringTab.jsx');
+    const { LocaleProvider } = await vite.ssrLoadModule('/src/i18n/react.jsx');
+    globalThis.localStorage = { getItem: () => 'en' };
+    const data = emptyVmMonitoring();
+    data.summary.cpuPercent = 42.7;
+    data.summary.networkRxPps = 0;
+    data.summary.networkTxPps = 1245;
+    data.summary.diskReadLatencyMs = 1.82;
+    data.series.networkRxPps = [{ timestamp: 1791446500000, value: 0 },
+      { timestamp: 1791446560000, value: 1245 }];
+    const html = renderToStaticMarkup(React.createElement(LocaleProvider, null,
+      React.createElement(MonitoringView, { status: 'ready', data, range: '1h',
+        onRangeChange() {}, onRefresh() {} })));
+    assert.match(html, /42\.7%/);
+    assert.match(html, /0 pps/);
+    assert.match(html, /1,245 pps/);
+    assert.match(html, /1\.82 ms\/op/);
+    assert.match(html, /Packet Drops/);
+    assert.equal((html.match(/class="monitoring-chart-empty"/g) || []).length, 6);
+    assert.ok((html.match(/N\/A/g) || []).length >= 3);
+  } finally {
+    if (priorStorage === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = priorStorage;
+    await vite.close();
+  }
+});
+
 test('browser boundary does not expose admin Monitoring API, PromQL, or credentials', () => {
   const code = [
     source('../src/monitoring/provider.js'), source('../src/monitoring/useVmMonitoring.js'),
@@ -200,6 +231,6 @@ test('browser boundary does not expose admin Monitoring API, PromQL, or credenti
   assert.match(code, /api\(`\/servers\/\$\{encodeURIComponent\(instanceId\)\}\/monitoring/);
   assert.doesNotMatch(source('../src/pages/Instances.jsx'), /VmMonitoringTab|loadVmMonitoring/);
   const css = source('../src/styles.css');
-  assert.match(css, /\.monitoring-summary-grid \{ display: grid; grid-template-columns: repeat\(5, minmax\(0, 1fr\)\)/);
+  assert.match(css, /\.monitoring-summary-grid \{ display: grid; grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
   assert.match(css, /@media \(max-width: 420px\) \{ \.monitoring-summary-grid \{ grid-template-columns: 1fr/);
 });

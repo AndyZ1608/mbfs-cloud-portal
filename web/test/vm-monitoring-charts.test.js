@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { chartSamples, chartTimeTicks, formatAxisTimestamp, formatChartValue,
   formatFullTimestamp, hoverTimestampAt, nearestRecordedTimestamp, recordedTimestamps, recordedValuesAt,
   sampleTolerance } from '../src/monitoring/chart.js';
+import { formatMonitoringRate } from '../src/monitoring/model.js';
 
 const START = Date.UTC(2026, 9, 8, 9, 20, 30);
 const source = (relative) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8');
@@ -110,6 +111,37 @@ test('tooltips show exact time, colored multiple-series values, and metric-speci
     assert.equal(formatChartValue(0, 'percent'), '0%');
     assert.equal(formatChartValue(0, 'throughput'), '0 B/s');
     assert.equal(formatChartValue(null, 'throughput'), 'N/A');
+  } finally { await vite.close(); }
+});
+
+test('packet, drop and latency charts use measured values, timestamp tooltips and distinct units', async () => {
+  const vite = await createServer({ server: { middlewareMode: true, watch: null }, appType: 'custom' });
+  try {
+    const { ChartTooltip, MetricChart } = await vite.ssrLoadModule('/src/components/VmMonitoringTab.jsx');
+    for (const [unit, values, expected] of [
+      ['pps', [1245, 836], ['1,245 pps', '836 pps']],
+      ['drops/s', [0, 2.4], ['0 drops/s', '2.4 drops/s']],
+      ['ms/op', [1.82, 4.31], ['1.82 ms/op', '4.31 ms/op']],
+    ]) {
+      const selected = values.map((value, index) => ({ key: String(index), label: index ? 'TX' : 'RX',
+        color: index ? 'blue' : 'red', point: { timestamp: START, value } }));
+      const tooltip = renderToStaticMarkup(React.createElement(ChartTooltip,
+        { timestamp: START, selected, unit, locale: 'en-US', left: 40 }));
+      assert.match(tooltip, /October 8, 2026/);
+      assert.match(tooltip, /:20:30/);
+      for (const value of expected) assert.ok(tooltip.includes(value));
+      const chart = renderToStaticMarkup(React.createElement(MetricChart, {
+        title: unit, unit, range: '1h', locale: 'en-US', t: () => 'No data',
+        series: selected.map((item) => ({ key: item.key, label: item.label, color: item.color,
+          points: [{ timestamp: START, value: item.point.value }, { timestamp: START + 60_000, value: null }] })),
+      }));
+      assert.match(chart, /monitoring-chart-axis/);
+      assert.ok(chart.includes(unit));
+    }
+    assert.equal(formatMonitoringRate(null, 'pps'), 'N/A');
+    assert.equal(formatMonitoringRate(-1, 'drops/s'), 'N/A');
+    assert.equal(formatMonitoringRate(0, 'ms/op'), '0 ms/op');
+    assert.notEqual(formatMonitoringRate(0.001, 'drops/s'), '0 drops/s');
   } finally { await vite.close(); }
 });
 

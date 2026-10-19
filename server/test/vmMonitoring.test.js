@@ -125,6 +125,38 @@ test('service maps 1h/6h/24h history, bounds concurrency, and leaves 7d unsuppor
   assert.equal(calls.length, 0);
 });
 
+test('optional packet and latency values are passed through only when rated by Monitoring', async () => {
+  const withOptional = snapshot();
+  Object.assign(withOptional.metrics, {
+    network_rx_packets_per_second: 1245, network_tx_packets_per_second: 0,
+    network_rx_drops_per_second: null, network_tx_drops_per_second: 2.4,
+    disk_read_latency_ms: 1.82, disk_write_latency_ms: -1,
+  });
+  const normalized = normalizeSnapshot(withOptional, VM, PROJECT_A);
+  assert.equal(normalized.summary.networkRxPps, 1245);
+  assert.equal(normalized.summary.networkTxPps, 0);
+  assert.equal(normalized.summary.networkRxDropsPerSec, null);
+  assert.equal(normalized.summary.networkTxDropsPerSec, 2.4);
+  assert.equal(normalized.summary.diskReadLatencyMs, 1.82);
+  assert.equal(normalized.summary.diskWriteLatencyMs, null, 'invalid negative latency is unavailable');
+  assert.equal(normalizeSnapshot(snapshot(), VM, PROJECT_A).summary.networkRxPps, null);
+
+  const calls = [];
+  const service = new MonitoringService({ snapshot: async () => withOptional,
+    history: async (_id, key) => { calls.push(key); return history(key, key === 'networkTxPps' ? 0 : 2.4); } });
+  const data = await service.metrics(VM, PROJECT_A, '1h');
+  assert.equal(calls.length, 12);
+  assert.equal(data.series.networkTxPps[1].value, 0);
+  assert.equal(data.series.networkRxDropsPerSec[0].value, null);
+  assert.equal(data.series.diskReadLatencyMs[1].value, 2.4);
+  assert.deepEqual(normalizeHistory({ ...history('diskReadLatencyMs'), points: [[1791446500, -3]] },
+    'diskReadLatencyMs', VM, PROJECT_A), [{ timestamp: 1791446500000, value: null }]);
+  assert.throws(() => normalizeHistory({ ...history('networkRxPps'), unit: 'B/s' },
+    'networkRxPps', VM, PROJECT_A), (error) => error.code === 'monitoring_invalid_response');
+  assert.throws(() => normalizeSnapshot(withOptional, VM, PROJECT_B),
+    (error) => error.code === 'monitoring_identity_mismatch');
+});
+
 test('missing snapshot and partial history retain safe N/A/No Data semantics', async () => {
   const missing = new MonitoringService({ snapshot: async () => null, history: async () => { throw new Error('should not load'); } });
   assert.deepEqual(await missing.metrics(VM, PROJECT_A, '1h', 'req'), emptyMonitoringData());

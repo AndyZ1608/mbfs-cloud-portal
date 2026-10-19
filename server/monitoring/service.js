@@ -16,12 +16,15 @@ const comparableId = (value) => {
   return /^[0-9a-f]{32}$/i.test(compact) ? compact.toLowerCase() : value.toLowerCase();
 };
 const numeric = (value) => typeof value === 'number' && Number.isFinite(value) ? value : null;
+const nonnegative = (value) => { const result = numeric(value); return result !== null && result >= 0 ? result : null; };
 const asObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
 
 export function emptyMonitoringData() {
   return {
     summary: { cpuPercent: null, memoryPercent: null, memoryUsedBytes: null, memoryTotalBytes: null,
-      diskReadBps: null, diskWriteBps: null, networkRxBps: null, networkTxBps: null, reachable: null },
+      diskReadBps: null, diskWriteBps: null, networkRxBps: null, networkTxBps: null,
+      networkRxPps: null, networkTxPps: null, networkRxDropsPerSec: null, networkTxDropsPerSec: null,
+      diskReadLatencyMs: null, diskWriteLatencyMs: null, reachable: null },
     series: Object.fromEntries(Object.keys(HISTORY_METRICS).map((key) => [key, []])),
     historyUnsupported: false, partial: false,
   };
@@ -47,6 +50,10 @@ export function normalizeSnapshot(payload, instanceId, projectId) {
   data.summary.diskWriteBps = numeric(metrics.disk_write_bytes_per_second);
   data.summary.networkRxBps = numeric(metrics.network_rx_bytes_per_second);
   data.summary.networkTxBps = numeric(metrics.network_tx_bytes_per_second);
+  // Optional, already-rated service values only. CMP never derives rates or latency from counters.
+  for (const [key, spec] of Object.entries(HISTORY_METRICS)) {
+    if (spec.optional) data.summary[key] = nonnegative(metrics[spec.metric]);
+  }
   // QEMU RSS is host process memory, not guest-used memory; reachability is not provided.
   return data;
 }
@@ -64,7 +71,7 @@ export function normalizeHistory(payload, key, instanceId, projectId) {
       || point[1] !== null && numeric(point[1]) === null) {
       throw new MonitoringError(502, 'monitoring_invalid_response', 'Monitoring trả về mẫu dữ liệu không hợp lệ.');
     }
-    return { timestamp: point[0] * 1000, value: point[1] };
+    return { timestamp: point[0] * 1000, value: spec.optional ? nonnegative(point[1]) : point[1] };
   }).sort((a, b) => a.timestamp - b.timestamp);
 }
 
@@ -91,7 +98,10 @@ export class MonitoringService {
     const historyOptions = MONITORING_RANGES[range];
     if (!historyOptions) data.historyUnsupported = true;
     if (!snapshot || !historyOptions) return data;
-    const keys = Object.keys(HISTORY_METRICS);
+    // Older Monitoring deployments do not expose these optional metric keys. Do not
+    // request unsupported history or turn an otherwise healthy tab into a partial error.
+    const keys = Object.keys(HISTORY_METRICS).filter((key) => !HISTORY_METRICS[key].optional
+      || Object.hasOwn(snapshot.metrics, HISTORY_METRICS[key].metric));
     const histories = await boundedHistories(keys, (key) => this.client.history(instanceId, key, historyOptions, requestId));
     for (let i = 0; i < keys.length; i++) {
       const result = histories[i];

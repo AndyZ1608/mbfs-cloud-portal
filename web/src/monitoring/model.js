@@ -3,9 +3,13 @@ export const MONITORING_RANGES = ['1h', '6h', '24h', '7d'];
 const SUMMARY_KEYS = [
   'cpuPercent', 'memoryPercent', 'memoryUsedBytes', 'memoryTotalBytes',
   'diskReadBps', 'diskWriteBps', 'networkRxBps', 'networkTxBps', 'reachable',
+  'networkRxPps', 'networkTxPps', 'networkRxDropsPerSec', 'networkTxDropsPerSec',
+  'diskReadLatencyMs', 'diskWriteLatencyMs',
 ];
 export const SERIES_KEYS = [
   'cpuPercent', 'memoryPercent', 'diskReadBps', 'diskWriteBps', 'networkRxBps', 'networkTxBps',
+  'networkRxPps', 'networkTxPps', 'networkRxDropsPerSec', 'networkTxDropsPerSec',
+  'diskReadLatencyMs', 'diskWriteLatencyMs',
 ];
 
 export function emptyVmMonitoring() {
@@ -43,6 +47,15 @@ function formatBytesValue(value, locale, suffix) {
 
 export const formatBytes = (value, locale = 'en-US') => formatBytesValue(value, locale, '');
 export const formatBytesPerSecond = (value, locale = 'en-US') => formatBytesValue(value, locale, '/s');
+
+export function formatMonitoringRate(value, unit, locale = 'en-US') {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 'N/A';
+  const maximumFractionDigits = unit === 'ms/op' ? 3 : unit === 'drops/s' ? 2 : 1;
+  const options = value > 0 && value < 0.01
+    ? { maximumSignificantDigits: 3, ...(value < 0.0001 ? { notation: 'scientific' } : {}) }
+    : { maximumFractionDigits };
+  return `${new Intl.NumberFormat(locale, options).format(value)} ${unit}`;
+}
 
 export function chartPoints(series, limit = 600) {
   if (!Array.isArray(series)) return [];

@@ -2,7 +2,7 @@ import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Activity, Cpu, HardDrive, MemoryStick, Network, RefreshCw, Wifi } from 'lucide-react';
 import { useI18n } from '../i18n/react.jsx';
 import { intlLocale } from '../i18n/index.js';
-import { emptyVmMonitoring, formatBytes, formatBytesPerSecond,
+import { emptyVmMonitoring, formatBytes, formatBytesPerSecond, formatMonitoringRate,
   formatPercent, hasMonitoringData, MONITORING_RANGES } from '../monitoring/model.js';
 import { chartMaximum, chartSamples, chartTimeTicks, formatAxisTimestamp, formatChartValue,
   formatFullTimestamp, formatSampleTime, hoverTimestampAt, recordedTimestamps, recordedValuesAt,
@@ -223,6 +223,18 @@ export function MonitoringView({ status, data, error, range, onRangeChange, onRe
       { key: 'networkRxBps', label: t('monitoring.receive'), color: 'var(--accent)', points: series.networkRxBps },
       { key: 'networkTxBps', label: t('monitoring.transmit'), color: 'var(--ok)', points: series.networkTxBps },
     ] },
+    { key: 'packets', title: t('monitoring.networkPacketRate'), unit: 'pps', lines: [
+      { key: 'networkRxPps', label: t('monitoring.rxPps'), color: 'var(--accent)', points: series.networkRxPps },
+      { key: 'networkTxPps', label: t('monitoring.txPps'), color: 'var(--ok)', points: series.networkTxPps },
+    ] },
+    { key: 'drops', title: t('monitoring.packetDrops'), unit: 'drops/s', lines: [
+      { key: 'networkRxDropsPerSec', label: t('monitoring.rxDrops'), color: 'var(--accent)', points: series.networkRxDropsPerSec },
+      { key: 'networkTxDropsPerSec', label: t('monitoring.txDrops'), color: 'var(--warn)', points: series.networkTxDropsPerSec },
+    ] },
+    { key: 'latency', title: t('monitoring.storageLatency'), unit: 'ms/op', lines: [
+      { key: 'diskReadLatencyMs', label: t('monitoring.readLatency'), color: 'var(--accent)', points: series.diskReadLatencyMs },
+      { key: 'diskWriteLatencyMs', label: t('monitoring.writeLatency'), color: 'var(--warn)', points: series.diskWriteLatencyMs },
+    ] },
   ];
 
   return <div className="vm-monitoring">{toolbar}
@@ -239,6 +251,18 @@ export function MonitoringView({ status, data, error, range, onRangeChange, onRe
       <MetricSummaryCard title={t('monitoring.network')} Icon={Network}
         value={bothMissing(summary.networkRxBps, summary.networkTxBps) ? 'N/A' : null}
         pairs={[[t('monitoring.receive'), networkRx], [t('monitoring.transmit'), networkTx]]} />
+      <MetricSummaryCard title={t('monitoring.networkPacketRate')} Icon={Network}
+        value={bothMissing(summary.networkRxPps, summary.networkTxPps) ? 'N/A' : null}
+        pairs={[[t('monitoring.rxPps'), formatMonitoringRate(summary.networkRxPps, 'pps', numberLocale)],
+          [t('monitoring.txPps'), formatMonitoringRate(summary.networkTxPps, 'pps', numberLocale)]]} />
+      <MetricSummaryCard title={t('monitoring.packetDrops')} Icon={Activity}
+        value={bothMissing(summary.networkRxDropsPerSec, summary.networkTxDropsPerSec) ? 'N/A' : null}
+        pairs={[[t('monitoring.rxDrops'), formatMonitoringRate(summary.networkRxDropsPerSec, 'drops/s', numberLocale)],
+          [t('monitoring.txDrops'), formatMonitoringRate(summary.networkTxDropsPerSec, 'drops/s', numberLocale)]]} />
+      <MetricSummaryCard title={t('monitoring.storageLatency')} Icon={HardDrive}
+        value={bothMissing(summary.diskReadLatencyMs, summary.diskWriteLatencyMs) ? 'N/A' : null}
+        pairs={[[t('monitoring.readLatency'), formatMonitoringRate(summary.diskReadLatencyMs, 'ms/op', numberLocale)],
+          [t('monitoring.writeLatency'), formatMonitoringRate(summary.diskWriteLatencyMs, 'ms/op', numberLocale)]]} />
       <MetricSummaryCard title={t('monitoring.reachability')} Icon={Wifi}
         value={summary.reachable === true ? t('monitoring.reachable')
           : summary.reachable === false ? t('monitoring.unreachable')
