@@ -9,6 +9,7 @@ import { InstanceActionDialogs } from './Instances.jsx';
 import { attachedSecurityGroups, attachedStorage, canDetachVolume, networkRows,
   resolvedInstanceFlavor, resolvedInstanceImageName } from '../instanceDetailData.js';
 import { formatActivity } from '../activityFormatter.js';
+import ActivityTable from '../components/ActivityTable.jsx';
 import ClassificationPicker, { ClassificationChip } from '../components/ClassificationPicker.jsx';
 import { emptySelection, selectionFromClassification } from '../classification.js';
 import { instanceErrorCategory, instanceErrorDescription, instanceErrorGuidance,
@@ -405,13 +406,11 @@ function InstanceDetail({ instanceId, project, roles, monitoringEnabled }) {
         <VmMonitoringTab projectId={currentProjectId} instanceId={instanceId} />
       </React.Suspense>}
       {tab === 'activity' && <><h3>{t('instance.detail.activity')}</h3><TabState state={current} t={t} empty={tabData?.entries?.length === 0 && 'instance.detail.noActivity'} errorKey="instance.detail.activityError">
-        <div className="vm-detail-table"><table className="tbl"><thead><tr>{['time', 'action', 'user', 'result', 'details'].map((key) => <th key={key}>{t(`instance.detail.${key}`)}</th>)}</tr></thead><tbody>
-          {(tabData?.entries || []).map((event, index) => {
-            const formatted = formatActivity(event, t);
-            return <tr key={`${event.ts}-${index}`}><td>{fmtDate(event.ts)}</td><td>{formatted.action || value(event.action)}</td><td>{value(event.user)}</td><td>{formatted.result}</td>
-              <td>{formatted.details || '—'}</td></tr>;
-          })}
-        </tbody></table></div>
+        <ActivityTable entries={tabData?.entries || []} currentName={server.name}
+          actionFor={(event) => {
+            const action = formatActivity(event, t).action;
+            return action && action !== event.action ? action : t('audit.action.other');
+          }} />
         {tabData?.next_offset != null && <button className="btn ghost sm" disabled={activityMoreBusy} onClick={loadMoreActivity}>{t('instance.detail.loadMore')}</button>}
       </TabState></>}
     </section>

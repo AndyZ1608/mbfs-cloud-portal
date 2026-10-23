@@ -127,6 +127,21 @@ export function mockFetch(svc, method, rawPath, body, projectId = 'p-demo') {
   if (svc === 'image') return mockImage(m, path, q, body, projectId);
   if (svc === 'lb') return mockLb(m, path, q, body, projectId);
   if (svc === 'identity') return mockIdentity(m, path, q, body);
+  if (svc === 'placement') return mockPlacement(m, path);
+  throw notFound();
+}
+
+function mockPlacement(method, path) {
+  const uuid = '00000000-0000-4000-8000-000000000001';
+  if (method === 'GET' && path === '/resource_providers') {
+    return { resource_providers: [{ uuid, name: 'mock-compute' }] };
+  }
+  if (method === 'GET' && path === `/resource_providers/${uuid}/inventories`) {
+    return { inventories: { VCPU: { total: 96, reserved: 0, allocation_ratio: 4 } } };
+  }
+  if (method === 'GET' && path === `/resource_providers/${uuid}/usages`) {
+    return { usages: { VCPU: 41 } };
+  }
   throw notFound();
 }
 

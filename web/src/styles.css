@@ -876,8 +876,12 @@ html[data-theme="dark"] .toast { background: #0b1220; }
 .vm-error-list-link { display: block; width: max-content; max-width: 220px; margin-top: 5px; color: var(--err); font-size: 11px; text-decoration: none; line-height: 1.35; }
 .vm-error-list-link:hover { text-decoration: underline; }
 .vm-create-warning { grid-column: 1 / -1; border: 1px solid var(--err); border-radius: 8px; background: var(--err-bg); color: var(--err); padding: 12px; font-size: 13px; }
-.audit-details { min-width: 180px; max-width: 340px; overflow-wrap: anywhere; }
-.audit-details > span, .audit-details > small { display: block; margin-top: 3px; }
+.activity-table-wrap { width: 100%; overflow-x: auto; }
+.activity-table { min-width: 620px; }
+.activity-table td { padding: 8px 10px; overflow-wrap: anywhere; }
+.activity-table .activity-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.activity-table .activity-vm { font-weight: 600; }
+.activity-table th:last-child, .activity-table td:last-child { white-space: nowrap; }
 @media (max-width: 900px) { .vm-detail-fields { grid-template-columns: 1fr; } }
 
 /* VM classification stays compact in lists and readable in the detail editor. */

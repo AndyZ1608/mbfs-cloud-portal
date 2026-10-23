@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api, ramGB } from '../api.js';
 import { Modal, Field, UsageBar, toast, Empty, PageHead } from '../components/ui.jsx';
 import { useI18n } from '../i18n/react.jsx';
+import { allocationPercentage } from '../clusterCapacity.js';
 
 export default function Admin() {
   const { t } = useI18n();
@@ -23,29 +24,45 @@ export default function Admin() {
 
 // ---------- Tổng quan hypervisor ----------
 function Overview() {
-  const { t, locale } = useI18n();
   const [data, setData] = useState(null);
   useEffect(() => { api('/admin/overview').then(setData).catch((e) => toast(e.message, 'error')); }, []);
+  const { t } = useI18n();
   if (!data) return <Empty>{t('common.loading')}</Empty>;
+  return <ClusterOverview data={data} />;
+}
+
+export function ClusterOverview({ data }) {
+  const { t, locale } = useI18n();
   const h = data.hypervisors;
+  const vcpu = data.vcpu;
+  const vcpuPercent = vcpu ? allocationPercentage(vcpu.allocated, vcpu.allocatable) : null;
+  const ramPercent = h ? allocationPercentage(h.memory_mb_used, h.memory_mb) : null;
+  const percent = (value) => value == null ? '—' : `${new Intl.NumberFormat(locale === 'vi' ? 'vi-VN' : 'en-US', { maximumFractionDigits: 1 }).format(value)}%`;
   return (
     <>
       {!h ? (
         <div className="card notice-card">{t('admin.hypervisorUnavailable')} {locale === 'vi' ? data.hypervisors_error || t('admin.novaDenied') : t('admin.novaDenied')}</div>
-      ) : (
-        <div className="grid-cards">
-          <div className="card">
-            <h4>{t('admin.clusterResources')}</h4>
-            <UsageBar label={t(h.count === 1 ? 'admin.hypervisorCount.one' : 'admin.hypervisorCount.other', { count: h.count })} used={h.vcpus_used} max={h.vcpus} />
+      ) : null}
+      <div className="grid-cards">
+        <div className="card">
+          <h4>{t('admin.clusterResources')}</h4>
+          {vcpu ? <>
+            <UsageBar label={t('admin.allocatableVcpu')} used={vcpu.allocated} max={vcpu.allocatable} />
+            <div className="stat-sub dim">{t('admin.inventoryVcpu')}: {vcpu.inventory_total}{vcpu.allocation_ratio != null ? ` · ${t('admin.placementRatio')}: ${vcpu.allocation_ratio}:1` : ''}</div>
+            {vcpu.allocated > vcpu.allocatable && <span className="badge badge-err">{t('admin.vcpuOverallocated')}</span>}
+          </> : <div className="dim">{t('admin.placementUnavailable')}</div>}
+          {h && <>
             <UsageBar label="RAM" used={h.memory_mb_used} max={h.memory_mb} render={(x) => ramGB(x)} />
             <UsageBar label={t('admin.localDisk')} used={h.local_gb_used} max={h.local_gb} unit="GB" />
-          </div>
+          </>}
+        </div>
+        {h && <>
           <div className="card stat"><span className="stat-label">{t('admin.runningVms')}</span><span className="stat-val mono">{h.running_vms}</span></div>
           <div className="card stat"><span className="stat-label">Hypervisor</span><span className="stat-val mono">{h.count}</span>
-            <span className="stat-sub dim">{t('admin.allocationRate')} vCPU {Math.round((h.vcpus_used / h.vcpus) * 100)}% · RAM {Math.round((h.memory_mb_used / h.memory_mb) * 100)}%</span></div>
-          <div className="card stat"><span className="stat-label">Projects</span><span className="stat-val mono">{data.projects.length}</span></div>
-        </div>
-      )}
+            <span className="stat-sub dim">{t('admin.allocationRate')} vCPU {percent(vcpuPercent)} · RAM {percent(ramPercent)}</span></div>
+        </>}
+        <div className="card stat"><span className="stat-label">Projects</span><span className="stat-val mono">{data.projects.length}</span></div>
+      </div>
     </>
   );
 }

@@ -3,6 +3,7 @@
 import { Router } from 'express';
 import { osFetch, OSError } from '../openstack.js';
 import { requireRole } from '../middleware.js';
+import { placementVcpuCapacity } from '../clusterCapacity.js';
 
 const router = Router();
 
@@ -12,13 +13,16 @@ router.use('/admin', requireRole('admin'));
 router.get('/admin/overview', async (req, res, next) => {
   try {
     const sess = req.session.os;
-    const [hypR, prjR] = await Promise.allSettled([
+    const [hypR, prjR, vcpuR] = await Promise.allSettled([
       osFetch(sess, 'compute', '/os-hypervisors/statistics'),
       osFetch(sess, 'identity', '/v3/projects'),
+      placementVcpuCapacity(sess),
     ]);
     res.json({
       hypervisors: hypR.status === 'fulfilled' ? hypR.value.hypervisor_statistics : null,
       hypervisors_error: hypR.status === 'rejected' ? String(hypR.reason?.message || hypR.reason) : null,
+      vcpu: vcpuR.status === 'fulfilled' ? vcpuR.value : null,
+      vcpu_error: vcpuR.status === 'rejected' ? 'placement_unavailable' : null,
       projects: prjR.status === 'fulfilled' ? (prjR.value.projects || []).map((p) => ({ id: p.id, name: p.name, enabled: p.enabled, description: p.description })) : [],
     });
   } catch (e) { next(e); }

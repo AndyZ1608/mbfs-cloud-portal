@@ -160,6 +160,7 @@ const SERVICE_TYPES = {
   lb: ['load-balancer'],
   identity: ['identity'],
   object: ['object-store'],
+  placement: ['placement'],
 };
 
 export function endpointFor(catalog, svc) {

@@ -46,7 +46,7 @@ export function StatusBadge({ status }) {
 
 // ---------- Usage bar ----------
 export function UsageBar({ label, used, max, unit = '', render }) {
-  const pct = max > 0 ? Math.min(100, Math.round((used / max) * 100)) : 0;
+  const pct = max > 0 ? Math.min(100, Math.round((used / max) * 100)) : max === 0 && used > 0 ? 100 : 0;
   const tone = pct >= 90 ? 'err' : pct >= 75 ? 'warn' : 'ok';
   const show = render || ((v) => new Intl.NumberFormat(intlLocale()).format(v));
   return (

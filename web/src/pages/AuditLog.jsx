@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { api, fmtDate } from '../api.js';
+import { api } from '../api.js';
 import { toast, Empty, PageHead } from '../components/ui.jsx';
 import { useI18n } from '../i18n/react.jsx';
 import { formatActivity } from '../activityFormatter.js';
+import { activityStatus, isVmActivity, vmActivityId, vmActivityName } from '../activityPresentation.js';
+import ActivityTable from '../components/ActivityTable.jsx';
 
 // Match specific method/path pairs before broad resource operations.
 const RULES = [
@@ -80,35 +82,52 @@ export function actionLabel(e, t) {
   if (EXTERNAL_ACTIONS.has(e.action)) return t(`audit.semantic.${e.action}`);
   if (e.resource_type === 'network' && NETWORK_ACTIONS.has(e.action)) return t(`network.audit.${e.action}`);
   const formatted = formatActivity(e, t);
-  if (formatted.semantic) return formatted.action;
+  if (formatted.semantic) return formatted.action === e.action ? t('audit.action.other') : formatted.action;
   const key = `${e.method} ${e.path}`;
   for (const [re, label] of RULES) if (re.test(key)) return t(`audit.action.${label}`);
-  return key;
+  return t('audit.action.other');
+}
+
+export function filterActivityRows(entries, { query = '', resourceFilter = 'all', currentNames = {}, t }) {
+  const search = query.trim().toLowerCase();
+  return entries.filter((event) => {
+    if (resourceFilter === 'instance' && !isVmActivity(event)) return false;
+    if (!search) return true;
+    return [event.user, actionLabel(event, t), vmActivityName(event, t, currentNames), activityStatus(event, t).label]
+      .some((field) => (field || '').toLowerCase().includes(search));
+  });
 }
 
 export default function AuditLog() {
   const { t } = useI18n();
   const [entries, setEntries] = useState(null);
+  const [currentNames, setCurrentNames] = useState({});
   const [q, setQ] = useState('');
   const [resourceFilter, setResourceFilter] = useState('all');
 
   async function load() {
-    try { setEntries((await api('/audit?limit=500')).entries); }
+    try {
+      const rows = (await api('/audit?limit=500')).entries || [];
+      setEntries(rows);
+      setCurrentNames({});
+      // Historical names are preferred. Only unresolved VM records need a
+      // current-name lookup, using the existing project-scoped VM list.
+      if (rows.some((event) => isVmActivity(event) && vmActivityId(event)
+        && vmActivityName(event, t) === t('activity.unknownVm'))) {
+        try {
+          const { servers = [] } = await api('/servers');
+          setCurrentNames(Object.fromEntries(servers.map((server) => [server.id, server.name])));
+        } catch { /* Unknown is safer than an unscoped or stale name. */ }
+      }
+    }
     catch (e) { toast(e.message, 'error'); }
   }
   useEffect(() => { load(); }, []);
 
   const filtered = useMemo(() => {
     if (!entries) return null;
-    const s = q.trim().toLowerCase();
-    return entries.filter((e) => {
-      const formatted = formatActivity(e, t);
-      if (resourceFilter === 'instance' && !formatted.semantic) return false;
-      if (!s) return true;
-      return [e.user, actionLabel(e, t), e.path, e.resource_name, e.resource_id,
-        e.project?.name, formatted.details, networkAuditDetails(e)].some((field) => (field || '').toLowerCase().includes(s));
-    });
-  }, [entries, q, t, resourceFilter]);
+    return filterActivityRows(entries, { query: q, resourceFilter, currentNames, t });
+  }, [entries, q, t, resourceFilter, currentNames]);
 
   return (
     <>
@@ -124,33 +143,7 @@ export default function AuditLog() {
       {!filtered ? <Empty>{t('common.loading')}</Empty> : filtered.length === 0 ? (
         <Empty>{t('audit.empty')}</Empty>
       ) : (
-        <div className="card">
-          <table className="tbl">
-            <thead><tr><th>{t('audit.time')}</th><th>{t('audit.user')}</th><th>{t('common.action')}</th><th>{t('instance.detail.details')}</th><th>{t('audit.path')}</th><th>{t('audit.result')}</th></tr></thead>
-            <tbody>
-              {filtered.map((e, i) => {
-                const formatted = formatActivity(e, t);
-                return <tr key={e.ts + i}>
-                  <td className="dim" style={{ whiteSpace: 'nowrap' }}>{fmtDate(e.ts)}</td>
-                  <td><b>{e.user || '—'}</b></td>
-                  <td>{actionLabel(e, t)}</td>
-                  <td className="audit-details">
-                    {e.resource_name && <b>{e.resource_name}</b>}
-                    {e.resource_id && <span className="mono dim">{e.resource_id}</span>}
-                    {(formatted.details || networkAuditDetails(e)) && <span>{formatted.details || networkAuditDetails(e)}</span>}
-                    {e.project?.name && <small>{t('common.project')}: {e.project.name}</small>}
-                    {!e.resource_name && !e.resource_id && !formatted.details && !networkAuditDetails(e) && !e.project?.name && '—'}
-                  </td>
-                  <td className="mono dim" style={{ wordBreak: 'break-all' }}>{e.path}</td>
-                  <td>
-                    <span className={`badge badge-${e.result === 'failure' || e.status >= 400 ? 'err' : e.result === 'accepted' ? 'info' : 'ok'}`}><i />{formatted.result}</span>
-                    <span className="dim"> {e.status}{e.ms != null ? ` · ${e.ms}ms` : ''}</span>
-                  </td>
-                </tr>;
-              })}
-            </tbody>
-          </table>
-        </div>
+        <div className="card"><ActivityTable entries={filtered} actionFor={(event) => actionLabel(event, t)} currentNames={currentNames} /></div>
       )}
     </>
   );
