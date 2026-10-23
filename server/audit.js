@@ -55,6 +55,10 @@ export function setAccountAudit(res, event) {
   res.locals.accountAudit = event;
 }
 
+export function setResourceAudit(res, event) {
+  res.locals.resourceAudit = event;
+}
+
 export function addInstanceAudit(res, event) {
   (res.locals.instanceAudits ||= []).push(event);
 }
@@ -89,6 +93,7 @@ export function listInstanceAudit({ projectId, instanceId, limit = 100, offset =
     if (skipped++ < safeOffset) continue;
     out.push({ ts: entry.ts, action: entry.action, user: entry.user,
       result: entry.result, status: entry.status, source: entry.source || 'cmp',
+      resource_type: entry.resource_type, instance_id: entry.instance_id,
       resource_name: entry.resource_name || entry.instance_name || null,
       details: entry.details && typeof entry.details === 'object' && !Array.isArray(entry.details)
         ? entry.details : { interfaces: interfaces.filter((item) => item.instance_id === instanceId)
@@ -128,11 +133,10 @@ function fallbackInstanceAudit(req, path) {
   return action ? { action, resourceId } : null;
 }
 
-// Ghi tự động các thao tác ghi (trừ nhánh /auth — xử lý riêng để lấy username khi login)
+// Local login is handled by auditLogin, including pre-auth failures.
 export function auditMiddleware(req, res, next) {
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
-  // /auth/login đã có auditLogin ghi riêng (lấy được username từ body)
-  if ((req.originalUrl || req.url).startsWith('/api/auth/login')) return next();
+  if ((req.originalUrl || req.url).split('?')[0] === '/api/auth/login') return next();
   const t0 = Date.now();
   res.on('finish', () => {
     try {
@@ -148,7 +152,7 @@ export function auditMiddleware(req, res, next) {
         source_ip: clientIp(req), ms: Date.now() - t0,
       };
       const events = res.locals.networkAudits?.length ? res.locals.networkAudits : res.locals.instanceAudits?.length ? res.locals.instanceAudits :
-        [res.locals.classificationAudit || res.locals.volumeAudit || res.locals.instanceAudit || res.locals.accountAudit ||
+        [res.locals.classificationAudit || res.locals.volumeAudit || res.locals.instanceAudit || res.locals.accountAudit || res.locals.resourceAudit ||
           (path === '/api/account/change-password' ? {
             action: 'account.password.change', resourceId: os?.user?.id,
             resourceName: os?.user?.name,
@@ -195,6 +199,13 @@ export function auditMiddleware(req, res, next) {
             resource_type: event.resource_type, resource_id: event.resource_id,
             resource_name: event.resource_name, details: event.details || {},
           } : {}),
+          ...(event?.resourceType || event?.resource_type ? {
+            resource_type: event.resourceType || event.resource_type,
+            resource_id: event.resourceId || event.resource_id || null,
+            resource_name: event.resourceName || event.resource_name || null,
+            ...(event.instanceId ? { instance_id: event.instanceId } : {}),
+            details: event.details || {},
+          } : {}),
           ...(event?.legacy || {}),
           status: event?.status || base.status, result,
         });
@@ -206,14 +217,17 @@ export function auditMiddleware(req, res, next) {
   next();
 }
 
-// Riêng cho POST /api/auth/login: lấy username từ body (không bao giờ ghi mật khẩu)
+// Login identity is trusted only after a successful scoped Keystone session.
 export function auditLogin(req, res, next) {
   const t0 = Date.now();
   res.on('finish', () => {
     record({
       request_id: req.id,
-      user: req.body?.username || null,
-      project: null,
+      user: res.statusCode < 400 ? req.session?.os?.user?.name || null : null,
+      project: res.statusCode < 400 && req.session?.os?.project
+        ? { id: req.session.os.project.id, name: req.session.os.project.name } : null,
+      project_id: res.statusCode < 400 ? req.session?.os?.project?.id || null : null,
+      action: 'auth.login', resource_type: 'cmp', resource_name: null,
       method: 'POST',
       path: '/auth/login',
       status: res.statusCode,

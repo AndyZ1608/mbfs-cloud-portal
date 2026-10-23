@@ -4,7 +4,7 @@ import { OSError } from '../openstack.js';
 import { svcConfigured } from '../svcauth.js';
 import { persistent } from '../store.js';
 import { listPolicies, addPolicy, patchPolicy, removePolicy, runPolicy, SCHED_TZ } from '../scheduler.js';
-import { listAudit } from '../audit.js';
+import { listAudit, setResourceAudit } from '../audit.js';
 import { fetchOwned } from '../projectScope.js';
 
 const router = Router();
@@ -47,6 +47,8 @@ router.post('/backup/policies', async (req, res, next) => {
       created_at: new Date().toISOString(),
       last_run: null,
     });
+    setResourceAudit(res, { action: 'backup.policy.create', resourceType: 'backup',
+      resourceId: pol.id, resourceName: pol.target_name });
     console.log(`[backup] NEW policy ${pol.type}/${pol.target_name} by=${sess.user.name}`);
     res.json({ policy: pol });
   } catch (e) { next(e); }
@@ -75,13 +77,18 @@ router.patch('/backup/policies/:id', (req, res, next) => {
     }
     const p = patchPolicy(req.params.id, req.session.os.project.id, patch);
     if (!p) throw new OSError(404, 'Không tìm thấy policy');
+    setResourceAudit(res, { action: 'backup.policy.update', resourceType: 'backup',
+      resourceId: p.id, resourceName: p.target_name });
     res.json({ policy: p });
   } catch (e) { next(e); }
 });
 
 router.delete('/backup/policies/:id', (req, res, next) => {
   try {
+    const policy = listPolicies(req.session.os.project.id).find((item) => item.id === req.params.id);
     if (!removePolicy(req.params.id, req.session.os.project.id)) throw new OSError(404, 'Không tìm thấy policy');
+    setResourceAudit(res, { action: 'backup.policy.delete', resourceType: 'backup',
+      resourceId: policy?.id, resourceName: policy?.target_name });
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
@@ -90,6 +97,8 @@ router.post('/backup/policies/:id/run', async (req, res, next) => {
   try {
     const pol = listPolicies(req.session.os.project.id).find((x) => x.id === req.params.id);
     if (!pol) throw new OSError(404, 'Không tìm thấy policy');
+    setResourceAudit(res, { action: 'backup.policy.run', resourceType: 'backup',
+      resourceId: pol.id, resourceName: pol.target_name });
     const r = await runPolicy(pol);
     res.json({ ok: true, ...r, last_run: pol.last_run });
   } catch (e) { next(e); }

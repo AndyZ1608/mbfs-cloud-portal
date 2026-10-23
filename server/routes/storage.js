@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { osFetch, OSError } from '../openstack.js';
 import { fetchOwned, isUsableImage, owned } from '../projectScope.js';
-import { setInstanceAudit, setVolumeAudit } from '../audit.js';
+import { setInstanceAudit, setResourceAudit, setVolumeAudit } from '../audit.js';
 import { requestVolumeExtend } from '../volumeExtend.js';
 import { decodeUploadHeader, uploadImage } from '../imageUpload.js';
 
@@ -32,6 +32,8 @@ router.post('/volumes', async (req, res, next) => {
     if (volume_type) volume.volume_type = volume_type;
     if (description) volume.description = description;
     const data = await osFetch(req.session.os, 'volume', '/volumes', { method: 'POST', body: { volume } });
+    setResourceAudit(res, { action: 'volume.create', resourceType: 'volume',
+      resourceId: data.volume?.id, resourceName: data.volume?.name || name, result: 'accepted' });
     console.log(`[volume] CREATE name=${name} size=${size}GB by=${req.session.os.user.name}`);
     res.json(data);
   } catch (e) { next(e); }
@@ -39,7 +41,9 @@ router.post('/volumes', async (req, res, next) => {
 
 router.delete('/volumes/:id', async (req, res, next) => {
   try {
-    await fetchOwned(req.session.os, 'volume', `/volumes/${req.params.id}`, 'volume');
+    const volume = await fetchOwned(req.session.os, 'volume', `/volumes/${req.params.id}`, 'volume');
+    setResourceAudit(res, { action: 'volume.delete', resourceType: 'volume',
+      resourceId: volume.id, resourceName: volume.name, result: 'accepted' });
     await osFetch(req.session.os, 'volume', `/volumes/${req.params.id}`, { method: 'DELETE' });
     console.log(`[volume] DELETE volume=${req.params.id} by=${req.session.os.user.name}`);
     res.json({ ok: true });
@@ -122,10 +126,14 @@ router.post('/snapshots', async (req, res, next) => {
     const server = servers.length === 1
       ? await fetchOwned(req.session.os, 'compute', `/servers/${servers[0]}`, 'server').catch(() => null) : null;
     if (server) setInstanceAudit(res, { action: 'instance.snapshot.create',
-      resourceId: server.id, resourceName: server.name, result: 'accepted',
+      resourceType: 'snapshot', instanceId: server.id, resourceName: name, result: 'accepted',
       details: { snapshot_name: name, volume_id: volume.id } });
     const data = await osFetch(req.session.os, 'volume', '/snapshots', { method: 'POST', body: { snapshot: { volume_id, name, force: true } } });
-    if (server && data?.snapshot?.id) res.locals.instanceAudit.details.snapshot_id = data.snapshot.id;
+    if (server) {
+      res.locals.instanceAudit.resourceId = data?.snapshot?.id;
+      if (data?.snapshot?.id) res.locals.instanceAudit.details.snapshot_id = data.snapshot.id;
+    } else setResourceAudit(res, { action: 'snapshot.create', resourceType: 'snapshot',
+      resourceId: data?.snapshot?.id, resourceName: data?.snapshot?.name || name, result: 'accepted' });
     console.log(`[volume] SNAPSHOT volume=${volume_id} name=${name} by=${req.session.os.user.name}`);
     res.json(data);
   } catch (e) { next(e); }
@@ -133,7 +141,9 @@ router.post('/snapshots', async (req, res, next) => {
 
 router.delete('/snapshots/:id', async (req, res, next) => {
   try {
-    await fetchOwned(req.session.os, 'volume', `/snapshots/${req.params.id}`, 'snapshot');
+    const snapshot = await fetchOwned(req.session.os, 'volume', `/snapshots/${req.params.id}`, 'snapshot');
+    setResourceAudit(res, { action: 'snapshot.delete', resourceType: 'snapshot',
+      resourceId: snapshot.id, resourceName: snapshot.name, result: 'accepted' });
     await osFetch(req.session.os, 'volume', `/snapshots/${req.params.id}`, { method: 'DELETE' });
     res.json({ ok: true });
   } catch (e) { next(e); }
@@ -176,6 +186,9 @@ router.post('/images/upload', async (req, res, next) => {
         console.log(`[image] stage=${stage} request_id=${req.id} project=${sess.project.id} image=${details.imageId || '-'} format=${details.diskFormat || '-'} bytes=${details.bytes ?? '-'} status=${details.status ?? '-'}`);
       },
     });
+    setResourceAudit(res, { action: 'image.upload', resourceType: 'image',
+      resourceId: result.image?.id, resourceName: result.image?.name || name,
+      result: result.processing ? 'accepted' : 'success' });
     res.status(result.processing ? 202 : 200).json(result);
   } catch (e) {
     if (e?.code === 'image_upload_too_large') {
@@ -189,7 +202,9 @@ router.post('/images/upload', async (req, res, next) => {
 
 router.delete('/images/:id', async (req, res, next) => {
   try {
-    await ownedImage(req.session.os, req.params.id);
+    const image = await ownedImage(req.session.os, req.params.id);
+    setResourceAudit(res, { action: 'image.delete', resourceType: 'image',
+      resourceId: image.id, resourceName: image.name });
     await osFetch(req.session.os, 'image', `/v2/images/${req.params.id}`, { method: 'DELETE' });
     console.log(`[image] DELETE image=${req.params.id} by=${req.session.os.user.name}`);
     res.json({ ok: true });

@@ -109,7 +109,8 @@ export async function runPolicy(pol) {
   pol.last_run = { ts: new Date().toISOString(), status: 'ok', message: `Đã tạo ${name}${pruned ? `, xoá ${pruned} bản cũ` : ''}` };
   pushNotice({ project_id: pol.project_id, project_name: pol.project_name, level: 'ok', title: `Backup thành công: ${pol.target_name}`, detail: pol.last_run.message, link: '/backup', code: 'backupSucceeded', values: { name: pol.target_name, created: name, pruned } });
   save();
-  record({ user: 'portal-task', project: { id: pol.project_id, name: pol.project_name }, method: 'JOB', path: `/backup/run/${pol.type}/${pol.target_name}`, status: 200, ms: 0 });
+  record({ user: 'portal-task', project: { id: pol.project_id, name: pol.project_name }, method: 'JOB', path: `/backup/run/${pol.type}/${pol.target_name}`, status: 200, ms: 0,
+    resource_type: 'backup', resource_id: pol.id, resource_name: pol.target_name });
   return { created, pruned };
 }
 
@@ -129,7 +130,8 @@ async function tick() {
       pol.last_run = { ts: new Date().toISOString(), status: 'error', message: e.message };
       save();
       pushNotice({ project_id: pol.project_id, project_name: pol.project_name, level: 'error', title: `Backup LỖI: ${pol.target_name}`, detail: e.message, link: '/backup', code: 'backupFailed', values: { name: pol.target_name } });
-      record({ user: 'portal-task', project: { id: pol.project_id, name: pol.project_name }, method: 'JOB', path: `/backup/run/${pol.type}/${pol.target_name}`, status: 500, ms: 0 });
+      record({ user: 'portal-task', project: { id: pol.project_id, name: pol.project_name }, method: 'JOB', path: `/backup/run/${pol.type}/${pol.target_name}`, status: 500, ms: 0,
+        resource_type: 'backup', resource_id: pol.id, resource_name: pol.target_name });
       console.warn(`[backup] LỖI policy=${pol.id}: ${e.message}`);
     }
   }

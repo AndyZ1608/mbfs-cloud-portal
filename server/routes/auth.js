@@ -5,6 +5,7 @@ import { passwordAuth, listProjects, scopeToken, OSError, MOCK } from '../openst
 import { config } from '../config.js';
 import { accountServiceConfigured } from '../keystoneSsoAccounts.js';
 import { safeSession } from './sso.js';
+import { setResourceAudit } from '../audit.js';
 
 const router = Router();
 
@@ -83,6 +84,8 @@ router.post('/switch-project', async (req, res, next) => {
       catalog: scoped.catalog,
       roles: scoped.roles || [],
     });
+    setResourceAudit(res, { action: 'auth.switch_project', resourceType: 'project',
+      resourceId: scoped.project.id, resourceName: scoped.project.name });
     console.log(`[auth] SWITCH user=${sess.user.name} -> project=${scoped.project.name}`);
     res.json({ project: scoped.project });
   } catch (e) {
@@ -102,6 +105,10 @@ router.get('/session', (req, res) => {
 });
 
 export async function destroyCmpSession(req, res) {
+  if (req.session.os) res.locals.auditSession = {
+    user: { id: req.session.os.user?.id, name: req.session.os.user?.name },
+    project: { id: req.session.os.project?.id, name: req.session.os.project?.name },
+  };
   await new Promise((resolve, reject) => req.session.destroy((error) => error ? reject(error) : resolve()));
   res.clearCookie('mbfs_cloud_sid', { path: '/', sameSite: 'lax', secure: config.secureCookies });
 }
@@ -109,6 +116,7 @@ export async function destroyCmpSession(req, res) {
 router.post('/logout', async (req, res, next) => {
   try {
     const name = req.session.os?.user?.name;
+    setResourceAudit(res, { action: 'auth.logout', resourceType: 'cmp' });
     await destroyCmpSession(req, res);
     if (name) console.log(`[auth] LOGOUT user=${name}`);
     res.json({ ok: true, redirect: process.env.OS_WEBSSO_LOGOUT_URL || null });

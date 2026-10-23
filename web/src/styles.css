@@ -880,7 +880,9 @@ html[data-theme="dark"] .toast { background: #0b1220; }
 .activity-table { min-width: 620px; }
 .activity-table td { padding: 8px 10px; overflow-wrap: anywhere; }
 .activity-table .activity-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
-.activity-table .activity-vm { font-weight: 600; }
+.activity-table .activity-target { min-width: 150px; }
+.activity-target-type { display: inline-block; padding: 2px 7px; margin-right: 7px; border-radius: 4px; background: var(--muted-bg); color: var(--muted); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.activity-target-name { font-weight: 600; overflow-wrap: anywhere; }
 .activity-table th:last-child, .activity-table td:last-child { white-space: nowrap; }
 @media (max-width: 900px) { .vm-detail-fields { grid-template-columns: 1fr; } }
 

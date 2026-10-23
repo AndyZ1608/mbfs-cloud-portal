@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { osFetch, OSError, MOCK, endpointFor } from '../openstack.js';
 import { fetchOwned, fetchUsableSubnet, isOwned, owned, projectQuery } from '../projectScope.js';
+import { setResourceAudit } from '../audit.js';
 
 const router = Router();
 
@@ -100,6 +101,8 @@ router.post('/lb', async (req, res, next) => {
       },
     };
     const data = await osFetch(sess, 'lb', '/v2/lbaas/loadbalancers', { method: 'POST', body });
+    setResourceAudit(res, { action: 'load_balancer.create', resourceType: 'load_balancer',
+      resourceId: data.loadbalancer?.id, resourceName: data.loadbalancer?.name || name, result: 'accepted' });
     console.log(`[lb] CREATE lb name=${name} members=${resolved.length} by=${sess.user.name}`);
     res.status(202).json(data);
   } catch (e) { next(e); }
@@ -113,9 +116,11 @@ router.post('/lb/pools/:pid/members', async (req, res, next) => {
     const pool = await fetchOwned(sess, 'lb', `/v2/lbaas/pools/${req.params.pid}`, 'pool');
     const parentId = pool.loadbalancers?.[0]?.id;
     if (!parentId) throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
-    await fetchOwned(sess, 'lb', `/v2/lbaas/loadbalancers/${parentId}`, 'loadbalancer');
+    const loadbalancer = await fetchOwned(sess, 'lb', `/v2/lbaas/loadbalancers/${parentId}`, 'loadbalancer');
     const member = await memberFromServer(sess, server_id, port);
     const data = await osFetch(sess, 'lb', `/v2/lbaas/pools/${req.params.pid}/members`, { method: 'POST', body: { member } });
+    setResourceAudit(res, { action: 'load_balancer.member.add', resourceType: 'load_balancer',
+      resourceId: loadbalancer.id, resourceName: loadbalancer.name, result: 'accepted' });
     console.log(`[lb] ADD member pool=${req.params.pid} addr=${member.address}:${port} by=${sess.user.name}`);
     res.json(data);
   } catch (e) { next(e); }
@@ -127,11 +132,13 @@ router.delete('/lb/pools/:pid/members/:mid', async (req, res, next) => {
     const pool = await fetchOwned(sess, 'lb', `/v2/lbaas/pools/${req.params.pid}`, 'pool');
     const parentId = pool.loadbalancers?.[0]?.id;
     if (!parentId) throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
-    await fetchOwned(sess, 'lb', `/v2/lbaas/loadbalancers/${parentId}`, 'loadbalancer');
+    const loadbalancer = await fetchOwned(sess, 'lb', `/v2/lbaas/loadbalancers/${parentId}`, 'loadbalancer');
     const member = (await osFetch(sess, 'lb', `/v2/lbaas/pools/${req.params.pid}/members/${req.params.mid}`))?.member;
     if (!member || member.project_id && !owned([member], sess).length) {
       throw new OSError(404, 'Không tìm thấy tài nguyên trong project hiện tại.', 'resource_not_found');
     }
+    setResourceAudit(res, { action: 'load_balancer.member.delete', resourceType: 'load_balancer',
+      resourceId: loadbalancer.id, resourceName: loadbalancer.name, result: 'accepted' });
     await osFetch(req.session.os, 'lb', `/v2/lbaas/pools/${req.params.pid}/members/${req.params.mid}`, { method: 'DELETE' });
     console.log(`[lb] DEL member pool=${req.params.pid} member=${req.params.mid} by=${req.session.os.user.name}`);
     res.json({ ok: true });
@@ -140,7 +147,9 @@ router.delete('/lb/pools/:pid/members/:mid', async (req, res, next) => {
 
 router.delete('/lb/:id', async (req, res, next) => {
   try {
-    await fetchOwned(req.session.os, 'lb', `/v2/lbaas/loadbalancers/${req.params.id}`, 'loadbalancer');
+    const loadbalancer = await fetchOwned(req.session.os, 'lb', `/v2/lbaas/loadbalancers/${req.params.id}`, 'loadbalancer');
+    setResourceAudit(res, { action: 'load_balancer.delete', resourceType: 'load_balancer',
+      resourceId: loadbalancer.id, resourceName: loadbalancer.name, result: 'accepted' });
     await osFetch(req.session.os, 'lb', `/v2/lbaas/loadbalancers/${req.params.id}?cascade=true`, { method: 'DELETE' });
     console.log(`[lb] DELETE lb=${req.params.id} (cascade) by=${req.session.os.user.name}`);
     res.json({ ok: true });

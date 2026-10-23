@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer } from 'vite';
-import { activityStatus, activityTimestamp, vmActivityName } from '../src/activityPresentation.js';
+import { activityStatus, activityTarget, activityTimestamp, vmActivityName } from '../src/activityPresentation.js';
 import { translate } from '../src/i18n/index.js';
 
 const vmId = '78b3f3ae-ec6d-470d-b607-46681cb3207c';
@@ -45,6 +45,32 @@ test('status badges preserve success, failure and accepted-request semantics', (
   assert.deepEqual(activityStatus({ result: 'accepted', status: 202 }, vi), { label: 'Đã tiếp nhận', tone: 'info' });
 });
 
+test('targets use structured resource names and safe historical fallbacks', () => {
+  const vi = t('vi');
+  assert.deepEqual(activityTarget({ resource_type: 'network', resource_name: 'NET_PROD' }, vi),
+    { type: 'Network', name: 'NET_PROD' });
+  assert.deepEqual(activityTarget({ resource_type: 'volume', resource_name: 'DATA-01', action: 'volume.delete' }, vi),
+    { type: 'Volume', name: 'DATA-01' });
+  assert.deepEqual(activityTarget({ resource_type: 'router', resource_name: 'ROUTER-PROD' }, vi),
+    { type: 'Router', name: 'ROUTER-PROD' });
+  assert.deepEqual(activityTarget({ resource_type: 'security_group', resource_name: 'SG-Web' }, vi),
+    { type: 'Security Group', name: 'SG-Web' });
+  assert.deepEqual(activityTarget({ resource_type: 'floating_ip', resource_name: '100.64.64.190' }, vi),
+    { type: 'Floating IP', name: '100.64.64.190' });
+  assert.deepEqual(activityTarget({ resource_type: 'snapshot', resource_name: 'daily-data' }, vi),
+    { type: 'Snapshot', name: 'daily-data' });
+  assert.deepEqual(activityTarget({ resource_type: 'project', resource_name: 'XPLAT' }, vi),
+    { type: 'Project', name: 'XPLAT' });
+  assert.deepEqual(activityTarget({ resource_type: 'user', resource_name: 'ducnn' }, vi),
+    { type: 'User', name: 'ducnn' });
+  assert.deepEqual(activityTarget({ action: 'auth.login', path: '/auth/login' }, vi),
+    { type: 'CMP', name: 'Phiên đăng nhập' });
+  assert.deepEqual(activityTarget({ resource_type: 'volume', resource_name: vmId }, vi),
+    { type: 'Volume', name: 'Không xác định' });
+  assert.deepEqual(activityTarget({ action: 'subnet.gateway.update', resource_type: 'network',
+    resource_name: 'Network, not subnet' }, vi), { type: 'Subnet', name: 'Không xác định' });
+});
+
 test('shared table renders exactly five localized columns without technical audit metadata', async () => {
   const vite = await createServer({ server: { middlewareMode: true, watch: null }, appType: 'custom' });
   const previousStorage = globalThis.localStorage;
@@ -68,7 +94,7 @@ test('shared table renders exactly five localized columns without technical audi
     const vi = render('vi');
     assert.equal((vi.match(/<th\b/g) || []).length, 5);
     assert.equal((vi.match(/<td\b/g) || []).length, 5);
-    for (const text of ['Thời gian', 'Người dùng', 'Thao tác', 'Máy ảo', 'Trạng thái',
+    for (const text of ['Thời gian', 'Người dùng', 'Thao tác', 'Đối tượng', 'Trạng thái',
       '05/10/2026 15:21:53', 'ducnn', 'Mở Console', 'Windows-2022-khong-xoa', 'Thành công']) {
       assert.ok(vi.includes(text), text);
     }
@@ -76,7 +102,8 @@ test('shared table renders exactly five localized columns without technical audi
       'hidden-detail', '>200<']) assert.ok(!vi.includes(hidden), hidden);
     assert.match(vi, /badge-ok/);
     const en = render('en');
-    assert.match(en, /Virtual Machine/);
+    assert.match(en, /Target/);
+    assert.match(en, /activity-target-type">VM/);
     assert.match(en, /Console opened/);
     assert.match(en, /Success/);
     const failed = render('vi', { ...entry, status: 500, result: 'failure' });
@@ -86,6 +113,13 @@ test('shared table renders exactly five localized columns without technical audi
     assert.match(accepted, /badge-info/);
     assert.match(accepted, /Accepted/);
     assert.doesNotMatch(accepted, /Success/);
+    const mixed = render('vi', [{ ...entry, resource_type: 'network', action: 'network.create',
+      resource_name: 'NET_PROD' }, { ...entry, resource_type: 'volume', action: 'volume.delete',
+      resource_name: 'DATA-01' }, { ...entry, action: 'auth.login', resource_type: 'cmp',
+      path: '/auth/login', resource_name: null }]);
+    assert.match(mixed, /Network<\/span><span class="activity-target-name">NET_PROD/);
+    assert.match(mixed, /Volume<\/span><span class="activity-target-name">DATA-01/);
+    assert.match(mixed, /CMP<\/span><span class="activity-target-name">Phiên đăng nhập/);
     const ordered = render('en', [{ ...entry, resource_name: 'Newest VM' },
       { ...entry, ts: '2026-10-04T08:21:53Z', resource_name: 'Older VM' }]);
     assert.ok(ordered.indexOf('Newest VM') < ordered.indexOf('Older VM'));
@@ -97,6 +131,10 @@ test('shared table renders exactly five localized columns without technical audi
     assert.deepEqual(filterActivityRows(rows, { query: vmId, t: t('en') }), [], 'hidden UUID is not a search/display field');
     assert.equal(filterActivityRows(rows, { t: t('en') }).length, 3);
     assert.equal(actionLabel({ method: 'GET', path: '/internal/secret' }, t('en')), 'Other action');
+    assert.equal(actionLabel({ action: 'network.create', method: 'POST', path: '/networks' }, t('vi')), 'Tạo network');
+    assert.equal(actionLabel({ action: 'network.rename', resource_type: 'network' }, t('en')), 'Network renamed');
+    assert.equal(actionLabel({ action: 'volume.delete', method: 'DELETE', path: '/volumes/id' }, t('en')), 'Delete volume');
+    assert.equal(actionLabel({ action: 'project.quota.update' }, t('vi')), 'Cập nhật quota Project');
   } finally {
     if (previousStorage === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = previousStorage;

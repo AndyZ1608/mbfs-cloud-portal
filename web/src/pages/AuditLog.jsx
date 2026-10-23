@@ -3,7 +3,7 @@ import { api } from '../api.js';
 import { toast, Empty, PageHead } from '../components/ui.jsx';
 import { useI18n } from '../i18n/react.jsx';
 import { formatActivity } from '../activityFormatter.js';
-import { activityStatus, isVmActivity, vmActivityId, vmActivityName } from '../activityPresentation.js';
+import { activityStatus, activityTarget, isVmActivity, vmActivityId, vmActivityName } from '../activityPresentation.js';
 import ActivityTable from '../components/ActivityTable.jsx';
 
 // Match specific method/path pairs before broad resource operations.
@@ -61,6 +61,18 @@ const NETWORK_ACTIONS = new Set([
 ]);
 const EXTERNAL_ACTIONS = new Set(['router.create', 'floating_ip.allocate', 'floating_ip.associate',
   'floating_ip.disassociate', 'floating_ip.release']);
+const RESOURCE_ACTIONS = new Set(['subnet.create', 'project.create', 'project.quota.update',
+  'user.create', 'user.password.reset', 'user.role.assign', 'image.upload',
+  'load_balancer.create', 'load_balancer.delete', 'load_balancer.member.add',
+  'load_balancer.member.delete', 'security_group.rule.add', 'security_group.rule.delete']);
+const LEGACY_RESOURCE_ACTIONS = [
+  [/^POST \/networks\/[^/]+\/subnet$/, 'subnet.create'],
+  [/^POST \/admin\/projects$/, 'project.create'],
+  [/^PUT \/admin\/projects\/[^/]+\/quota$/, 'project.quota.update'],
+  [/^POST \/admin\/users$/, 'user.create'],
+  [/^POST \/admin\/users\/[^/]+\/password$/, 'user.password.reset'],
+  [/^POST \/admin\/assign$/, 'user.role.assign'],
+];
 
 export function networkAuditDetails(event) {
   if (event.resource_type !== 'network' || !NETWORK_ACTIONS.has(event.action)) return '';
@@ -78,12 +90,16 @@ export function networkAuditDetails(event) {
 }
 
 export function actionLabel(e, t) {
+  if (e.action?.startsWith('auth.sso.login.') || e.path === '/auth/websso/login') return t('audit.action.login');
+  if (e.action === 'auth.sso.logout') return t('audit.action.logout');
   if (e.action === 'account.password.change') return t('account.auditAction');
+  if (RESOURCE_ACTIONS.has(e.action)) return t(`audit.semantic.${e.action}`);
   if (EXTERNAL_ACTIONS.has(e.action)) return t(`audit.semantic.${e.action}`);
-  if (e.resource_type === 'network' && NETWORK_ACTIONS.has(e.action)) return t(`network.audit.${e.action}`);
+  if (NETWORK_ACTIONS.has(e.action)) return t(`network.audit.${e.action}`);
   const formatted = formatActivity(e, t);
   if (formatted.semantic) return formatted.action === e.action ? t('audit.action.other') : formatted.action;
   const key = `${e.method} ${e.path}`;
+  for (const [re, action] of LEGACY_RESOURCE_ACTIONS) if (re.test(key)) return t(`audit.semantic.${action}`);
   for (const [re, label] of RULES) if (re.test(key)) return t(`audit.action.${label}`);
   return t('audit.action.other');
 }
@@ -93,7 +109,8 @@ export function filterActivityRows(entries, { query = '', resourceFilter = 'all'
   return entries.filter((event) => {
     if (resourceFilter === 'instance' && !isVmActivity(event)) return false;
     if (!search) return true;
-    return [event.user, actionLabel(event, t), vmActivityName(event, t, currentNames), activityStatus(event, t).label]
+    const target = activityTarget(event, t, currentNames);
+    return [event.user, actionLabel(event, t), target.type, target.name, activityStatus(event, t).label]
       .some((field) => (field || '').toLowerCase().includes(search));
   });
 }

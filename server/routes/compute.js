@@ -4,7 +4,7 @@ import { traceNovaConsole } from '../consoleDiagnostics.js';
 import { changeInstancePassword } from '../passwordChange.js';
 import { assertOwned, fetchOwned, fetchUsableImage, owned } from '../projectScope.js';
 import { attachInterface, createServerWithInterfaces, prepareInterfaces } from '../instanceInterfaces.js';
-import { addInstanceAudit, instanceActionCode, listInstanceAudit, recordInstanceErrorOnce, setInstanceAudit } from '../audit.js';
+import { addInstanceAudit, instanceActionCode, listInstanceAudit, recordInstanceErrorOnce, setInstanceAudit, setResourceAudit } from '../audit.js';
 import { assignmentsForInstances, pruneMissingInstances, removeInstanceAssignments, replaceAssignments, validateSelection } from '../classifications.js';
 import { classifyInstanceError, faultImageId, preflightImageFlavor, publicServer, publicServerPayload } from '../instanceErrors.js';
 import { deleteInstanceWithPorts } from '../instanceDeletion.js';
@@ -534,6 +534,8 @@ router.post('/keypairs', async (req, res, next) => {
     const keypair = { name };
     if (public_key) keypair.public_key = public_key;
     const data = await osFetch(req.session.os, 'compute', '/os-keypairs', { method: 'POST', body: { keypair } });
+    setResourceAudit(res, { action: 'keypair.create', resourceType: 'keypair',
+      resourceName: data.keypair?.name || name });
     console.log(`[compute] CREATE keypair name=${name} by=${req.session.os.user.name}`);
     res.json(data);
   } catch (e) { next(e); }
@@ -542,6 +544,8 @@ router.post('/keypairs', async (req, res, next) => {
 router.delete('/keypairs/:name', async (req, res, next) => {
   try {
     await osFetch(req.session.os, 'compute', `/os-keypairs/${encodeURIComponent(req.params.name)}`, { method: 'DELETE' });
+    setResourceAudit(res, { action: 'keypair.delete', resourceType: 'keypair',
+      resourceName: req.params.name });
     res.json({ ok: true });
   } catch (e) { next(e); }
 });

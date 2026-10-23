@@ -72,7 +72,12 @@ router.get('/networks/:id/resources', async (req, res, next) => {
 });
 
 router.post('/networks/:id/subnet', async (req, res, next) => {
-  try { res.status(201).json(await createOnlySubnet(req.session.os, req.params.id, req.body)); }
+  try {
+    const result = await createOnlySubnet(req.session.os, req.params.id, req.body);
+    res.locals.networkAudits = [{ action: 'subnet.create', resourceType: 'subnet',
+      resourceId: result.subnet.id, resourceName: result.subnet.name }];
+    res.status(201).json(result);
+  }
   catch (error) { next(error); }
 });
 
@@ -84,8 +89,13 @@ router.get('/networks/:id/edit', async (req, res, next) => {
 router.patch('/networks/:id', async (req, res, next) => {
   try {
     const result = await editNetwork(req.session.os, req.params.id, req.body);
-    res.locals.networkAudits = result.events.map((event) => ({ ...event,
-      resourceId: result.network.id, resourceName: result.network.name }));
+    res.locals.networkAudits = result.events.map((event) => {
+      const subnet = event.action.startsWith('subnet.')
+        ? result.subnets.find((item) => item.id === event.details?.subnet_id) : null;
+      return { ...event, resourceType: subnet ? 'subnet' : 'network',
+        resourceId: subnet?.id || result.network.id,
+        resourceName: subnet?.name || result.network.name };
+    });
     res.json({ network: result.network, subnets: result.subnets });
   } catch (error) {
     res.locals.networkAudits = [{ action: 'network.update', resourceId: req.params.id, details: {} }];
@@ -98,6 +108,8 @@ router.post('/networks', async (req, res, next) => {
   const sess = req.session.os;
   try {
     const result = await createNetwork(sess, req.body);
+    res.locals.networkAudits = [{ action: 'network.create', resourceId: result.network.id,
+      resourceName: result.network.name }];
     console.log(`[network] CREATE network=${result.network.id} mode=${result.mode} by=${sess.user.name}`);
     res.json(result);
   } catch (e) { next(e); }
@@ -105,7 +117,8 @@ router.post('/networks', async (req, res, next) => {
 
 router.delete('/networks/:id', async (req, res, next) => {
   try {
-    await fetchOwned(req.session.os, 'network', `/v2.0/networks/${req.params.id}`, 'network');
+    const network = await fetchOwned(req.session.os, 'network', `/v2.0/networks/${req.params.id}`, 'network');
+    res.locals.networkAudits = [{ action: 'network.delete', resourceId: network.id, resourceName: network.name }];
     await osFetch(req.session.os, 'network', `/v2.0/networks/${req.params.id}`, { method: 'DELETE' });
     console.log(`[network] DELETE network=${req.params.id} by=${req.session.os.user.name}`);
     res.json({ ok: true });
@@ -169,8 +182,9 @@ router.post('/routers/:id/interfaces', async (req, res, next) => {
   try {
     const { subnet_id } = req.body || {};
     if (!subnet_id) throw new OSError(400, 'Thiếu subnet_id');
-    await fetchOwned(req.session.os, 'network', `/v2.0/routers/${req.params.id}`, 'router');
+    const router = await fetchOwned(req.session.os, 'network', `/v2.0/routers/${req.params.id}`, 'router');
     await fetchOwned(req.session.os, 'network', `/v2.0/subnets/${subnet_id}`, 'subnet');
+    res.locals.networkAudits = [{ action: 'router.interface.attach', resourceId: router.id, resourceName: router.name }];
     const data = await osFetch(req.session.os, 'network', `/v2.0/routers/${req.params.id}/add_router_interface`, { method: 'PUT', body: { subnet_id } });
     res.json(data);
   } catch (e) { next(e); }
@@ -178,8 +192,9 @@ router.post('/routers/:id/interfaces', async (req, res, next) => {
 
 router.delete('/routers/:id/interfaces/:subnetId', async (req, res, next) => {
   try {
-    await fetchOwned(req.session.os, 'network', `/v2.0/routers/${req.params.id}`, 'router');
+    const router = await fetchOwned(req.session.os, 'network', `/v2.0/routers/${req.params.id}`, 'router');
     await fetchOwned(req.session.os, 'network', `/v2.0/subnets/${req.params.subnetId}`, 'subnet');
+    res.locals.networkAudits = [{ action: 'router.interface.detach', resourceId: router.id, resourceName: router.name }];
     const data = await osFetch(req.session.os, 'network', `/v2.0/routers/${req.params.id}/remove_router_interface`, { method: 'PUT', body: { subnet_id: req.params.subnetId } });
     res.json(data || { ok: true });
   } catch (e) { next(e); }
@@ -187,7 +202,8 @@ router.delete('/routers/:id/interfaces/:subnetId', async (req, res, next) => {
 
 router.delete('/routers/:id', async (req, res, next) => {
   try {
-    await fetchOwned(req.session.os, 'network', `/v2.0/routers/${req.params.id}`, 'router');
+    const router = await fetchOwned(req.session.os, 'network', `/v2.0/routers/${req.params.id}`, 'router');
+    res.locals.networkAudits = [{ action: 'router.delete', resourceId: router.id, resourceName: router.name }];
     await osFetch(req.session.os, 'network', `/v2.0/routers/${req.params.id}`, { method: 'DELETE' });
     res.json({ ok: true });
   } catch (e) { next(e); }
@@ -387,6 +403,8 @@ router.post('/security-groups', async (req, res, next) => {
     if (!name) throw new OSError(400, 'Thiếu tên security group');
     const sess = req.session.os;
     const data = await osFetch(sess, 'network', '/v2.0/security-groups', { method: 'POST', body: { security_group: { name, description: description || '', project_id: currentProjectId(sess) } } });
+    res.locals.networkAudits = [{ action: 'security_group.create', resourceType: 'security_group',
+      resourceId: data.security_group.id, resourceName: data.security_group.name }];
     console.log(`[network] CREATE secgroup name=${name} by=${req.session.os.user.name}`);
     res.json(data);
   } catch (e) { next(e); }
@@ -394,7 +412,9 @@ router.post('/security-groups', async (req, res, next) => {
 
 router.delete('/security-groups/:id', async (req, res, next) => {
   try {
-    await fetchOwned(req.session.os, 'network', `/v2.0/security-groups/${req.params.id}`, 'security_group');
+    const group = await fetchOwned(req.session.os, 'network', `/v2.0/security-groups/${req.params.id}`, 'security_group');
+    res.locals.networkAudits = [{ action: 'security_group.delete', resourceType: 'security_group',
+      resourceId: group.id, resourceName: group.name }];
     await osFetch(req.session.os, 'network', `/v2.0/security-groups/${req.params.id}`, { method: 'DELETE' });
     res.json({ ok: true });
   } catch (e) { next(e); }
@@ -405,7 +425,7 @@ router.post('/security-group-rules', async (req, res, next) => {
     const { security_group_id, direction, protocol, port_min, port_max, remote_ip_prefix } = req.body || {};
     if (!security_group_id || !direction) throw new OSError(400, 'Thiếu thông tin rule');
     const sess = req.session.os;
-    await fetchOwned(sess, 'network', `/v2.0/security-groups/${security_group_id}`, 'security_group');
+    const group = await fetchOwned(sess, 'network', `/v2.0/security-groups/${security_group_id}`, 'security_group');
     const rule = { security_group_id, direction, ethertype: 'IPv4', project_id: currentProjectId(sess) };
     if (protocol && protocol !== 'any') rule.protocol = protocol;
     if (rule.protocol === 'tcp' || rule.protocol === 'udp') {
@@ -414,6 +434,8 @@ router.post('/security-group-rules', async (req, res, next) => {
     }
     rule.remote_ip_prefix = remote_ip_prefix || '0.0.0.0/0';
     const data = await osFetch(req.session.os, 'network', '/v2.0/security-group-rules', { method: 'POST', body: { security_group_rule: rule } });
+    res.locals.networkAudits = [{ action: 'security_group.rule.add', resourceType: 'security_group',
+      resourceId: group.id, resourceName: group.name }];
     console.log(`[network] ADD rule sg=${security_group_id} ${direction} ${protocol || 'any'} ${port_min || ''}-${port_max || port_min || ''} by=${req.session.os.user.name}`);
     res.json(data);
   } catch (e) { next(e); }
@@ -423,7 +445,9 @@ router.delete('/security-group-rules/:id', async (req, res, next) => {
   try {
     const sess = req.session.os;
     const rule = await fetchOwned(sess, 'network', `/v2.0/security-group-rules/${req.params.id}`, 'security_group_rule');
-    await fetchOwned(sess, 'network', `/v2.0/security-groups/${rule.security_group_id}`, 'security_group');
+    const group = await fetchOwned(sess, 'network', `/v2.0/security-groups/${rule.security_group_id}`, 'security_group');
+    res.locals.networkAudits = [{ action: 'security_group.rule.delete', resourceType: 'security_group',
+      resourceId: group.id, resourceName: group.name }];
     await osFetch(req.session.os, 'network', `/v2.0/security-group-rules/${req.params.id}`, { method: 'DELETE' });
     res.json({ ok: true });
   } catch (e) { next(e); }

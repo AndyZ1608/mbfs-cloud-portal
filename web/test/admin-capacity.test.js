@@ -35,7 +35,7 @@ test('cluster overview renders Placement vCPU without changing Nova RAM/disk or 
     assert.match(en, /0\s*\/\s*196 GB/);
     assert.match(en, /34/);
     assert.match(en, /Projects/);
-    assert.match(en, /VCPU inventory total: 256/);
+    assert.doesNotMatch(en, /VCPU inventory total|Placement allocation ratio|256.*4:1/);
     const vi = render('vi', data);
     assert.match(vi, /292\s*\/\s*1\.024/);
     assert.match(vi, /28,5%/);

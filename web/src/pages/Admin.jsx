@@ -48,7 +48,6 @@ export function ClusterOverview({ data }) {
           <h4>{t('admin.clusterResources')}</h4>
           {vcpu ? <>
             <UsageBar label={t('admin.allocatableVcpu')} used={vcpu.allocated} max={vcpu.allocatable} />
-            <div className="stat-sub dim">{t('admin.inventoryVcpu')}: {vcpu.inventory_total}{vcpu.allocation_ratio != null ? ` · ${t('admin.placementRatio')}: ${vcpu.allocation_ratio}:1` : ''}</div>
             {vcpu.allocated > vcpu.allocatable && <span className="badge badge-err">{t('admin.vcpuOverallocated')}</span>}
           </> : <div className="dim">{t('admin.placementUnavailable')}</div>}
           {h && <>

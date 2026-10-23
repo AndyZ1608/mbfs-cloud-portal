@@ -4,6 +4,7 @@ import { Router } from 'express';
 import { osFetch, OSError } from '../openstack.js';
 import { requireRole } from '../middleware.js';
 import { placementVcpuCapacity } from '../clusterCapacity.js';
+import { setResourceAudit } from '../audit.js';
 
 const router = Router();
 
@@ -36,6 +37,8 @@ router.post('/admin/projects', async (req, res, next) => {
     const d = await osFetch(req.session.os, 'identity', '/v3/projects', {
       method: 'POST', body: { project: { name, description, domain_id: 'default', enabled: true } },
     });
+    setResourceAudit(res, { action: 'project.create', resourceType: 'project',
+      resourceId: d.project.id, resourceName: d.project.name });
     console.log(`[admin] CREATE project=${name} by=${req.session.os.user.name}`);
     res.json({ project: d.project });
   } catch (e) { next(e); }
@@ -65,11 +68,15 @@ router.put('/admin/projects/:id/quota', async (req, res, next) => {
   try {
     const sess = req.session.os;
     const pid = req.params.id;
+    const projectName = pid === sess.project.id ? sess.project.name
+      : (await osFetch(sess, 'identity', `/v3/projects/${pid}`).catch(() => null))?.project?.name;
     const q = req.body || {};
     const pick = (keys) => Object.fromEntries(keys.filter((k) => q[k] !== undefined && q[k] !== '').map((k) => [k, Number(q[k])]));
     const nova = pick(['instances', 'cores', 'ram']);
     const cin = pick(['volumes', 'gigabytes', 'snapshots']);
     const neu = pick(['floatingip', 'network', 'security_group']);
+    setResourceAudit(res, { action: 'project.quota.update', resourceType: 'project',
+      resourceId: pid, resourceName: projectName });
     const results = [];
     if (Object.keys(nova).length) results.push(osFetch(sess, 'compute', `/os-quota-sets/${pid}`, { method: 'PUT', body: { quota_set: nova } }));
     if (Object.keys(cin).length) results.push(osFetch(sess, 'volume', `/os-quota-sets/${pid}`, { method: 'PUT', body: { quota_set: cin } }));
@@ -96,6 +103,8 @@ router.post('/admin/users', async (req, res, next) => {
     const d = await osFetch(req.session.os, 'identity', '/v3/users', {
       method: 'POST', body: { user: { name, password, domain_id: 'default', enabled: true } },
     });
+    setResourceAudit(res, { action: 'user.create', resourceType: 'user',
+      resourceId: d.user.id, resourceName: d.user.name });
     console.log(`[admin] CREATE user=${name} by=${req.session.os.user.name}`);
     res.json({ user: { id: d.user.id, name: d.user.name } });
   } catch (e) { next(e); }
@@ -105,6 +114,9 @@ router.post('/admin/users/:id/password', async (req, res, next) => {
   try {
     const { password } = req.body || {};
     if (!password || password.length < 8) throw new OSError(400, 'Mật khẩu tối thiểu 8 ký tự');
+    const user = (await osFetch(req.session.os, 'identity', `/v3/users/${req.params.id}`).catch(() => null))?.user;
+    setResourceAudit(res, { action: 'user.password.reset', resourceType: 'user',
+      resourceId: req.params.id, resourceName: user?.name });
     await osFetch(req.session.os, 'identity', `/v3/users/${req.params.id}`, {
       method: 'PATCH', body: { user: { password } },
     });
@@ -123,6 +135,9 @@ router.post('/admin/assign', async (req, res, next) => {
     const rr = await osFetch(sess, 'identity', `/v3/roles?name=${role}`);
     const roleId = rr.roles?.[0]?.id;
     if (!roleId) throw new OSError(404, `Không tìm thấy role "${role}" trong Keystone`);
+    const user = (await osFetch(sess, 'identity', `/v3/users/${user_id}`).catch(() => null))?.user;
+    setResourceAudit(res, { action: 'user.role.assign', resourceType: 'user',
+      resourceId: user_id, resourceName: user?.name });
     await osFetch(sess, 'identity', `/v3/projects/${project_id}/users/${user_id}/roles/${roleId}`, { method: 'PUT' });
     console.log(`[admin] ASSIGN user=${user_id} project=${project_id} role=${role} by=${sess.user.name}`);
     res.json({ ok: true });
